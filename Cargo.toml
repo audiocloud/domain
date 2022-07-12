@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "audiocloud-domain-server",
+    "audiocloud-reaper-plugin",
+    "audiocloud-driver"
+]
