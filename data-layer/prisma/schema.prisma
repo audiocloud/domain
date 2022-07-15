@@ -1,0 +1,45 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id         String   @id
+  app_id     String
+  session_id String
+  from       DateTime
+  to         DateTime
+  spec       String
+  state      String
+}
+
+model Instance {
+  id           String    @id // concatenated model_manufacturer/model_name/instance
+  power_state  Json?
+  play_state   Json?
+  input_start  Int
+  output_start Int
+  last_seen    DateTime?
+  session_id   String? // currently active session
+}
+
+model PowerController {
+  id            Int   @id
+  spec          Json
+  desired_state Json?
+  state         Json?
+}
+
+model AppFile {
+  app_id  String
+  file_id String
+
+  @@id([app_id, file_id])
+}
