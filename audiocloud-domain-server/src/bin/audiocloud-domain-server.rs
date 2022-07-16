@@ -1,6 +1,7 @@
 use std::env;
 
 use actix_web::{App, HttpServer};
+use audiocloud_api::newtypes::DomainId;
 use clap::Parser;
 use tracing::*;
 
@@ -17,11 +18,17 @@ struct Opts {
 
     #[clap(flatten)]
     db: DataOpts,
+
+    #[clap(short, long, env)]
+    api_key: String,
+
+    #[clap(short, long, env, default_value = "https://api.audiocloud.org")]
+    api_url: String,
 }
 
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
-    // the domain server is basically a bunch of timers and event handlers running on top of an embedded sqlite database
+    // the domain server is basically a bunch of timers and event handlers running on top of a mongodb database.
 
     let _ = dotenv::dotenv();
 
@@ -34,7 +41,9 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = Opts::parse();
 
-    data::init_data(opts.db).await?;
+    let domain_id = DomainId::new("distopik_hq".to_owned());
+
+    data::init_data(opts.db, &domain_id).await?;
 
     info!(bind = opts.bind,
           port = opts.port,
