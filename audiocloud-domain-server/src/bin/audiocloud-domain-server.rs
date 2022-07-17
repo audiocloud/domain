@@ -1,12 +1,13 @@
 use std::env;
 
 use actix_web::{App, HttpServer};
-use audiocloud_api::newtypes::DomainId;
 use clap::Parser;
 use tracing::*;
 
+use audiocloud_api::newtypes::DomainId;
+use audiocloud_domain_server::cloud::CloudOpts;
 use audiocloud_domain_server::data::DataOpts;
-use audiocloud_domain_server::{data, rest};
+use audiocloud_domain_server::{cloud, data, rest};
 
 #[derive(Parser)]
 struct Opts {
@@ -19,11 +20,8 @@ struct Opts {
     #[clap(flatten)]
     db: DataOpts,
 
-    #[clap(short, long, env)]
-    api_key: String,
-
-    #[clap(short, long, env, default_value = "https://api.audiocloud.org")]
-    api_url: String,
+    #[clap(flatten)]
+    cloud: CloudOpts,
 }
 
 #[actix_web::main]
@@ -41,9 +39,9 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = Opts::parse();
 
-    let domain_id = DomainId::new("distopik_hq".to_owned());
+    let domain_id = cloud::init(opts.cloud).await?;
 
-    data::init_data(opts.db, &domain_id).await?;
+    data::init(opts.db, &domain_id).await?;
 
     info!(bind = opts.bind,
           port = opts.port,

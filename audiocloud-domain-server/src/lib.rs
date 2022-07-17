@@ -1,3 +1,3 @@
 pub mod data;
 pub mod rest;
-pub mod events;
+pub mod cloud;

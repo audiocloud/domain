@@ -27,7 +27,7 @@ impl MongoDb {
     }
 }
 
-pub async fn init_data(opts: DataOpts, domain: &DomainId) -> anyhow::Result<()> {
+pub async fn init(opts: DataOpts, domain: &DomainId) -> anyhow::Result<()> {
     let mongo = MongoDb::new(opts, domain).await?;
     MONGO.set(mongo).map_err(|_| anyhow!("MongoDB init already called!"))?;
 
