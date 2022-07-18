@@ -31,7 +31,7 @@ pub async fn init(opts: CloudOpts) -> anyhow::Result<DomainId> {
                                            .tcp_nodelay(true)
                                            .build()?;
 
-    let boot = client.get(opts.api_url.join("/boot")?)
+    let boot = client.get(opts.api_url.join("/v1/domains/boot")?)
                      .send()
                      .await?
                      .json::<BootDomain>()
