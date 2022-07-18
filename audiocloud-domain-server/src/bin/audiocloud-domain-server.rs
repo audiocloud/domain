@@ -4,7 +4,6 @@ use actix_web::{App, HttpServer};
 use clap::Parser;
 use tracing::*;
 
-use audiocloud_api::newtypes::DomainId;
 use audiocloud_domain_server::cloud::CloudOpts;
 use audiocloud_domain_server::data::DataOpts;
 use audiocloud_domain_server::{cloud, data, rest};
@@ -32,25 +31,31 @@ async fn main() -> anyhow::Result<()> {
 
     if env::var("RUST_LOG").is_err() {
         env::set_var("RUST_LOG",
-                     "info,audiocloud_domain_server=debug,audiocloud_api=debug,actix_server=warn");
+                     "info,audiocloud_domain_server=debug,audiocloud_api=debug,actix_server=warn,rdkafka=debug");
     }
 
     tracing_subscriber::fmt::init();
 
     let opts = Opts::parse();
 
-    let domain_id = cloud::init(opts.cloud).await?;
+    let boot = cloud::init(opts.cloud).await?;
 
-    data::init(opts.db, &domain_id).await?;
+    data::init(opts.db, boot).await?;
+
+    // ideally this should not resolve until we are even with the upstream database.
+    cloud::spawn_event_listener();
 
     info!(bind = opts.bind,
           port = opts.port,
           " ==== AudioCloud Domain server ==== ");
 
     // create actix
-    HttpServer::new(|| App::new().configure(rest::configure)).bind((opts.bind.as_str(), opts.port))?
-                                                             .run()
-                                                             .await?;
+    HttpServer::new(|| {
+        App::new().wrap(tracing_actix_web::TracingLogger::default())
+                  .configure(rest::configure)
+    }).bind((opts.bind.as_str(), opts.port))?
+      .run()
+      .await?;
 
     Ok(())
 }
