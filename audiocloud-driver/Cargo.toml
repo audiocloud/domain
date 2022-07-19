@@ -9,7 +9,7 @@ edition = "2021"
 
 
 [dependencies.audiocloud-api]
-git = "https://github.com/audiocloud/apis.git"
+path = "../../apis/audiocloud-api"
 
 [dependencies.audiocloud-models]
-git = "https://github.com/audiocloud/apis.git"
+path = "../../apis/audiocloud-models"

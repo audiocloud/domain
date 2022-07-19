@@ -42,6 +42,7 @@ impl From<DomainPowerInstanceSettings> for InstancePower {
 pub struct InstancePlay {
     pub spec:    DomainMediaInstanceSettings,
     pub state:   Timestamped<InstancePlayState>,
+    pub media:   Option<Timestamped<f64>>,
     pub desired: Timestamped<DesiredInstancePlayState>,
     pub tracker: RequestTracker,
 }
@@ -49,6 +50,7 @@ pub struct InstancePlay {
 impl From<DomainMediaInstanceSettings> for InstancePlay {
     fn from(spec: DomainMediaInstanceSettings) -> Self {
         Self { spec,
+               media: None,
                state: Timestamped::new(InstancePlayState::Playing { play_id: PlayId::new(u64::MAX), }),
                desired: Timestamped::new(DesiredInstancePlayState::Stopped),
                tracker: Default::default() }

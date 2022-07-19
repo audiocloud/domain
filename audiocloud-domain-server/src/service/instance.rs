@@ -4,12 +4,14 @@ use actix::spawn;
 use chrono::Duration;
 use maplit::hashmap;
 use rayon::prelude::*;
+use tracing::*;
 
-use audiocloud_api::driver::InstanceDriverCommand;
+use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverEvent};
 use audiocloud_api::instance::{power, DesiredInstancePowerState, InstancePowerState};
 use audiocloud_api::model::ModelValue;
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_api::session::InstanceParameters;
+use audiocloud_api::time::Timestamped;
 
 use crate::data::get_state;
 use crate::data::instance::{Instance, InstancePower};
@@ -47,7 +49,7 @@ fn update_instance_power(id: &FixedInstanceId, power: &mut InstancePower) -> boo
 
             set_instance_parameters(&power.spec.instance,
                                     hashmap! {
-                                        power::params::POWER.clone() => vec![(power.spec.channel, power_state)],
+                                        power::params::POWER.clone() => hashmap! { power.spec.channel => power_state }
                                     });
             false
         } else {
@@ -60,27 +62,11 @@ fn update_instance_power(id: &FixedInstanceId, power: &mut InstancePower) -> boo
 
 fn set_instance_parameters(id: &FixedInstanceId, parameters: InstanceParameters) {
     if let Some(mut instance) = get_state().instances.get_mut(id) {
-        for (set_id, set_value) in parameters {
-            for (param_id, mut value) in &mut instance.parameters {
-                if param_id == &set_id {
-                    for (set_ch, set_value) in &set_value {
-                        let mut found = false;
-                        for current in value.iter_mut() {
-                            if &current.0 == set_ch {
-                                current.1 = set_value.clone();
-                                found = true;
-                                break;
-                            }
-                        }
-
-                        if !found {
-                            value.push((*set_ch, set_value.clone()));
-                        }
-                    }
-
-                    value.sort_by(|a, b| a.0.cmp(&b.0));
-                }
-            }
+        for (parameter_id, values) in parameters {
+            instance.parameters
+                    .entry(parameter_id.clone())
+                    .or_default()
+                    .extend(values.into_iter());
         }
 
         instance.parameters_dirty = true;
@@ -94,11 +80,48 @@ fn update_instance(id: &FixedInstanceId, instance: &mut Instance) {
                              .unwrap_or(true);
 
     if instance.parameters_dirty {
-        spawn(send_instance_cmd(InstanceDriverCommand::SetParameters(instance.parameters.clone())));
         instance.parameters_dirty = false;
+        spawn(send_instance_cmd(InstanceDriverCommand::SetParameters(instance.parameters.clone())));
     }
 }
 
 async fn send_instance_cmd(cmd: InstanceDriverCommand) {
     // TODO: send to nats
+}
+
+fn on_instance_evt(id: FixedInstanceId, evt: InstanceDriverEvent) {
+    if let Some(mut instance) = get_state().instances.get_mut(&id) {
+        match evt {
+            InstanceDriverEvent::Started => {
+                info!(%id, "instance started");
+            }
+            InstanceDriverEvent::IOError { error } => {
+                error!(%error, %id, "IO error");
+            }
+            InstanceDriverEvent::ConnectionLost => {
+                warn!(%id, "connection lost");
+            }
+            InstanceDriverEvent::Connected => {
+                info!(%id, "connected");
+            }
+            InstanceDriverEvent::Reports { reports } => {
+                for (report_id, report_value) in reports {
+                    instance.reports
+                            .entry(report_id.clone())
+                            .or_default()
+                            .extend(report_value.into_iter().map(|(k, v)| (k, v.into())));
+                }
+            }
+            InstanceDriverEvent::PlayState { desired,
+                                             current,
+                                             media, } => {
+                if let Some(play) = &mut instance.play {
+                    if play.desired.value() == &desired {
+                        play.state = current.into();
+                        play.media = media.map(Timestamped::from);
+                    }
+                }
+            }
+        }
+    }
 }
