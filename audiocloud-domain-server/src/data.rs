@@ -10,14 +10,18 @@ use audiocloud_api::time::Timestamped;
 
 use crate::data::instance::{InstancePlay, InstancePower};
 
-mod instance;
-mod reaper;
-mod session;
+pub mod instance;
+pub mod reaper;
+pub mod session;
 
 #[derive(Args)]
 pub struct DataOpts {}
 
 static STATE: OnceCell<DomainState> = OnceCell::new();
+
+pub fn get_state() -> &'static DomainState {
+    STATE.get().expect("State not initialized")
+}
 
 pub struct DomainState {
     pub instances:       DashMap<FixedInstanceId, instance::Instance>,
@@ -38,9 +42,17 @@ impl DomainState {
 
         let instances = DashMap::new();
         for (id, instance) in boot.fixed_instances {
+            let model_id = id.model_id();
             instances.insert(id,
-                             instance::Instance { play:  instance.media.map(InstancePlay::from),
-                                                  power: instance.power.map(InstancePower::from), });
+                             instance::Instance { reports:          Default::default(),
+                                                  parameters:       Default::default(),
+                                                  parameters_dirty: false,
+                                                  play:             instance.media.map(InstancePlay::from),
+                                                  power:            instance.power.map(InstancePower::from),
+                                                  model:            boot.models
+                                                                        .get(&model_id)
+                                                                        .expect("model for instance")
+                                                                        .clone(), });
         }
 
         let web_sockets = DashMap::new();

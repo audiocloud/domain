@@ -13,11 +13,12 @@ use crate::tracker::RequestTracker;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Instance {
-    pub power:    Option<InstancePower>,
-    pub play:     Option<InstancePlay>,
-    pub model:    Model,
-    pub settings: InstanceParameters,
-    pub reports:  InstanceReports,
+    pub power:            Option<InstancePower>,
+    pub play:             Option<InstancePlay>,
+    pub model:            Model,
+    pub parameters:       InstanceParameters,
+    pub reports:          InstanceReports,
+    pub parameters_dirty: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
