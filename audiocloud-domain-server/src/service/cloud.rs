@@ -7,7 +7,7 @@ use rdkafka::config::{FromClientConfigAndContext, RDKafkaLogLevel};
 use rdkafka::consumer::stream_consumer::StreamConsumer;
 use rdkafka::consumer::{Consumer, ConsumerContext, Rebalance};
 use rdkafka::error::KafkaResult;
-use rdkafka::message::Headers;
+use rdkafka::message::BorrowedMessage;
 use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use rdkafka::{ClientContext, Offset};
 use reqwest::header::{HeaderMap, HeaderValue};
@@ -15,6 +15,7 @@ use reqwest::Url;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::BootDomain;
+use audiocloud_api::domain::DomainSessionCommand;
 
 #[derive(Args, Debug)]
 pub struct CloudOpts {
@@ -109,37 +110,52 @@ pub async fn init(opts: CloudOpts) -> anyhow::Result<BootDomain> {
     Ok(boot)
 }
 
-pub fn spawn_event_listener() {
-    let stream = get_cloud_client().consumer.stream();
+pub async fn spawn_command_listener(event_base: i64) -> anyhow::Result<()> {
+    let mut stream = get_cloud_client().consumer.stream();
 
-    spawn(stream.for_each(|m| {
-                    async move {
-                        if let Ok(m) = m {
-                            let payload = match m.payload_view::<str>() {
-                                None => "",
-                                Some(Ok(s)) => s,
-                                Some(Err(e)) => {
-                                    warn!("Error while deserializing message payload: {:?}", e);
-                                    ""
-                                }
-                            };
+    while let Some(message) = stream.next().await {
+        let done = matches!(&message, Ok(msg) if msg.offset() >= (event_base - 1));
+        dispatch_message(message).await;
+        if done {
+            info!("Caught up with cloud events");
+            break;
+        }
+    }
 
-                            info!("key: '{:?}', payload: '{}', topic: {}, partition: {}, offset: {}, timestamp: {:?}",
-                                  m.key().map(|e| String::from_utf8_lossy(e)).unwrap_or_default(),
-                                  payload,
-                                  m.topic(),
-                                  m.partition(),
-                                  m.offset(),
-                                  m.timestamp());
+    spawn(async move {
+        while let Some(message) = stream.next().await {
+            dispatch_message(message).await;
+        }
+    });
 
-                            if let Some(headers) = m.headers() {
-                                for num in 0..headers.count() {
-                                    if let Some((key, value)) = headers.get(num) {
-                                        info!("  Header {:#?}: {:?}", key, String::from_utf8_lossy(value));
-                                    }
-                                }
-                            }
+    Ok(())
+}
+
+async fn dispatch_message(msg: KafkaResult<BorrowedMessage<'_>>) {
+    match msg {
+        Ok(msg) => {
+            info!(offset = msg.offset(), "--- --- message --- ---");
+            match msg.payload_view::<str>() {
+                None => {
+                    warn!(?msg, "Message payload is not a string");
+                }
+                Some(payload) => match payload {
+                    Ok(payload) => match serde_json::from_str::<DomainSessionCommand>(payload) {
+                        Ok(command) => {
+                            info!(?command, "Received command");
                         }
-                    }.instrument(info_span!("message_from_kafka"))
-                }));
+                        Err(err) => {
+                            warn!(?err, "Failed to parse command");
+                        }
+                    },
+                    Err(err) => {
+                        warn!(%err, "Message payload is not a string");
+                    }
+                },
+            }
+        }
+        Err(err) => {
+            error!(%err, "Error consuming message");
+        }
+    }
 }

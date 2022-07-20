@@ -8,7 +8,7 @@ use audiocloud_api::cloud::domains::BootDomain;
 use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId, SocketId};
 use audiocloud_api::time::Timestamped;
 
-use crate::data::instance::{InstancePlay, InstancePower};
+use crate::data::instance::{InMemInstancePlay, InMemInstancePower};
 
 pub mod instance;
 pub mod reaper;
@@ -24,8 +24,8 @@ pub fn get_state() -> &'static DomainState {
 }
 
 pub struct DomainState {
-    pub instances:       DashMap<FixedInstanceId, instance::Instance>,
-    pub sessions:        DashMap<AppSessionId, session::Session>,
+    pub instances:       DashMap<FixedInstanceId, instance::InMemInstance>,
+    pub sessions:        DashMap<AppSessionId, session::InMemSession>,
     pub web_sockets:     DashMap<SocketId, ()>,
     pub web_rtc_sockets: DashMap<SocketId, ()>,
 }
@@ -35,7 +35,7 @@ impl DomainState {
         let sessions = DashMap::new();
         for (id, session) in boot.sessions {
             sessions.insert(id,
-                            session::Session { spec:   session.spec,
+                            session::InMemSession { spec:   session.spec,
                                                state:  SessionState::default(),
                                                reaper: Timestamped::new(None), });
         }
@@ -44,11 +44,11 @@ impl DomainState {
         for (id, instance) in boot.fixed_instances {
             let model_id = id.model_id();
             instances.insert(id,
-                             instance::Instance { reports:          Default::default(),
+                             instance::InMemInstance { reports:          Default::default(),
                                                   parameters:       Default::default(),
                                                   parameters_dirty: false,
-                                                  play:             instance.media.map(InstancePlay::from),
-                                                  power:            instance.power.map(InstancePower::from),
+                                                  play:             instance.media.map(InMemInstancePlay::from),
+                                                  power:            instance.power.map(InMemInstancePower::from),
                                                   model:            boot.models
                                                                         .get(&model_id)
                                                                         .expect("model for instance")

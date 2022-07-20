@@ -14,7 +14,7 @@ use audiocloud_api::session::InstanceParameters;
 use audiocloud_api::time::Timestamped;
 
 use crate::data::get_state;
-use crate::data::instance::{Instance, InstancePower};
+use crate::data::instance::{InMemInstance, InMemInstancePower};
 
 pub fn update_instances() {
     get_state().instances.par_iter_mut().for_each(|mut instance_with_id| {
@@ -23,7 +23,7 @@ pub fn update_instances() {
                                         });
 }
 
-fn update_instance_power(id: &FixedInstanceId, power: &mut InstancePower) -> bool {
+fn update_instance_power(id: &FixedInstanceId, power: &mut InMemInstancePower) -> bool {
     // are we in a transitional state
     match power.state.value() {
         InstancePowerState::WarmingUp => {
@@ -73,7 +73,7 @@ fn set_instance_parameters(id: &FixedInstanceId, parameters: InstanceParameters)
     }
 }
 
-fn update_instance(id: &FixedInstanceId, instance: &mut Instance) {
+fn update_instance(id: &FixedInstanceId, instance: &mut InMemInstance) {
     let power_done = instance.power
                              .as_mut()
                              .map(|power| update_instance_power(id, power))
@@ -89,7 +89,7 @@ async fn send_instance_cmd(cmd: InstanceDriverCommand) {
     // TODO: send to nats
 }
 
-fn on_instance_evt(id: FixedInstanceId, evt: InstanceDriverEvent) {
+pub fn on_instance_evt(id: FixedInstanceId, evt: InstanceDriverEvent) {
     if let Some(mut instance) = get_state().instances.get_mut(&id) {
         match evt {
             InstanceDriverEvent::Started => {

@@ -4,9 +4,9 @@ use actix_web::{App, HttpServer};
 use clap::Parser;
 use tracing::*;
 
-use audiocloud_domain_server::cloud::CloudOpts;
 use audiocloud_domain_server::data::DataOpts;
-use audiocloud_domain_server::{cloud, data, rest};
+use audiocloud_domain_server::service::cloud;
+use audiocloud_domain_server::{data, rest};
 
 #[derive(Parser)]
 struct Opts {
@@ -20,7 +20,7 @@ struct Opts {
     db: DataOpts,
 
     #[clap(flatten)]
-    cloud: CloudOpts,
+    cloud: cloud::CloudOpts,
 }
 
 #[actix_web::main]
@@ -40,10 +40,12 @@ async fn main() -> anyhow::Result<()> {
 
     let boot = cloud::init(opts.cloud).await?;
 
+    let event_base = boot.event_base;
+
     data::init(opts.db, boot).await?;
 
     // ideally this should not resolve until we are even with the upstream database.
-    cloud::spawn_event_listener();
+    cloud::spawn_command_listener(event_base as i64).await?;
 
     info!(bind = opts.bind,
           port = opts.port,
