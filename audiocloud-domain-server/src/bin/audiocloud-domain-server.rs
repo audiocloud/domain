@@ -44,6 +44,10 @@ async fn main() -> anyhow::Result<()> {
 
     data::init(boot).await?;
 
+    service::instance::init();
+
+    service::session::init();
+
     service::cloud::spawn_command_listener(event_base as i64).await?;
 
     info!(bind = opts.bind,
