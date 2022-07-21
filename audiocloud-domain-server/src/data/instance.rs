@@ -12,9 +12,9 @@ use audiocloud_api::time::Timestamped;
 use crate::tracker::RequestTracker;
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct InMemInstance {
-    pub power:            Option<InMemInstancePower>,
-    pub play:             Option<InMemInstancePlay>,
+pub struct Instance {
+    pub power:            Option<InstancePower>,
+    pub play:             Option<InstancePlay>,
     pub model:            Model,
     pub parameters:       InstanceParameters,
     pub reports:          InstanceReports,
@@ -22,24 +22,26 @@ pub struct InMemInstance {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct InMemInstancePower {
-    pub spec:    DomainPowerInstanceSettings,
-    pub state:   Timestamped<InstancePowerState>,
-    pub desired: Timestamped<DesiredInstancePowerState>,
-    pub tracker: RequestTracker,
+pub struct InstancePower {
+    pub spec:          DomainPowerInstanceSettings,
+    pub state:         Timestamped<InstancePowerState>,
+    pub channel_state: Timestamped<bool>,
+    pub desired:       Timestamped<DesiredInstancePowerState>,
+    pub tracker:       RequestTracker,
 }
 
-impl From<DomainPowerInstanceSettings> for InMemInstancePower {
+impl From<DomainPowerInstanceSettings> for InstancePower {
     fn from(spec: DomainPowerInstanceSettings) -> Self {
         Self { spec,
                state: Timestamped::new(InstancePowerState::PoweredUp),
                desired: Timestamped::new(DesiredInstancePowerState::ShutDown),
+               channel_state: Timestamped::new(false),
                tracker: Default::default() }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct InMemInstancePlay {
+pub struct InstancePlay {
     pub spec:    DomainMediaInstanceSettings,
     pub state:   Timestamped<InstancePlayState>,
     pub media:   Option<Timestamped<f64>>,
@@ -47,7 +49,7 @@ pub struct InMemInstancePlay {
     pub tracker: RequestTracker,
 }
 
-impl From<DomainMediaInstanceSettings> for InMemInstancePlay {
+impl From<DomainMediaInstanceSettings> for InstancePlay {
     fn from(spec: DomainMediaInstanceSettings) -> Self {
         Self { spec,
                media: None,

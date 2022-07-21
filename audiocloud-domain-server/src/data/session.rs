@@ -5,7 +5,7 @@ use audiocloud_api::time::Timestamped;
 use crate::data::reaper::ReaperState;
 
 #[derive(Debug)]
-pub struct InMemSession {
+pub struct Session {
     pub spec:   SessionSpec,
     pub state:  SessionState,
     pub reaper: Timestamped<Option<ReaperState>>,

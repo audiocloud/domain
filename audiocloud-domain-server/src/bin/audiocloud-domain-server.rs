@@ -6,7 +6,7 @@ use tracing::*;
 
 use audiocloud_domain_server::data::DataOpts;
 use audiocloud_domain_server::service::cloud;
-use audiocloud_domain_server::{data, rest};
+use audiocloud_domain_server::{data, rest, service};
 
 #[derive(Parser)]
 struct Opts {
@@ -42,10 +42,9 @@ async fn main() -> anyhow::Result<()> {
 
     let event_base = boot.event_base;
 
-    data::init(opts.db, boot).await?;
+    data::init(boot).await?;
 
-    // ideally this should not resolve until we are even with the upstream database.
-    cloud::spawn_command_listener(event_base as i64).await?;
+    service::cloud::spawn_command_listener(event_base as i64).await?;
 
     info!(bind = opts.bind,
           port = opts.port,
