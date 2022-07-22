@@ -22,7 +22,7 @@ use audiocloud_api::session::{InstanceParameters, InstanceReports};
 use audiocloud_api::time::{Timestamp, Timestamped};
 
 use crate::data::get_boot_cfg;
-use crate::data::instance::{Instance, InstancePlay, InstancePower};
+use crate::data::instance::{InstancePlay, InstancePower};
 use crate::service::session::NotifySessionSpec;
 
 pub fn init() {
@@ -30,11 +30,16 @@ pub fn init() {
 }
 
 pub struct InstanceActor {
-    id:              FixedInstanceId,
-    instance:        Instance,
-    owner:           Option<AppSessionId>,
-    connected:       Timestamped<bool>,
-    last_state_emit: Option<Timestamp>,
+    id:               FixedInstanceId,
+    power:            Option<InstancePower>,
+    play:             Option<InstancePlay>,
+    model:            Model,
+    parameters:       InstanceParameters,
+    reports:          InstanceReports,
+    parameters_dirty: bool,
+    owner:            Option<AppSessionId>,
+    connected:        Timestamped<bool>,
+    last_state_emit:  Option<Timestamp>,
 }
 
 impl Actor for InstanceActor {
@@ -55,16 +60,16 @@ impl Supervised for InstanceActor {
 impl InstanceActor {
     pub fn new(id_spec: FixedInstanceId, spec: DomainFixedInstance, model_spec: Model) -> Self {
         debug!(id = %id_spec, "Creating new instance actor");
-        Self { id:              id_spec,
-               owner:           None,
-               last_state_emit: None,
-               connected:       Timestamped::new(false),
-               instance:        Instance { power:            spec.power.map(InstancePower::from),
-                                           play:             spec.media.map(InstancePlay::from),
-                                           model:            model_spec,
-                                           parameters:       Default::default(),
-                                           reports:          Default::default(),
-                                           parameters_dirty: false, }, }
+        Self { id:               id_spec,
+               owner:            None,
+               last_state_emit:  None,
+               connected:        Timestamped::new(false),
+               power:            spec.power.map(InstancePower::from),
+               play:             spec.media.map(InstancePlay::from),
+               model:            model_spec,
+               parameters:       Default::default(),
+               reports:          Default::default(),
+               parameters_dirty: false, }
     }
 
     fn update(&mut self, ctx: &mut Context<Self>) {
@@ -82,7 +87,7 @@ impl InstanceActor {
     }
 
     fn update_play(&mut self, ctx: &mut Context<Self>) {
-        if let Some(play) = &mut self.instance.play {
+        if let Some(play) = &mut self.play {
             if !play.state.value().satisfies(play.desired.value()) {
                 if play.tracker.should_retry() {
                     // TODO: send command to drivers
@@ -93,7 +98,7 @@ impl InstanceActor {
     }
 
     fn update_power(&mut self, ctx: &mut Context<Self>) {
-        if let Some(power) = &mut self.instance.power {
+        if let Some(power) = &mut self.power {
             use InstancePowerState::*;
             let mut changed = false;
 
@@ -154,21 +159,17 @@ impl InstanceActor {
 
     fn set_reports(&mut self, reports: HashMap<ReportId, MultiChannelValue>, _ctx: &mut Context<Self>) {
         for (report_id, report_value) in reports {
-            self.instance
-                .reports
+            self.reports
                 .entry(report_id.clone())
                 .or_default()
                 .extend(report_value.into_iter().map(|(k, v)| (k, v.into())));
         }
 
         self.issue_system_async(NotifyInstanceReports { instance_id: self.id.clone(),
-                                                        reports:     self.instance.reports.clone(), });
+                                                        reports:     self.reports.clone(), });
 
-        if self.instance.model.capabilities.contains(&PowerDistributor) {
-            if let Some(power) = self.instance
-                                     .reports
-                                     .get(&audiocloud_api::instance::power::reports::POWER)
-            {
+        if self.model.capabilities.contains(&PowerDistributor) {
+            if let Some(power) = self.reports.get(&audiocloud_api::instance::power::reports::POWER) {
                 if let Some(num_channels) = power.keys().max() {
                     let mut values = vec![false; *num_channels];
                     for (channel, value) in power.iter() {
@@ -183,7 +184,7 @@ impl InstanceActor {
     }
 
     fn set_play_state(&mut self, play_state: InstancePlayState, media: Option<f64>, ctx: &mut Context<Self>) {
-        if let Some(play) = &mut self.instance.play {
+        if let Some(play) = &mut self.play {
             let state_change = play.state.value() != &play_state;
             let media_change = play.media
                                    .as_ref()
@@ -208,7 +209,7 @@ impl InstanceActor {
     }
 
     fn get_power_report(&self) -> Option<ReportInstancePowerState> {
-        if let Some(power) = &self.instance.power {
+        if let Some(power) = &self.power {
             Some(ReportInstancePowerState { actual:  power.state.clone(),
                                             desired: power.desired.clone(), })
         } else {
@@ -217,7 +218,7 @@ impl InstanceActor {
     }
 
     fn get_play_report(&self) -> Option<ReportInstancePlayState> {
-        if let Some(play) = &self.instance.play {
+        if let Some(play) = &self.play {
             Some(ReportInstancePlayState { actual:  play.state.clone(),
                                            desired: play.desired.clone(),
                                            media:   play.media.clone(), })
@@ -259,7 +260,7 @@ impl Handler<SetInstanceParameters> for InstanceActor {
 
     fn handle(&mut self, msg: SetInstanceParameters, _ctx: &mut Self::Context) -> Self::Result {
         // TODO: merge parameters
-        self.instance.parameters_dirty = true;
+        self.parameters_dirty = true;
     }
 }
 
@@ -267,7 +268,7 @@ impl Handler<NotifyInstancePower> for InstanceActor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyInstancePower, _ctx: &mut Self::Context) -> Self::Result {
-        if let Some(power) = &mut self.instance.power {
+        if let Some(power) = &mut self.power {
             if &power.spec.instance == &msg.instance_id {
                 match msg.power.get(power.spec.channel) {
                     Some(new_state) => {

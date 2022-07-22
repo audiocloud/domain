@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::mem;
 use std::time::Duration;
 
 use actix::{Actor, Addr, ArbiterHandle, AsyncContext, Context, Handler, Message, Running, Supervised};
@@ -10,9 +9,8 @@ use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
 use audiocloud_api::change::{PlayId, RenderId, SessionPlayState, SessionState};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId};
-use audiocloud_api::session::SessionMode;
+use audiocloud_api::session::{Session, SessionMode};
 
-use crate::data::session::Session;
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 use crate::tracker::RequestTracker;
 
@@ -70,8 +68,9 @@ impl Handler<NotifyInstanceState> for SessionActor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyInstanceState, ctx: &mut Self::Context) -> Self::Result {
+        let should_update = self.session.spec.fixed_instance_to_fixed_id(&msg.instance_id).is_some();
         self.instance_states.insert(msg.instance_id.clone(), msg);
-        if self.session.spec.fixed_instance_to_fixed_id(&msg.instance_id).is_some() {
+        if should_update {
             self.update(ctx);
         }
     }
@@ -96,7 +95,7 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                     self.state.play_state = SessionPlayState::Playing(playing).into();
                     self.emit_state();
                 }
-                self.packet.push_audio_engine_playing(audio);
+                self.packet.push_audio_packets(audio);
             }
             AudioEngineEvent::Rendering { rendering } => {
                 if !self.state.play_state.value().is_rendering(rendering.render_id) {
@@ -111,7 +110,7 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                                                                path });
             }
             AudioEngineEvent::Meters { peak_meters } => {
-                self.packet.push_audio_engine_meters(peak_meters);
+                // TODO: translate to packet
             }
             AudioEngineEvent::Exit { .. } => {
                 self.engine_loaded = false;
@@ -129,17 +128,17 @@ impl SessionActor {
             SessionMode::StoppingPlay(_) => {
                 self.stopping_play(ctx);
             }
-            SessionMode::PreparingToPlay(play_id) => {
-                self.preparing_to_play(play_id, ctx);
+            SessionMode::PreparingToPlay(_) => {
+                self.preparing_to_play(ctx);
             }
-            SessionMode::PreparingToRender(render_id) => {
-                self.preparing_to_render(render_id, ctx);
+            SessionMode::PreparingToRender(_) => {
+                self.preparing_to_render(ctx);
             }
-            SessionMode::Rendering(render_id) => {
-                self.rendering(render_id, ctx);
+            SessionMode::Rendering(_) => {
+                self.rendering(ctx);
             }
-            SessionMode::Playing(play_id) => {
-                self.playing(play_id, ctx);
+            SessionMode::Playing(_) => {
+                self.playing(ctx);
             }
             SessionMode::Idle => {
                 self.idle(ctx);
@@ -183,21 +182,21 @@ impl SessionActor {
         }
     }
 
-    fn preparing_to_play(&mut self, play_id: &PlayId, ctx: &mut Context<Self>) {
+    fn preparing_to_play(&mut self, ctx: &mut Context<Self>) {
         if !self.engine_loaded {
             return;
         }
     }
 
-    fn preparing_to_render(&mut self, render_id: &RenderId, ctx: &mut Context<Self>) {
+    fn preparing_to_render(&mut self, ctx: &mut Context<Self>) {
         if !self.engine_loaded {
             return;
         }
     }
 
-    fn rendering(&mut self, render_id: &RenderId, ctx: &mut Context<Self>) {}
+    fn rendering(&mut self, ctx: &mut Context<Self>) {}
 
-    fn playing(&mut self, play_id: &PlayId, ctx: &mut Context<Self>) {}
+    fn playing(&mut self, ctx: &mut Context<Self>) {}
 
     fn idle(&mut self, ctx: &mut Context<Self>) {}
 
@@ -205,6 +204,12 @@ impl SessionActor {
         self.issue_system_async(NotifySessionSpec { session_id: self.id.clone(),
                                                     spec:       self.session.spec.clone(), });
     }
+
+    fn emit_state(&self) {
+        self.issue_system_async(NotifySessionState { session_id: self.id.clone(),
+                                                     state:      self.state.clone(), });
+    }
+
     fn request_audio_engine_command(&self, cmd: AudioEngineCommand) {
         todo!()
     }
@@ -213,6 +218,7 @@ impl SessionActor {
 pub struct SessionsSupervisor {
     active:   HashMap<AppSessionId, Addr<SessionActor>>,
     sessions: HashMap<AppSessionId, Session>,
+    state:    HashMap<AppSessionId, SessionState>,
 }
 
 impl Actor for SessionsSupervisor {
@@ -225,6 +231,24 @@ impl Supervised for SessionsSupervisor {
     fn restarting(&mut self, ctx: &mut Self::Context) {
         self.subscribe_system_async::<NotifySessionSpec>(ctx);
         self.subscribe_system_async::<NotifySessionState>(ctx);
+    }
+}
+
+impl Handler<NotifySessionSpec> for SessionsSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NotifySessionSpec, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(session) = self.sessions.get_mut(&msg.session_id) {
+            session.spec = msg.spec;
+        }
+    }
+}
+
+impl Handler<NotifySessionState> for SessionsSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NotifySessionState, ctx: &mut Self::Context) -> Self::Result {
+        self.state.insert(msg.session_id, msg.state);
     }
 }
 

@@ -5,21 +5,9 @@ use audiocloud_api::cloud::domains::{DomainMediaInstanceSettings, DomainPowerIns
 use audiocloud_api::instance::{
     DesiredInstancePlayState, DesiredInstancePowerState, InstancePlayState, InstancePowerState,
 };
-use audiocloud_api::model::Model;
-use audiocloud_api::session::{InstanceParameters, InstanceReports};
 use audiocloud_api::time::Timestamped;
 
 use crate::tracker::RequestTracker;
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Instance {
-    pub power:            Option<InstancePower>,
-    pub play:             Option<InstancePlay>,
-    pub model:            Model,
-    pub parameters:       InstanceParameters,
-    pub reports:          InstanceReports,
-    pub parameters_dirty: bool,
-}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstancePower {
