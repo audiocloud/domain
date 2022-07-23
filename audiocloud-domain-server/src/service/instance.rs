@@ -13,7 +13,7 @@ use tracing::*;
 use audiocloud_api::cloud::domains::{BootDomain, DomainFixedInstance};
 use audiocloud_api::driver::InstanceDriverEvent;
 use audiocloud_api::instance::{
-    InstancePlayState, InstancePowerState, ReportInstancePlayState, ReportInstancePowerState,
+    DesiredInstancePlayState, InstancePlayState, InstancePowerState, ReportInstancePlayState, ReportInstancePowerState,
 };
 use audiocloud_api::model::ModelCapability::PowerDistributor;
 use audiocloud_api::model::{multi_channel_value, Model, MultiChannelValue};
@@ -157,12 +157,12 @@ impl InstanceActor {
         }
     }
 
-    fn set_reports(&mut self, reports: HashMap<ReportId, MultiChannelValue>, _ctx: &mut Context<Self>) {
+    fn set_reports(&mut self, reports: InstanceReports, _ctx: &mut Context<Self>) {
         for (report_id, report_value) in reports {
             self.reports
                 .entry(report_id.clone())
                 .or_default()
-                .extend(report_value.into_iter().map(|(k, v)| (k, v.into())));
+                .extend(report_value.into_iter());
         }
 
         self.issue_system_async(NotifyInstanceReports { instance_id: self.id.clone(),
@@ -261,6 +261,16 @@ impl Handler<SetInstanceParameters> for InstanceActor {
     fn handle(&mut self, msg: SetInstanceParameters, _ctx: &mut Self::Context) -> Self::Result {
         // TODO: merge parameters
         self.parameters_dirty = true;
+    }
+}
+
+impl Handler<SetInstanceDesiredState> for InstanceActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetInstanceDesiredState, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(play) = &mut self.play {
+            play.desired = Timestamped::new(msg.desired);
+        }
     }
 }
 
@@ -373,6 +383,16 @@ impl Handler<SetInstanceParameters> for InstancesSupervisor {
     }
 }
 
+impl Handler<SetInstanceDesiredState> for InstancesSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SetInstanceDesiredState, ctx: &mut Context<InstancesSupervisor>) {
+        if let Some(instance) = self.instances.get(&msg.instance_id) {
+            instance.do_send(msg);
+        }
+    }
+}
+
 impl Handler<NotifyInstanceDriver> for InstancesSupervisor {
     type Result = ();
 
@@ -400,6 +420,13 @@ impl SystemService for InstancesSupervisor {
 pub struct SetInstanceParameters {
     pub instance_id: FixedInstanceId,
     pub parameters:  InstanceParameters,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct SetInstanceDesiredState {
+    pub instance_id: FixedInstanceId,
+    pub desired:     DesiredInstancePlayState,
 }
 
 #[derive(Message, Clone, Debug)]

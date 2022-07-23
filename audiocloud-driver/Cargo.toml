@@ -12,6 +12,7 @@ dotenv = "0.15"
 actix = "0.13"
 actix-broker = "0.4"
 serde_yaml = "0.8"
+serde_repr = "0.1"
 maplit = "1"
 anyhow = "1"
 

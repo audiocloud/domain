@@ -6,11 +6,12 @@ use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, Instanc
 use audiocloud_api::instance::power;
 use audiocloud_api::model::ModelValue;
 use audiocloud_api::newtypes::FixedInstanceId;
+use audiocloud_api::time::Timestamped;
 use audiocloud_models::netio::netio_4c::*;
 use serde::{Deserialize, Serialize};
 
 use crate::nats::{NatsService, Publish};
-use crate::{Command, Event, InstanceConfig};
+use crate::{emit_event, Command, Event, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Config {
@@ -38,8 +39,7 @@ struct Netio4cMocked {
 
 impl Netio4cMocked {
     pub fn emit(&self, evt: InstanceDriverEvent) {
-        self.issue_system_async(Event { instance_id: self.id.clone(),
-                                        event:       evt, });
+        emit_event(self.id.clone(), evt);
     }
 }
 
@@ -66,7 +66,14 @@ impl Handler<Command> for Netio4cMocked {
                     }
                 }
 
-                let power_values = self.state.iter().cloned().map(ModelValue::Bool).enumerate().collect();
+                let power_values = self.state
+                                       .iter()
+                                       .cloned()
+                                       .map(ModelValue::Bool)
+                                       .map(Timestamped::from)
+                                       .enumerate()
+                                       .collect();
+                
                 self.emit(InstanceDriverEvent::Reports { reports: hashmap! {
                                                              power::reports::POWER.clone() => power_values,
                                                          }, });

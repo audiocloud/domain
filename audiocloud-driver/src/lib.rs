@@ -1,4 +1,5 @@
 use actix::{Message, Recipient};
+use actix_broker::{Broker, SystemBroker};
 use serde::{Deserialize, Serialize};
 
 use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
@@ -54,4 +55,8 @@ pub struct Command {
 pub struct Event {
     pub instance_id: FixedInstanceId,
     pub event:       InstanceDriverEvent,
+}
+
+pub fn emit_event(instance_id: FixedInstanceId, event: InstanceDriverEvent) {
+    Broker::<SystemBroker>::issue_async(Event { instance_id, event });
 }

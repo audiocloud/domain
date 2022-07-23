@@ -3,15 +3,15 @@ use actix::{Actor, Recipient};
 use audiocloud_api::newtypes::FixedInstanceId;
 use serde::{Deserialize, Serialize};
 
-pub mod netio4;
-pub mod netio4_mocked;
+pub mod power_pdu_4c;
+pub mod power_pdu_4c_mocked;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Config {
     #[serde(rename = "power_pdu_4c")]
-    PowerPdu4c(netio4::Config),
+    PowerPdu4c(power_pdu_4c::Config),
     #[serde(rename = "power_pdu_4c_mocked")]
-    PowerPdu4cMocked(netio4_mocked::Config),
+    PowerPdu4cMocked(power_pdu_4c_mocked::Config),
 }
 
 impl InstanceConfig for Config {
