@@ -1,24 +1,24 @@
-use std::collections::HashMap;
+#![allow(unused_variables)]
+
 use std::time::Duration;
 
-use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, Supervised, SystemService};
+use actix::{Actor, AsyncContext, Context, Handler, Message, Supervised, SystemService};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 
-use crate::data::get_boot_cfg;
 use audiocloud_api::app::SessionPacket;
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
-use audiocloud_api::change::{
-    DesiredSessionPlayState, PlayId, PlaySession, RenderId, RenderSession, SessionPlayState, SessionState,
-};
+use audiocloud_api::change::{DesiredSessionPlayState, PlayId, RenderId, SessionPlayState, SessionState};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::instance::DesiredInstancePlayState;
 use audiocloud_api::newtypes::AppSessionId;
 use audiocloud_api::session::{Session, SessionMode};
+use supervisor::SessionsSupervisor;
 
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 use crate::tracker::RequestTracker;
 
 pub mod session_instances;
+pub mod supervisor;
 
 pub struct SessionActor {
     id:                   AppSessionId,
@@ -142,6 +142,16 @@ impl Handler<SetSessionDesiredState> for SessionActor {
 }
 
 impl SessionActor {
+    pub fn new(id: &AppSessionId, session: &Session) -> Self {
+        Self { id:                   id.clone(),
+               session:              session.clone(),
+               packet:               Default::default(),
+               instances:            Default::default(),
+               state:                Default::default(),
+               audio_engine_tracker: Default::default(),
+               engine_loaded:        false, }
+    }
+
     fn update(&mut self, ctx: &mut Context<Self>) {
         let mut modified = false;
         match (self.state.mode.value(), self.state.desired_play_state.value()) {
@@ -271,12 +281,6 @@ impl SessionActor {
         }
     }
 
-    fn preparing_to_render(&mut self, ctx: &mut Context<Self>) {
-        if !self.engine_loaded {
-            return;
-        }
-    }
-
     fn update_idle(&mut self, ctx: &mut Context<Self>) {}
 
     fn emit_spec(&self) {
@@ -291,64 +295,6 @@ impl SessionActor {
 
     fn request_audio_engine_command(&self, cmd: AudioEngineCommand) {
         todo!()
-    }
-}
-
-pub struct SessionsSupervisor {
-    active:   HashMap<AppSessionId, Addr<SessionActor>>,
-    sessions: HashMap<AppSessionId, Session>,
-    state:    HashMap<AppSessionId, SessionState>,
-}
-
-impl Actor for SessionsSupervisor {
-    type Context = Context<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {}
-}
-
-impl Supervised for SessionsSupervisor {
-    fn restarting(&mut self, ctx: &mut Self::Context) {
-        self.subscribe_system_async::<NotifySessionSpec>(ctx);
-        self.subscribe_system_async::<NotifySessionState>(ctx);
-    }
-}
-
-impl Default for SessionsSupervisor {
-    fn default() -> Self {
-        let sessions = get_boot_cfg().sessions.clone();
-        Self { active: Default::default(),
-               sessions,
-               state: Default::default() }
-    }
-}
-
-impl SystemService for SessionsSupervisor {}
-
-impl Handler<NotifySessionSpec> for SessionsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifySessionSpec, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(session) = self.sessions.get_mut(&msg.session_id) {
-            session.spec = msg.spec;
-        }
-    }
-}
-
-impl Handler<SetSessionDesiredState> for SessionsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: SetSessionDesiredState, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(session) = self.active.get_mut(&msg.session_id) {
-            session.do_send(msg);
-        }
-    }
-}
-
-impl Handler<NotifySessionState> for SessionsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifySessionState, ctx: &mut Self::Context) -> Self::Result {
-        self.state.insert(msg.session_id, msg.state);
     }
 }
 
@@ -403,6 +349,10 @@ pub struct NotifyRenderFailed {
     pub error:      String,
     pub cancelled:  bool,
 }
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct BecomeOnline;
 
 pub fn init() {
     let _ = SessionsSupervisor::from_registry();

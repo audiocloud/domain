@@ -5,7 +5,6 @@ use clap::Parser;
 use tracing::*;
 
 use audiocloud_domain_server::data::DataOpts;
-use audiocloud_domain_server::service::cloud;
 use audiocloud_domain_server::{data, rest, service};
 
 #[derive(Parser)]
@@ -38,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = Opts::parse();
 
-    let boot = cloud::init(opts.cloud).await?;
+    let boot = service::cloud::init(opts.cloud).await?;
 
     let event_base = boot.event_base;
 
