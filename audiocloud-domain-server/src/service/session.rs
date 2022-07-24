@@ -21,7 +21,7 @@ use supervisor::{BecomeOnline, SessionsSupervisor};
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 use crate::tracker::RequestTracker;
 
-mod messages;
+pub mod messages;
 pub mod session_instances;
 pub mod supervisor;
 

@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{Actor, ActorFutureExt, Addr, Context, fut, Handler, Supervised, Supervisor, SystemService, WrapFuture};
+use actix::{
+    fut, Actor, ActorFutureExt, Addr, Context, Handler, Message, Supervised, Supervisor, SystemService, WrapFuture,
+};
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
-use actix_derive::message_derive_rtype as Message;
 
 use audiocloud_api::change::SessionState;
 use audiocloud_api::newtypes::AppSessionId;

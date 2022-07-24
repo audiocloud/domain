@@ -6,10 +6,10 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::time::{Duration, Instant};
 
 use actix::{
-    Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, fut, Handler, StreamHandler,
+    fut, Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, StreamHandler,
     SystemService, WrapFuture,
 };
-use actix_web::{get, HttpRequest, Responder, web};
+use actix_web::{get, web, HttpRequest, Responder};
 use actix_web_actors::ws;
 use bytes::Bytes;
 use maplit::hashmap;
@@ -24,8 +24,8 @@ use audiocloud_api::session::SessionSecurity;
 use messages::{LoginWebSocket, LogoutWebSocket, RegisterWebSocket, WebSocketSend};
 use supervisor::SocketsSupervisor;
 
-use crate::service::session::supervisor::SessionsSupervisor;
 use crate::service::session::messages::{ExecuteSessionCommand, NotifySessionSecurity};
+use crate::service::session::supervisor::SessionsSupervisor;
 
 mod messages;
 mod supervisor;
@@ -58,7 +58,8 @@ async fn ws_handler(req: HttpRequest,
     resp
 }
 
-struct WebSocketActor {
+#[derive(Debug)]
+pub struct WebSocketActor {
     id:         WebSocketId,
     security:   HashMap<AppSessionId, SessionSecurity>,
     secure_key: HashMap<AppSessionId, SecureKey>,
@@ -274,7 +275,7 @@ impl Handler<NotifySessionSecurity> for WebSocketActor {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-struct WebSocketId(u64);
+pub struct WebSocketId(u64);
 
 static NEXT_SOCKET_ID: AtomicU64 = AtomicU64::new(0);
 
