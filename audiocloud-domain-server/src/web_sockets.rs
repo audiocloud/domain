@@ -49,6 +49,7 @@ async fn ws_handler(req: HttpRequest,
 
     let resp = ws::start(WebSocketActor { id:         get_next_socket_id(),
                                           security:   hashmap! {},
+                                          secure_key: hashmap! {},
                                           created_at: Instant::now(), },
                          &req,
                          stream);
@@ -58,6 +59,7 @@ async fn ws_handler(req: HttpRequest,
 struct WebSocketActor {
     id:         WebSocketId,
     security:   HashMap<AppSessionId, SessionSecurity>,
+    secure_key: HashMap<AppSessionId, SecureKey>,
     created_at: Instant,
 }
 
@@ -68,7 +70,7 @@ impl WebSocketActor {
         }
     }
 
-    fn login(&self, session_id: AppSessionId, secure_key: SecureKey, ctx: &mut <Self as Actor>::Context) {
+    fn login(&mut self, session_id: AppSessionId, secure_key: SecureKey, ctx: &mut <Self as Actor>::Context) {
         let login = LoginWebSocket { id:         self.id,
                                      secure_key: secure_key.clone(),
                                      session_id: session_id.clone(), };
@@ -83,6 +85,8 @@ impl WebSocketActor {
                 }
             }
         };
+
+        self.secure_key.insert(session_id.clone(), secure_key.clone());
 
         SocketsSupervisor::from_registry().send(login)
                                           .into_actor(self)
@@ -103,6 +107,8 @@ impl WebSocketActor {
     fn logout(&mut self, session_id: AppSessionId, ctx: &mut <Self as Actor>::Context) {
         let logout = LogoutWebSocket { id:         self.id,
                                        session_id: session_id.clone(), };
+
+        self.secure_key.remove(&session_id);
 
         SocketsSupervisor::from_registry().send(logout)
                                           .into_actor(self)
@@ -246,6 +252,25 @@ impl Handler<WebSocketSend> for WebSocketActor {
     }
 }
 
+impl Handler<NotifySessionSecurity> for WebSocketActor {
+    type Result = ();
+
+    fn handle(&mut self, mut msg: NotifySessionSecurity, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(secure_key) = self.secure_key.get(&msg.session_id) {
+            match msg.security.remove(secure_key) {
+                Some(security) => {
+                    self.security.insert(msg.session_id, security);
+                }
+                None => {
+                    self.security.remove(&msg.session_id);
+                }
+            }
+        } else {
+            self.security.remove(&msg.session_id);
+        }
+    }
+}
+
 #[derive(Message)]
 #[rtype(result = "()")]
 struct WebSocketSend {
@@ -351,8 +376,14 @@ impl Handler<NotifySessionSecurity> for SocketsSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifySessionSecurity, ctx: &mut Self::Context) -> Self::Result {
-        let old_security = self.security.insert(msg.session_id, msg.security);
-        // TOOD: inform socket? is there any need?
+        let old_security = self.security.insert(msg.session_id.clone(), msg.security.clone());
+        if let Some(memberships) = self.membership.get(&msg.session_id) {
+            for membership in memberships {
+                if let Some(socket) = self.web_sockets.get(&membership.web_socket_id) {
+                    socket.do_send(msg.clone());
+                }
+            }
+        }
     }
 }
 
