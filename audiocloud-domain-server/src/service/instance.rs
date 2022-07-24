@@ -23,7 +23,7 @@ use audiocloud_api::time::{Timestamp, Timestamped};
 
 use crate::data::get_boot_cfg;
 use crate::data::instance::{InstancePlay, InstancePower};
-use crate::service::session::NotifySessionSpec;
+use crate::service::session::messages::NotifySessionSpec;
 
 pub fn init() {
     let _ = InstancesSupervisor::from_registry();

@@ -5,7 +5,6 @@ use actix::SystemService;
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::instance::DesiredInstancePlayState;
 use audiocloud_api::newtypes::FixedInstanceId;
-use audiocloud_api::session::Session;
 
 use crate::service::instance::{InstancesSupervisor, NotifyInstanceState, SetInstanceDesiredState};
 use crate::tracker::RequestTracker;

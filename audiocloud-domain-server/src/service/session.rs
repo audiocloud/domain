@@ -1,25 +1,27 @@
 #![allow(unused_variables)]
 
-use std::collections::HashMap;
 use std::time::Duration;
 
-use actix::{Actor, AsyncContext, Context, Handler, Message, Supervised, SystemService};
+use actix::{Actor, AsyncContext, Context, Handler, Supervised, SystemService};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use anyhow::anyhow;
 
 use audiocloud_api::app::SessionPacket;
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
 use audiocloud_api::change::{DesiredSessionPlayState, PlayId, RenderId, SessionPlayState, SessionState};
-use audiocloud_api::cloud::apps::SessionSpec;
-use audiocloud_api::domain::DomainSessionCommand;
 use audiocloud_api::instance::DesiredInstancePlayState;
-use audiocloud_api::newtypes::{AppSessionId, SecureKey};
-use audiocloud_api::session::{Session, SessionMode, SessionSecurity};
-use supervisor::SessionsSupervisor;
+use audiocloud_api::newtypes::AppSessionId;
+use audiocloud_api::session::{Session, SessionMode};
+use messages::{
+    ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyRenderComplete, NotifySessionSpec, NotifySessionState,
+    SetSessionDesiredState,
+};
+use supervisor::{BecomeOnline, SessionsSupervisor};
 
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 use crate::tracker::RequestTracker;
 
+mod messages;
 pub mod session_instances;
 pub mod supervisor;
 
@@ -308,82 +310,6 @@ impl SessionActor {
         todo!()
     }
 }
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct SetSessionDesiredState {
-    pub session_id: AppSessionId,
-    pub desired:    DesiredSessionPlayState,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "anyhow::Result<()>")]
-pub struct ExecuteSessionCommand {
-    pub session_id: AppSessionId,
-    pub command:    DomainSessionCommand,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifySessionPacket {
-    pub session_id: AppSessionId,
-    pub packet:     SessionPacket,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifySessionDeleted {
-    pub session_id: AppSessionId,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifySessionSecurity {
-    pub session_id: AppSessionId,
-    pub security:   HashMap<SecureKey, SessionSecurity>,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifySessionSpec {
-    pub session_id: AppSessionId,
-    pub spec:       SessionSpec,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifySessionState {
-    pub session_id: AppSessionId,
-    pub state:      SessionState,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifyAudioEngineEvent {
-    pub session_id: AppSessionId,
-    pub event:      AudioEngineEvent,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifyRenderComplete {
-    pub session_id: AppSessionId,
-    pub render_id:  RenderId,
-    pub path:       String,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifyRenderFailed {
-    pub session_id: AppSessionId,
-    pub render_id:  RenderId,
-    pub error:      String,
-    pub cancelled:  bool,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct BecomeOnline;
 
 pub fn init() {
     let _ = SessionsSupervisor::from_registry();

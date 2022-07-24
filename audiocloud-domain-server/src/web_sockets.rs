@@ -1,32 +1,34 @@
 #![allow(unused_variables)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::{Duration, Instant};
 
 use actix::{
-    fut, Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Message,
-    StreamHandler, Supervised, SystemService, WrapFuture,
+    Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, fut, Handler, StreamHandler,
+    SystemService, WrapFuture,
 };
-use actix_web::{get, web, HttpRequest, Responder};
+use actix_web::{get, HttpRequest, Responder, web};
 use actix_web_actors::ws;
-use anyhow::anyhow;
-use audiocloud_api::change::ModifySessionSpec;
 use bytes::Bytes;
 use maplit::hashmap;
 use serde::Deserialize;
 use tracing::error;
 
+use audiocloud_api::change::ModifySessionSpec;
 use audiocloud_api::codec::{Codec, MsgPack};
 use audiocloud_api::domain::{DomainSessionCommand, WebSocketCommand, WebSocketEvent};
 use audiocloud_api::newtypes::{AppId, AppSessionId, SecureKey, SessionId};
 use audiocloud_api::session::SessionSecurity;
+use messages::{LoginWebSocket, LogoutWebSocket, RegisterWebSocket, WebSocketSend};
+use supervisor::SocketsSupervisor;
 
 use crate::service::session::supervisor::SessionsSupervisor;
-use crate::service::session::{
-    ExecuteSessionCommand, NotifySessionDeleted, NotifySessionPacket, NotifySessionSecurity,
-};
+use crate::service::session::messages::{ExecuteSessionCommand, NotifySessionSecurity};
+
+mod messages;
+mod supervisor;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(ws_handler);
@@ -271,12 +273,6 @@ impl Handler<NotifySessionSecurity> for WebSocketActor {
     }
 }
 
-#[derive(Message)]
-#[rtype(result = "()")]
-struct WebSocketSend {
-    bytes: Bytes,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct WebSocketId(u64);
 
@@ -286,160 +282,12 @@ fn get_next_socket_id() -> WebSocketId {
     WebSocketId(NEXT_SOCKET_ID.fetch_add(1, SeqCst))
 }
 
-#[derive(Default)]
-pub struct SocketsSupervisor {
-    web_sockets: HashMap<WebSocketId, Addr<WebSocketActor>>,
-    membership:  HashMap<AppSessionId, HashSet<WebSocketMembership>>,
-    security:    HashMap<AppSessionId, HashMap<SecureKey, SessionSecurity>>,
-}
-
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct WebSocketMembership {
     secure_key:    SecureKey,
     web_socket_id: WebSocketId,
 }
 
-impl Actor for SocketsSupervisor {
-    type Context = Context<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        ctx.run_interval(Duration::from_secs(1), Self::update);
-        self.restarting(ctx);
-    }
-}
-
-impl SocketsSupervisor {
-    fn update(&mut self, ctx: &mut Context<Self>) {
-        self.web_sockets.retain(|_, socket| socket.connected());
-        self.prune_unlinked_access();
-    }
-
-    fn prune_unlinked_access(&mut self) {
-        for (session_id, access) in self.membership.iter_mut() {
-            access.retain(|access| self.web_sockets.contains_key(&access.web_socket_id));
-        }
-
-        self.membership.retain(|_, access| !access.is_empty());
-    }
-}
-
-impl Handler<RegisterWebSocket> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: RegisterWebSocket, ctx: &mut Self::Context) -> Self::Result {
-        self.web_sockets.insert(msg.id, msg.address);
-    }
-}
-
-impl Handler<LoginWebSocket> for SocketsSupervisor {
-    type Result = anyhow::Result<SessionSecurity>;
-
-    fn handle(&mut self, msg: LoginWebSocket, ctx: &mut Self::Context) -> Self::Result {
-        self.membership
-            .entry(msg.session_id.clone())
-            .or_insert_with(|| HashSet::new())
-            .insert(WebSocketMembership { secure_key:    msg.secure_key.clone(),
-                                          web_socket_id: msg.id, });
-
-        Ok(self.security
-               .get(&msg.session_id)
-               .and_then(|sec| sec.get(&msg.secure_key))
-               .ok_or_else(|| anyhow!("Could not find session security"))?
-               .clone())
-    }
-}
-
-impl Handler<LogoutWebSocket> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: LogoutWebSocket, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(memberships) = self.membership.get_mut(&msg.session_id) {
-            memberships.retain(|membership| membership.web_socket_id != msg.id);
-        }
-    }
-}
-
-impl Handler<NotifySessionDeleted> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifySessionDeleted, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(accesses) = self.membership.remove(&msg.session_id) {
-            for access in accesses {
-                self.web_sockets.remove(&access.web_socket_id);
-            }
-        }
-        self.prune_unlinked_access();
-    }
-}
-
-impl Handler<NotifySessionSecurity> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifySessionSecurity, ctx: &mut Self::Context) -> Self::Result {
-        let old_security = self.security.insert(msg.session_id.clone(), msg.security.clone());
-        if let Some(memberships) = self.membership.get(&msg.session_id) {
-            for membership in memberships {
-                if let Some(socket) = self.web_sockets.get(&membership.web_socket_id) {
-                    socket.do_send(msg.clone());
-                }
-            }
-        }
-    }
-}
-
-impl Handler<NotifySessionPacket> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifySessionPacket, ctx: &mut Self::Context) -> Self::Result {
-        if let (Some(session_sockets), Some(session_security)) =
-            (self.membership.get(&msg.session_id), self.security.get(&msg.session_id))
-        {
-            let event = WebSocketEvent::Packet(msg.session_id, msg.packet);
-            let bytes = match MsgPack.serialize(&event) {
-                Ok(bytes) => Bytes::from(bytes),
-                Err(err) => {
-                    error!(%err, "Failed to serialize a session packet");
-                    return;
-                }
-            };
-
-            for socket in session_sockets.iter() {
-                if let Some(socket) = self.web_sockets.get(&socket.web_socket_id) {
-                    socket.do_send(WebSocketSend { bytes: bytes.clone() });
-                }
-            }
-        }
-    }
-}
-
-impl Supervised for SocketsSupervisor {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {}
-}
-
-impl SystemService for SocketsSupervisor {}
-
 pub fn init() {
     let _ = SocketsSupervisor::from_registry();
-}
-
-#[derive(Message, Clone)]
-#[rtype(result = "()")]
-struct RegisterWebSocket {
-    address: Addr<WebSocketActor>,
-    id:      WebSocketId,
-}
-
-#[derive(Message, Clone)]
-#[rtype(result = "anyhow::Result<SessionSecurity>")]
-struct LoginWebSocket {
-    id:         WebSocketId,
-    session_id: AppSessionId,
-    secure_key: SecureKey,
-}
-
-#[derive(Message, Clone)]
-#[rtype(result = "()")]
-struct LogoutWebSocket {
-    id:         WebSocketId,
-    session_id: AppSessionId,
 }

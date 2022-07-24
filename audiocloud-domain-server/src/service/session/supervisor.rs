@@ -1,18 +1,20 @@
 use std::collections::HashMap;
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Supervised, Supervisor, SystemService, WrapFuture};
+use actix::{Actor, ActorFutureExt, Addr, Context, fut, Handler, Supervised, Supervisor, SystemService, WrapFuture};
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
+use actix_derive::message_derive_rtype as Message;
 
 use audiocloud_api::change::SessionState;
 use audiocloud_api::newtypes::AppSessionId;
 use audiocloud_api::session::Session;
 
 use crate::data::get_boot_cfg;
-use crate::service::session::{
-    BecomeOnline, ExecuteSessionCommand, NotifySessionSpec, NotifySessionState, SessionActor, SetSessionDesiredState,
+use crate::service::session::messages::{
+    ExecuteSessionCommand, NotifySessionSpec, NotifySessionState, SetSessionDesiredState,
 };
+use crate::service::session::SessionActor;
 
 pub struct SessionsSupervisor {
     active:   HashMap<AppSessionId, Addr<SessionActor>>,
@@ -104,3 +106,7 @@ impl Handler<ExecuteSessionCommand> for SessionsSupervisor {
         }
     }
 }
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct BecomeOnline;
