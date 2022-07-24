@@ -1,11 +1,18 @@
-use actix::{Actor, Addr, Context, Handler, Supervised, Supervisor, SystemService};
 use std::collections::HashMap;
+
+use actix::fut::LocalBoxActorFuture;
+use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Supervised, Supervisor, SystemService, WrapFuture};
 use actix_broker::BrokerSubscribe;
+use anyhow::anyhow;
+
 use audiocloud_api::change::SessionState;
 use audiocloud_api::newtypes::AppSessionId;
 use audiocloud_api::session::Session;
+
 use crate::data::get_boot_cfg;
-use crate::service::session::{BecomeOnline, NotifySessionSpec, NotifySessionState, SessionActor, SetSessionDesiredState};
+use crate::service::session::{
+    BecomeOnline, ExecuteSessionCommand, NotifySessionSpec, NotifySessionState, SessionActor, SetSessionDesiredState,
+};
 
 pub struct SessionsSupervisor {
     active:   HashMap<AppSessionId, Addr<SessionActor>>,
@@ -80,5 +87,20 @@ impl Handler<NotifySessionState> for SessionsSupervisor {
 
     fn handle(&mut self, msg: NotifySessionState, ctx: &mut Self::Context) -> Self::Result {
         self.state.insert(msg.session_id, msg.state);
+    }
+}
+
+impl Handler<ExecuteSessionCommand> for SessionsSupervisor {
+    type Result = LocalBoxActorFuture<Self, anyhow::Result<()>>;
+
+    fn handle(&mut self, msg: ExecuteSessionCommand, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(session) = self.active.get(&msg.session_id) {
+            session.send(msg)
+                   .into_actor(self)
+                   .map(|res, _, _| anyhow::Result::<()>::Ok(res??))
+                   .boxed_local()
+        } else {
+            fut::err(anyhow!("Session not found")).into_actor(self).boxed_local()
+        }
     }
 }

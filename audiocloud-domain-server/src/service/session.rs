@@ -1,17 +1,20 @@
 #![allow(unused_variables)]
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use actix::{Actor, AsyncContext, Context, Handler, Message, Supervised, SystemService};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
+use anyhow::anyhow;
 
 use audiocloud_api::app::SessionPacket;
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
 use audiocloud_api::change::{DesiredSessionPlayState, PlayId, RenderId, SessionPlayState, SessionState};
 use audiocloud_api::cloud::apps::SessionSpec;
+use audiocloud_api::domain::DomainSessionCommand;
 use audiocloud_api::instance::DesiredInstancePlayState;
-use audiocloud_api::newtypes::AppSessionId;
-use audiocloud_api::session::{Session, SessionMode};
+use audiocloud_api::newtypes::{AppSessionId, SecureKey};
+use audiocloud_api::session::{Session, SessionMode, SessionSecurity};
 use supervisor::SessionsSupervisor;
 
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
@@ -138,6 +141,14 @@ impl Handler<SetSessionDesiredState> for SessionActor {
             self.stop();
             self.update(ctx);
         }
+    }
+}
+
+impl Handler<ExecuteSessionCommand> for SessionActor {
+    type Result = anyhow::Result<()>;
+
+    fn handle(&mut self, msg: ExecuteSessionCommand, ctx: &mut Self::Context) -> Self::Result {
+        Err(anyhow!("Not implemented"))
     }
 }
 
@@ -306,10 +317,30 @@ pub struct SetSessionDesiredState {
 }
 
 #[derive(Message, Clone, Debug)]
+#[rtype(result = "anyhow::Result<()>")]
+pub struct ExecuteSessionCommand {
+    pub session_id: AppSessionId,
+    pub command:    DomainSessionCommand,
+}
+
+#[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifySessionPacket {
     pub session_id: AppSessionId,
     pub packet:     SessionPacket,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct NotifySessionDeleted {
+    pub session_id: AppSessionId,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct NotifySessionSecurity {
+    pub session_id: AppSessionId,
+    pub security:   HashMap<SecureKey, SessionSecurity>,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -356,4 +387,8 @@ pub struct BecomeOnline;
 
 pub fn init() {
     let _ = SessionsSupervisor::from_registry();
+}
+
+pub fn become_online() {
+    SessionsSupervisor::from_registry().do_send(BecomeOnline);
 }

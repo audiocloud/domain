@@ -5,7 +5,7 @@ use clap::Parser;
 use tracing::*;
 
 use audiocloud_domain_server::data::DataOpts;
-use audiocloud_domain_server::{data, rest, service};
+use audiocloud_domain_server::{data, rest, service, web_sockets};
 
 #[derive(Parser)]
 struct Opts {
@@ -19,7 +19,7 @@ struct Opts {
     db: DataOpts,
 
     #[clap(flatten)]
-    cloud: cloud::CloudOpts,
+    cloud: service::cloud::CloudOpts,
 }
 
 #[actix_web::main]
@@ -49,6 +49,8 @@ async fn main() -> anyhow::Result<()> {
 
     service::cloud::spawn_command_listener(event_base as i64).await?;
 
+    service::session::become_online();
+
     info!(bind = opts.bind,
           port = opts.port,
           " ==== AudioCloud Domain server ==== ");
@@ -57,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
     HttpServer::new(|| {
         App::new().wrap(tracing_actix_web::TracingLogger::default())
                   .configure(rest::configure)
+                  .configure(web_sockets::configure)
     }).bind((opts.bind.as_str(), opts.port))?
       .run()
       .await?;
