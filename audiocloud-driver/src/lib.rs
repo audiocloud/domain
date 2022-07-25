@@ -1,6 +1,7 @@
 use actix::{Message, Recipient};
 use actix_broker::{Broker, SystemBroker};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::newtypes::FixedInstanceId;
@@ -9,11 +10,11 @@ pub mod distopik;
 pub mod http_client;
 pub mod nats;
 pub mod netio;
+pub mod supervisor;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct ConfigFile {
-    instances: Vec<DriverConfig>,
-}
+use tracing::*;
+
+pub type ConfigFile = HashMap<FixedInstanceId, DriverConfig>;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -23,13 +24,6 @@ pub enum DriverConfig {
 }
 
 impl InstanceConfig for DriverConfig {
-    fn instance_id(&self) -> FixedInstanceId {
-        match self {
-            DriverConfig::Distopik(c) => c.instance_id(),
-            DriverConfig::Netio(c) => c.instance_id(),
-        }
-    }
-
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
         match self {
             DriverConfig::Distopik(c) => c.create(id),
@@ -39,7 +33,6 @@ impl InstanceConfig for DriverConfig {
 }
 
 pub trait InstanceConfig {
-    fn instance_id(&self) -> FixedInstanceId;
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>>;
 }
 
@@ -58,5 +51,6 @@ pub struct Event {
 }
 
 pub fn emit_event(instance_id: FixedInstanceId, event: InstanceDriverEvent) {
+    info!(id = %instance_id, "{}", serde_json::to_string(&event).unwrap());
     Broker::<SystemBroker>::issue_async(Event { instance_id, event });
 }

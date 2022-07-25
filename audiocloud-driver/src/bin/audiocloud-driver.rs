@@ -1,10 +1,13 @@
+use actix::prelude::*;
 use std::path::PathBuf;
+use std::time::Duration;
 use std::{env, fs};
 
 use clap::Parser;
 
 use audiocloud_driver::nats::NatsOpts;
-use audiocloud_driver::{http_client, ConfigFile};
+use audiocloud_driver::supervisor::DriverSupervisor;
+use audiocloud_driver::{http_client, ConfigFile, InstanceConfig};
 
 #[derive(Parser, Debug, Clone)]
 struct DriverOpts {
@@ -22,11 +25,17 @@ async fn main() -> anyhow::Result<()> {
         env::set_var("RUST_LOG", "info,audiocloud_api=debug,audiocloud_driver=debug");
     }
 
+    tracing_subscriber::fmt::init();
+
     let opts = DriverOpts::parse();
 
     http_client::init()?;
 
-    let cfg = serde_yaml::from_reader::<_, ConfigFile>(fs::File::open(opts.config_file)?)?;
+    let instances = serde_yaml::from_reader::<_, ConfigFile>(fs::File::open(opts.config_file)?)?;
 
-    Ok(())
+    let _supervisor = DriverSupervisor::new(instances)?.start();
+
+    loop {
+        actix::clock::sleep(Duration::from_secs(1)).await;
+    }
 }

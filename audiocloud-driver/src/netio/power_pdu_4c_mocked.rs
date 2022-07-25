@@ -1,40 +1,34 @@
-use actix::{Actor, Context, Handler, Recipient, SystemService};
-use actix_broker::BrokerIssue;
+#![allow(unused_variables)]
+
+use std::time::Duration;
+
+use actix::{Actor, AsyncContext, Context, Handler, Recipient, Supervised};
 use maplit::hashmap;
+use serde::{Deserialize, Serialize};
+use tracing::*;
 
 use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
-use audiocloud_api::instance::power;
 use audiocloud_api::model::ModelValue;
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_api::time::Timestamped;
 use audiocloud_models::netio::netio_4c::*;
-use serde::{Deserialize, Serialize};
 
-use crate::nats::{NatsService, Publish};
-use crate::{emit_event, Command, Event, InstanceConfig};
+use crate::{emit_event, Command, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct Config {
-    instance: String,
-}
+pub struct Config;
 
 impl InstanceConfig for Config {
-    fn instance_id(&self) -> FixedInstanceId {
-        netio_power_pdu_4c_id().instance(self.instance.clone())
-    }
-
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
-        Ok(Netio4cMocked { id,
-                           config: self,
-                           state: [false; 4] }.start()
-                                              .recipient())
+        info!(%id, config = ?self, "Creating instance");
+
+        Ok(Netio4cMocked { id, state: [false; 4] }.start().recipient())
     }
 }
 
 struct Netio4cMocked {
-    id:     FixedInstanceId,
-    config: Config,
-    state:  [bool; 4],
+    id:    FixedInstanceId,
+    state: [bool; 4],
 }
 
 impl Netio4cMocked {
@@ -45,12 +39,37 @@ impl Netio4cMocked {
 
 impl Actor for Netio4cMocked {
     type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.restarting(ctx);
+    }
+}
+
+impl Supervised for Netio4cMocked {
+    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
+        ctx.run_interval(Duration::from_secs(60), Self::update);
+        self.update(ctx);
+    }
+}
+
+impl Netio4cMocked {
+    fn update(&mut self, ctx: &mut Context<Self>) {
+        let power_values = self.state
+                               .iter()
+                               .cloned()
+                               .map(ModelValue::Bool)
+                               .map(Timestamped::from)
+                               .enumerate()
+                               .collect();
+
+        self.emit(InstanceDriverEvent::Reports { reports: hashmap! { reports::POWER.clone() => power_values }, });
+    }
 }
 
 impl Handler<Command> for Netio4cMocked {
     type Result = Result<(), InstanceDriverError>;
 
-    fn handle(&mut self, msg: Command, _ctx: &mut Context<Self>) -> Self::Result {
+    fn handle(&mut self, msg: Command, ctx: &mut Context<Self>) -> Self::Result {
         match msg.command {
             InstanceDriverCommand::CheckConnection => self.emit(InstanceDriverEvent::Connected),
             InstanceDriverCommand::Stop
@@ -58,7 +77,7 @@ impl Handler<Command> for Netio4cMocked {
             | InstanceDriverCommand::Render { .. }
             | InstanceDriverCommand::Rewind { .. } => return Err(InstanceDriverError::MediaNotPresent),
             InstanceDriverCommand::SetParameters(mut p) => {
-                if let Some(power) = p.remove(&power::params::POWER) {
+                if let Some(power) = p.remove(&params::POWER) {
                     for (i, value) in power {
                         if let Some(value) = value.to_bool() {
                             self.state[i] = value;
@@ -66,17 +85,7 @@ impl Handler<Command> for Netio4cMocked {
                     }
                 }
 
-                let power_values = self.state
-                                       .iter()
-                                       .cloned()
-                                       .map(ModelValue::Bool)
-                                       .map(Timestamped::from)
-                                       .enumerate()
-                                       .collect();
-                
-                self.emit(InstanceDriverEvent::Reports { reports: hashmap! {
-                                                             power::reports::POWER.clone() => power_values,
-                                                         }, });
+                self.update(ctx);
             }
         }
 

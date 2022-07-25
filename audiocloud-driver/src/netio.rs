@@ -10,18 +10,12 @@ pub mod power_pdu_4c_mocked;
 pub enum Config {
     #[serde(rename = "power_pdu_4c")]
     PowerPdu4c(power_pdu_4c::Config),
+
     #[serde(rename = "power_pdu_4c_mocked")]
     PowerPdu4cMocked(power_pdu_4c_mocked::Config),
 }
 
 impl InstanceConfig for Config {
-    fn instance_id(&self) -> FixedInstanceId {
-        match self {
-            Config::PowerPdu4c(c) => c.instance_id(),
-            Config::PowerPdu4cMocked(c) => c.instance_id(),
-        }
-    }
-
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
         match self {
             Config::PowerPdu4c(c) => c.create(id),

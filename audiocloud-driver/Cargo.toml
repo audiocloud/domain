@@ -13,8 +13,12 @@ actix = "0.13"
 actix-broker = "0.4"
 serde_yaml = "0.8"
 serde_repr = "0.1"
+serde_json = "1"
 maplit = "1"
 anyhow = "1"
+tracing = "0.1"
+futures = "0.3"
+tracing-subscriber = "0.1"
 
 [dependencies.tokio]
 version = "1"

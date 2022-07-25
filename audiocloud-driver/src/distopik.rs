@@ -14,13 +14,6 @@ pub enum Config {
 }
 
 impl InstanceConfig for Config {
-    fn instance_id(&self) -> FixedInstanceId {
-        match self {
-            Config::Dual1084(c) => c.instance_id(),
-            Config::Summatra(c) => c.instance_id(),
-        }
-    }
-
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
         match self {
             Config::Dual1084(c) => c.create(id),

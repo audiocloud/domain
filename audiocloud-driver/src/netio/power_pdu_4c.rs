@@ -3,12 +3,16 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use actix::{spawn, Actor, ActorFutureExt, AsyncContext, Context, Handler, Recipient, Supervised, WrapFuture};
-use actix_broker::{Broker, SystemBroker};
+use actix::{
+    fut, spawn, Actor, ActorFutureExt, Addr, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running,
+    Supervised, WrapFuture,
+};
+use futures::TryFutureExt;
 use maplit::hashmap;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
+use tracing::*;
 
 use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::model::ModelValue;
@@ -17,23 +21,20 @@ use audiocloud_api::time::{Timestamp, Timestamped};
 use audiocloud_models::netio::netio_4c::*;
 
 use crate::http_client::get_http_client;
-use crate::{emit_event, Command, Event, InstanceConfig};
+use crate::{emit_event, Command, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Config {
-    pub instance: String,
-    pub address:  String,
-    pub username: String,
-    pub password: String,
+    pub address: String,
+    #[serde(default)]
+    pub auth:    Option<(String, String)>,
 }
 
 impl InstanceConfig for Config {
-    fn instance_id(&self) -> FixedInstanceId {
-        netio_power_pdu_4c_id().instance(self.instance.clone())
-    }
-
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
+        info!(%id, config = ?self, "Creating instance");
         let base_url = Url::parse(&self.address)?;
+
         Ok(PowerPdu4c { id,
                         config: self,
                         base_url }.start()
@@ -49,11 +50,16 @@ pub struct PowerPdu4c {
 
 impl Actor for PowerPdu4c {
     type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.restarting(ctx);
+    }
 }
 
 impl Supervised for PowerPdu4c {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         ctx.run_interval(Duration::from_secs(60), Self::update);
+        self.update(ctx);
     }
 }
 
@@ -120,17 +126,19 @@ impl PowerPdu4c {
         let id = self.id.clone();
         let url = self.base_url.clone();
         spawn(async move {
-            let url = url.join("/netio.json")?;
-            let response = get_http_client().get(url)
-                                            .send()
-                                            .await?
-                                            .json::<NetioPowerResponse>()
-                                            .await?;
+                  let url = url.join("/netio.json")?;
+                  let response = get_http_client().get(url)
+                                                  .send()
+                                                  .await?
+                                                  .json::<NetioPowerResponse>()
+                                                  .await?;
 
-            Self::handle_response(id, response);
+                  Self::handle_response(id, response);
 
-            anyhow::Result::<()>::Ok(())
-        });
+                  anyhow::Result::<()>::Ok(())
+              }.map_err(|err| {
+                   info!(?err, "Update failed");
+               }));
     }
 
     fn handle_response(id: FixedInstanceId, response: NetioPowerResponse) {
@@ -140,8 +148,10 @@ impl PowerPdu4c {
         for channel in response.outputs {
             let power_value = Timestamped::from(ModelValue::Bool(channel.state == PowerState::On));
             let current_value = Timestamped::from(ModelValue::Number(channel.current as f64 / 1000.0));
-            power_values.insert(channel.id as usize, power_value);
-            current_values.insert(channel.id as usize, current_value);
+            let channel_id = (channel.id as usize) - 1;
+
+            power_values.insert(channel_id, power_value);
+            current_values.insert(channel_id, current_value);
         }
 
         let reports = hashmap! {
@@ -162,18 +172,19 @@ struct NetioPowerRequest {
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
 struct NetioPowerOutputAction {
+    #[serde(rename = "ID")]
     pub id:     u32,
     pub action: PowerAction,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 struct NetioPowerResponse {
     global_measure: NetioGlobalMeasure,
     outputs:        Vec<NetioPowerOutput>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 struct NetioGlobalMeasure {
     voltage:              f64,
@@ -185,9 +196,10 @@ struct NetioGlobalMeasure {
     energy_start:         Timestamp,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
 struct NetioPowerOutput {
+    #[serde(rename = "ID")]
     id:           u32,
     name:         String,
     current:      u32,
