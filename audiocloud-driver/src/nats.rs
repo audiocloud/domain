@@ -31,10 +31,10 @@ pub async fn init(opts: NatsOpts, instances: HashSet<FixedInstanceId>) -> anyhow
         let model = &instance_id.name;
         let instance = &instance_id.instance;
         let subscription = connection.subscribe(&format!("ac.insts.{manufacturer}.{model}.{instance}.cmds"))
-                                     .await?;
+            .await?;
 
         spawn(handle_commands(subscription, instance_id));
-    }w
+    }
 
     NATS.set(connection)
         .map_err(|_| anyhow!("State init already called!"))?;
