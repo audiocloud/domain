@@ -18,7 +18,7 @@ maplit = "1"
 anyhow = "1"
 tracing = "0.1"
 futures = "0.3"
-tracing-subscriber = "0.1"
+tracing-subscriber = "0.3"
 
 [dependencies.tokio]
 version = "1"
@@ -36,6 +36,9 @@ features = ["derive"]
 version = "3"
 features = ["derive", "env"]
 
+[dependencies.clap.openssl]
+version = "*"
+features = ["vendored"]
 
 [dependencies.audiocloud-api]
 path = "../../apis/audiocloud-api"
