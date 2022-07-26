@@ -25,6 +25,11 @@ jobs:
           target: armv7-unknown-linux-gnueabihf
           override: true
         name: Install Rust toolchain for Raspberry Pi
+
+      - run: |
+          sudo dpkg --add-architecture armhf
+          sudo apt-get update -y
+          sudo apt-get install -y libssl-dev:armhf pkg-config
       - uses: actions/cache@v3
         with:
           path: |
