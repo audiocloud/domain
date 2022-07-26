@@ -8,12 +8,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+        with:
+          path: domain
         name: Checkout drivers code
       - uses: actions/checkout@v2
         with:
           repository: audiocloud/api
-          path: ..
+          path: api
         name: Checkout API code
+      - run: |
+          ls -lR
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
@@ -27,16 +31,17 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
+            domain/target/
             key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rs/cargo@v1
         with:
-          args: --release --all-features --target armv7-unknown-linux-gnueabihf -p audiocloud-driver
+
+          args: --release --all-features --target armv7-unknown-linux-gnueabihf -p audiocloud-driver --manifest-path=domain/Cargo.toml
           command: build
           use-cross: true
         name: Build drivers for Raspberry Pi
       - run: |
-          ls -lR target/
+          ls -lR
         name: List files in target directory
       - uses: actions/upload-artifact@v3
         name: Upload binary artifact
