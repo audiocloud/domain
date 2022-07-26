@@ -36,8 +36,8 @@ features = ["derive"]
 version = "3"
 features = ["derive", "env"]
 
-[dependencies.clap.openssl]
-version = "*"
+[dependencies.openssl]
+version = "0.10"
 features = ["vendored"]
 
 [dependencies.audiocloud-api]
