@@ -28,6 +28,7 @@ jobs:
 
       - run: |
           sudo dpkg --add-architecture armhf
+          sudo cp domain/.github/workflows/sources.list /etc/apt/sources.list.d/armhf.list
           sudo apt-get update -y
           sudo apt-get install -y libssl-dev:armhf pkg-config
       - uses: actions/cache@v3
