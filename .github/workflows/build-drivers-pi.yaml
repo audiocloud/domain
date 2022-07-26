@@ -15,6 +15,7 @@ jobs:
         with:
           repository: audiocloud/api
           path: api
+          ref: main
         name: Checkout API code
       - run: |
           ls -lR
