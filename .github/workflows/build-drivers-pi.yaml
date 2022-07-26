@@ -1,4 +1,4 @@
-on: [ push ]
+on: [ workflow_dispatch ]
 
 name: Build Drivers for Raspberry Pi
 
