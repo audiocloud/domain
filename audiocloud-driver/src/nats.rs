@@ -13,7 +13,8 @@ use audiocloud_api::codec::{Codec, Json};
 use audiocloud_api::driver::InstanceDriverCommand;
 use audiocloud_api::newtypes::FixedInstanceId;
 
-use crate::Event;
+use crate::supervisor::{get_driver_supervisor, DriverSupervisor};
+use crate::{Command, Event};
 
 #[derive(Args, Clone, Debug)]
 pub struct NatsOpts {
@@ -31,7 +32,7 @@ pub async fn init(opts: NatsOpts, instances: HashSet<FixedInstanceId>) -> anyhow
         let model = &instance_id.name;
         let instance = &instance_id.instance;
         let subscription = connection.subscribe(&format!("ac.insts.{manufacturer}.{model}.{instance}.cmds"))
-            .await?;
+                                     .await?;
 
         spawn(handle_commands(subscription, instance_id));
     }
@@ -48,7 +49,18 @@ pub fn get_nats() -> &'static Connection {
 
 async fn handle_commands(subscription: nats_aflowt::Subscription, instance_id: FixedInstanceId) {
     while let Some(msg) = subscription.next().await {
-        if let Ok(cmd) = Json.deserialize::<InstanceDriverCommand>(&msg.data) {}
+        if let Ok(cmd) = Json.deserialize::<InstanceDriverCommand>(&msg.data) {
+            if let Some(supervisor) = get_driver_supervisor() {
+                if let Ok(response) = supervisor.send(Command { instance_id: instance_id.clone(),
+                                                                command:     cmd, })
+                                                .await
+                {
+                    if let Ok(encoded) = Json.serialize(&response) {
+                        let _ = msg.respond(encoded).await;
+                    }
+                }
+            }
+        }
     }
 }
 
