@@ -34,6 +34,7 @@ jobs:
             ~/.cargo/git/db/
             target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
       - uses: actions-rs/cargo@v1
         with:
           args: --release --all-features --target armv7-unknown-linux-gnueabihf -p audiocloud-driver --manifest-path=domain/Cargo.toml --target-dir target
