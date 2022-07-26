@@ -1,0 +1,46 @@
+on: [ push ]
+
+name: Build Drivers for Raspberry Pi
+
+jobs:
+  build:
+    name: Rust build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout drivers code
+      - uses: actions/checkout@v2
+        with:
+          repository: audiocloud/api
+          path: ..
+        name: Checkout API code
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          target: armv7-unknown-linux-gnueabihf
+          override: true
+        name: Install Rust toolchain for Raspberry Pi
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+            key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions-rs/cargo@v1
+        with:
+          args: --release --all-features --target armv7-unknown-linux-gnueabihf -p audiocloud-driver
+          command: build
+          use-cross: true
+        name: Build drivers for Raspberry Pi
+      - run: |
+          ls -lR target/
+        name: List files in target directory
+      - uses: actions/upload-artifact@v3
+        name: Upload binary artifact
+        with:
+          name: audiocloud-driver
+          path: target/armv7-unknown-linux-gnueabihf/release/audiocloud-driver
+

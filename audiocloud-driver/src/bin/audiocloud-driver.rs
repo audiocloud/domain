@@ -7,7 +7,7 @@ use clap::Parser;
 
 use audiocloud_driver::nats::NatsOpts;
 use audiocloud_driver::supervisor::DriverSupervisor;
-use audiocloud_driver::{http_client, ConfigFile, InstanceConfig};
+use audiocloud_driver::{http_client, nats, ConfigFile, InstanceConfig};
 
 #[derive(Parser, Debug, Clone)]
 struct DriverOpts {
@@ -33,9 +33,9 @@ async fn main() -> anyhow::Result<()> {
 
     let instances = serde_yaml::from_reader::<_, ConfigFile>(fs::File::open(opts.config_file)?)?;
 
-    let _supervisor = DriverSupervisor::new(instances)?.start();
+    let _supervisor = DriverSupervisor::new(opts.nats, instances).await?.start();
 
     loop {
-        actix::clock::sleep(Duration::from_secs(1)).await;
+        actix::clock::sleep(Duration::MAX).await;
     }
 }

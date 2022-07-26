@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use actix::{Actor, AsyncContext, Context, Handler, Message, Supervised, SystemService};
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
@@ -21,7 +23,7 @@ pub struct NatsOpts {
 
 static NATS: OnceCell<Connection> = OnceCell::new();
 
-pub async fn init(opts: NatsOpts, instances: Vec<FixedInstanceId>) -> anyhow::Result<()> {
+pub async fn init(opts: NatsOpts, instances: HashSet<FixedInstanceId>) -> anyhow::Result<()> {
     let connection = nats_aflowt::connect(opts.nats_url.as_str()).await?;
 
     for instance_id in instances {
@@ -32,7 +34,7 @@ pub async fn init(opts: NatsOpts, instances: Vec<FixedInstanceId>) -> anyhow::Re
                                      .await?;
 
         spawn(handle_commands(subscription, instance_id));
-    }
+    }w
 
     NATS.set(connection)
         .map_err(|_| anyhow!("State init already called!"))?;
