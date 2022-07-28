@@ -89,13 +89,25 @@ impl WebSocketActor {
             }
         };
 
+        let send_login_success = |ctx: &mut <Self as Actor>::Context, session_id: AppSessionId| {
+            match MsgPack.serialize(&WebSocketEvent::LoginSuccess(session_id)) {
+                Ok(bytes) => {
+                    ctx.notify(WebSocketSend { bytes: Bytes::from(bytes), });
+                }
+                Err(err) => {
+                    error!(%err, "Failed to serialize LoginSuccess");
+                }
+            }
+        };
+
         self.secure_key.insert(session_id.clone(), secure_key.clone());
 
         SocketsSupervisor::from_registry().send(login)
                                           .into_actor(self)
                                           .map(move |res, act, ctx| match res {
                                               Ok(Ok(security)) => {
-                                                  act.security.insert(session_id, security);
+                                                  act.security.insert(session_id.clone(), security);
+                                                  send_login_success(ctx, session_id);
                                               }
                                               Ok(Err(err)) => {
                                                   send_login_error(ctx, session_id, err.to_string());

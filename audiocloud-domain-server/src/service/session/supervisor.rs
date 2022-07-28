@@ -27,7 +27,9 @@ pub struct SessionsSupervisor {
 impl Actor for SessionsSupervisor {
     type Context = Context<Self>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {}
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.restarting(ctx);
+    }
 }
 
 impl Supervised for SessionsSupervisor {

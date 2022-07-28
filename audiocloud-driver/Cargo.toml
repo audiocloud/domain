@@ -19,6 +19,13 @@ anyhow = "1"
 tracing = "0.1"
 futures = "0.3"
 tracing-subscriber = "0.3"
+byteorder = "1"
+hidapi = "1"
+rand = "0.8"
+
+[dependencies.nix]
+version = "0.24"
+features = ["ioctl"]
 
 [dependencies.tokio]
 version = "1"
@@ -39,6 +46,10 @@ features = ["derive", "env"]
 [dependencies.openssl]
 version = "0.10"
 features = ["vendored"]
+
+[dependencies.chrono]
+version = "0.4"
+features = ["serde"]
 
 [dependencies.audiocloud-api]
 path = "../../apis/audiocloud-api"
