@@ -21,6 +21,7 @@ use supervisor::{BecomeOnline, SessionsSupervisor};
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 use crate::tracker::RequestTracker;
 
+pub mod audio_engine;
 pub mod messages;
 pub mod session_instances;
 pub mod supervisor;
@@ -97,33 +98,36 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
             AudioEngineEvent::Loaded => {
                 self.engine_loaded = false;
             }
-            AudioEngineEvent::Stopped => {
+            AudioEngineEvent::Stopped { session_id } => {
                 if !self.state.play_state.value().is_stopped() {
                     self.state.play_state = SessionPlayState::Stopped.into();
                     self.emit_state();
                 }
             }
-            AudioEngineEvent::Playing { playing, audio } => {
+            AudioEngineEvent::Playing { session_id,
+                                        playing,
+                                        audio,
+                                        peak_meters,
+                                        dynamic_reports, } => {
                 if !self.state.play_state.value().is_playing(playing.play_id) {
                     self.state.play_state = SessionPlayState::Playing(playing).into();
                     self.emit_state();
                 }
                 self.packet.push_audio_packets(audio);
             }
-            AudioEngineEvent::Rendering { rendering } => {
+            AudioEngineEvent::Rendering { session_id, rendering } => {
                 if !self.state.play_state.value().is_rendering(rendering.render_id) {
                     self.state.play_state = SessionPlayState::Rendering(rendering).into();
                     self.emit_state();
                 }
             }
-            AudioEngineEvent::RenderingFinished { render_id, path } => {
+            AudioEngineEvent::RenderingFinished { session_id,
+                                                  render_id,
+                                                  path, } => {
                 self.state.play_state = SessionPlayState::Stopped.into();
                 self.issue_system_async(NotifyRenderComplete { session_id: self.id.clone(),
                                                                render_id,
                                                                path });
-            }
-            AudioEngineEvent::Meters { peak_meters } => {
-                // TODO: translate to packet
             }
             AudioEngineEvent::Exit { .. } => {
                 self.engine_loaded = false;
@@ -251,7 +255,7 @@ impl SessionActor {
     fn update_stopping(&mut self, ctx: &mut Context<Self>) {
         if !self.state.play_state.value().is_stopped() {
             if self.audio_engine_tracker.should_retry() {
-                self.request_audio_engine_command(AudioEngineCommand::Stop {});
+                self.request_audio_engine_command(AudioEngineCommand::Stop { session_id: self.id.clone(), });
                 self.audio_engine_tracker.retried();
             }
         } else if self.engine_loaded {
@@ -276,9 +280,13 @@ impl SessionActor {
         {
             if self.audio_engine_tracker.should_retry() {
                 let command = match self.state.desired_play_state.value() {
-                    DesiredSessionPlayState::Play(play) => AudioEngineCommand::Play(play.clone()),
-                    DesiredSessionPlayState::Render(render) => AudioEngineCommand::Render(render.clone()),
-                    DesiredSessionPlayState::Stopped => AudioEngineCommand::Stop,
+                    DesiredSessionPlayState::Play(play) => AudioEngineCommand::Play { session_id: self.id.clone(),
+                                                                                      play:       play.clone(), },
+                    DesiredSessionPlayState::Render(render) => {
+                        AudioEngineCommand::Render { session_id: self.id.clone(),
+                                                     render:     render.clone(), }
+                    }
+                    DesiredSessionPlayState::Stopped => AudioEngineCommand::Stop { session_id: self.id.clone(), },
                 };
                 self.request_audio_engine_command(command);
                 self.audio_engine_tracker.retried();
