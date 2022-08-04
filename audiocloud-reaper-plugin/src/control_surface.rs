@@ -1,14 +1,16 @@
 use anyhow::anyhow;
-use audiocloud_api::change::{PlaySession, RenderSession};
+use audiocloud_api::change::{ModifySession, ModifySessionSpec, PlaySession, RenderSession};
+use flume::{Receiver, Sender};
+use maplit::hashmap;
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::mem;
-use std::path::PathBuf;
 use std::str::FromStr;
 use tracing::*;
 
-use audiocloud_api::model::{ModelValue, MultiChannelTimestampedValue};
-use audiocloud_api::newtypes::{MixerId, TrackId};
+use audiocloud_api::model::{ModelValue, MultiChannelTimestampedValue, MultiChannelValue};
+use audiocloud_api::newtypes::{AppSessionId, DynamicId, ParameterId, TrackId};
 use audiocloud_api::session::SessionObjectId;
 use audiocloud_api::time::Timestamped;
 use reaper_medium::ProjectContext::CurrentProject;
@@ -29,12 +31,7 @@ pub struct AudiocloudControlSurface {
     reaper_tracks: Vec<ReaperTrackId>,
     tracks:        HashMap<TrackId, track::ReaperTrack>,
     play_state:    PlayState,
-}
-
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum ReaperTrackId {
-    Input(SessionObjectId),
-    Output(SessionObjectId),
+    session_id:    AppSessionId,
 }
 
 #[derive(Debug)]
@@ -44,11 +41,17 @@ pub enum EngineMode {
     Playing(PlaySession),
 }
 
-impl ToString for ReaperTrackId {
-    fn to_string(&self) -> String {
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ReaperTrackId {
+    Input(SessionObjectId),
+    Output(SessionObjectId),
+}
+
+impl Display for ReaperTrackId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ReaperTrackId::Input(obj_id) => format!("inp:{obj_id}"),
-            ReaperTrackId::Output(obj_id) => format!("out:{obj_id}"),
+            ReaperTrackId::Input(id) => write!(f, "inp:{id}"),
+            ReaperTrackId::Output(id) => write!(f, "out:{id}"),
         }
     }
 }
@@ -72,7 +75,7 @@ impl ControlSurface for AudiocloudControlSurface {
     fn run(&mut self) {
         while let Ok(msg) = self.rx_cmd.try_recv() {
             match msg {
-                AudioEngineCommand::SetSpec { session_id, spec } => self.set_sepc(spec),
+                AudioEngineCommand::SetSpec { session_id, spec } => self.set_spec(spec),
                 AudioEngineCommand::ModifySpec { session_id,
                                                  transaction, } => self.modify_spec(transaction),
                 AudioEngineCommand::SetDynamicParameters { session_id,
@@ -87,27 +90,7 @@ impl ControlSurface for AudiocloudControlSurface {
         }
 
         // take measurements from peak meters and send to integration task
-        let reaper = Reaper::get();
-        let mut metering = HashMap::new();
-
-        for track in 0..reaper.count_tracks(CurrentProject) {
-            let track = reaper.get_track(CurrentProject, track).unwrap();
-            let num_channels = unsafe { reaper.get_media_track_info_value(track, TrackAttributeKey::Nchan) as u32 };
-
-            let mcv = MultiChannelTimestampedValue::with_capacity(num_channels as usize);
-            for channel in 0..num_channels {
-                let volume = unsafe { reaper.track_get_peak_info(track, channel) }.get();
-                mcv.push(Some(Timestamped::new(ModelValue::Number(volume))));
-            }
-
-            let name = unsafe {
-                reaper.get_set_media_track_info_get_name(track, |name| ReaperTrackId::from_str(name.to_str()))
-            };
-
-            if let Some(Ok(track_id)) = name {
-                metering.insert(track_id, mcv);
-            }
-        }
+        let metering = self.get_track_metering();
 
         // send all the metering
         if let Err(err) = self.tx_mtr.try_send(metering) {
@@ -120,6 +103,42 @@ impl ControlSurface for AudiocloudControlSurface {
 }
 
 impl AudiocloudControlSurface {
+    pub fn new(session_id: AppSessionId,
+               spec: SessionSpec,
+               rx_cmd: Receiver<AudioEngineCommand>,
+               tx_evt: Sender<AudioEngineEvent>,
+               tx_mtr: Sender<HashMap<ReaperTrackId, MultiChannelTimestampedValue>>)
+               -> Self {
+        let play_state = Reaper::get().get_play_state_ex(CurrentProject);
+        let rv = Self { rx_cmd,
+                        tx_evt,
+                        tx_mtr,
+                        spec,
+                        mode: EngineMode::Stopped,
+                        reaper_tracks: vec![],
+                        tracks: hashmap! {},
+                        play_state,
+                        session_id };
+
+        rv
+    }
+
+    fn set_spec(&mut self, spec: SessionSpec) {
+        self.spec = spec;
+    }
+
+    fn modify_spec(&mut self, transaction: Vec<ModifySessionSpec>) {}
+
+    fn set_dynamic_parameters(&self, dynamic_id: DynamicId, parameters: HashMap<ParameterId, MultiChannelValue>) {}
+
+    fn start_render(&mut self, render: RenderSession) {
+        self.mode = EngineMode::Rendering(render);
+    }
+
+    fn start_play(&mut self, play: PlaySession) {
+        self.mode = EngineMode::Playing(play);
+    }
+
     fn stop(&mut self) {
         Reaper::get().on_stop_button_ex(CurrentProject);
     }
@@ -134,26 +153,33 @@ impl AudiocloudControlSurface {
             EngineMode::Rendering(render) => {
                 if stopped_after_play {
                     let success = current_pos >= render.segment.end() * 0.98;
-                    let path = self.get_last_media_item_path(&render.mixer_id);
-                    if let Some(path) = path && success {
-                        self.tx_evt.send(AudioEngineEvent::RenderingFinished { session_id: self.session_id.clone(), render_id: render.render_id.clone(), path });
-                    } else {
-                        if let Some(path) = path {
+                    let track_id = ReaperTrackId::Output(SessionObjectId::Mixer(render.mixer_id.clone()));
+                    let path = self.clear_track_media_items(&track_id);
+                    if let Some(path) = path {
+                        if success {
+                            self.tx_evt
+                                .send(AudioEngineEvent::RenderingFinished { session_id: self.session_id.clone(),
+                                                                            render_id: render.render_id.clone(),
+                                                                            path });
+                        } else {
                             let _ = std::fs::remove_file(&path);
                         }
-                        self.tx_evt.send(AudioEngineEvent::RenderingFailed {
-                            session_id: self.session_id.clone(),
-                            render_id: render.render_id.clone(),
-                            reason: format!("rendering interrupted")
-                        });
                     }
-                    self.cleanup_play(&render.mixer_id);
+
+                    if !success {
+                        self.tx_evt
+                            .send(AudioEngineEvent::RenderingFailed { session_id: self.session_id.clone(),
+                                                                      render_id:  render.render_id.clone(),
+                                                                      reason:     format!("rendering interrupted"), });
+                    }
+
+                    self.clear_all_tracks_parent_sends();
                     self.mode = EngineMode::Stopped;
                 }
             }
             EngineMode::Playing(playing) => {
                 if stopped_after_play {
-                    self.cleanup_play(&playing.mixer_id);
+                    self.clear_all_tracks_parent_sends();
                     self.mode = EngineMode::Stopped;
                 }
             }
@@ -162,20 +188,9 @@ impl AudiocloudControlSurface {
         self.play_state = new_play_state;
     }
 
-    fn cleanup_play(&mut self, mixer_id: &MixerId) {
-        self.set_track_master_send(ReaperTrackId::Output(SessionObjectId::Mixer(cur_mixer.clone())), false);
-    }
-
     fn set_track_master_send(&mut self, track_id: ReaperTrackId, send: bool) {
-        let index = self.reaper_tracks.iter().position(|id| {
-                                                 if let &track_id = id {
-                                                     cur_mixer == mixer_id
-                                                 } else {
-                                                     false
-                                                 }
-                                             });
-
-        let index = match index {
+        let reaper = Reaper::get();
+        let index = match self.get_track_index(&track_id) {
             None => {
                 warn!("Setting master send on track_id {track_id} but it does not exist anymore");
                 return;
@@ -183,9 +198,6 @@ impl AudiocloudControlSurface {
             Some(index) => index,
         };
 
-        let reaper = Reaper::get();
-
-        // "un-send to master"
         unsafe {
             if let Some(track) = reaper.get_track(CurrentProject, index as u32) {
                 reaper.set_media_track_info_value(track, TrackAttributeKey::MainSend, match send {
@@ -196,7 +208,9 @@ impl AudiocloudControlSurface {
         }
     }
 
-    fn get_last_media_item_path(&self, index: u32) -> Option<String> {
+    fn clear_track_media_items(&self, id: &ReaperTrackId) -> Option<String> {
+        let index = self.get_track_index(id)?;
+        let reaper = Reaper::get();
         if let Some(track) = reaper.get_track(CurrentProject, index as u32) {
             // find all media files
             let mut location = None;
@@ -221,5 +235,47 @@ impl AudiocloudControlSurface {
         } else {
             None
         }
+    }
+
+    fn clear_all_tracks_parent_sends(&self) {
+        let reaper = Reaper::get();
+        for i in 0.. {
+            match reaper.get_track(CurrentProject, i as u32) {
+                Some(track) => unsafe {
+                    reaper.set_media_track_info_value(track, TrackAttributeKey::MainSend, 0.0);
+                },
+                None => break,
+            }
+        }
+    }
+
+    fn get_track_index(&self, id: &ReaperTrackId) -> Option<usize> {
+        self.reaper_tracks.iter().position(|track_id| track_id == id)
+    }
+
+    fn get_track_metering(&self) -> HashMap<ReaperTrackId, MultiChannelTimestampedValue> {
+        let reaper = Reaper::get();
+        let mut metering = HashMap::new();
+
+        for track in 0..reaper.count_tracks(CurrentProject) {
+            let track = reaper.get_track(CurrentProject, track).unwrap();
+            let num_channels = unsafe { reaper.get_media_track_info_value(track, TrackAttributeKey::Nchan) as u32 };
+
+            let mcv = MultiChannelTimestampedValue::with_capacity(num_channels as usize);
+            for channel in 0..num_channels {
+                let volume = unsafe { reaper.track_get_peak_info(track, channel) }.get();
+                mcv.push(Some(Timestamped::new(ModelValue::Number(volume))));
+            }
+
+            let name = unsafe {
+                reaper.get_set_media_track_info_get_name(track, |name| ReaperTrackId::from_str(name.to_str()))
+            };
+
+            if let Some(Ok(track_id)) = name {
+                metering.insert(track_id, mcv);
+            }
+        }
+
+        metering
     }
 }
