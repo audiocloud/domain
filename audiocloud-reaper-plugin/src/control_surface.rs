@@ -28,7 +28,6 @@ pub mod track;
 pub struct AudiocloudControlSurface {
     rx_cmd:        flume::Receiver<ControlSurfaceCommandWithResultSender>,
     tx_evt:        flume::Sender<ControlSurfaceEvent>,
-    tx_mtr:        flume::Sender<HashMap<ReaperTrackId, MultiChannelTimestampedValue>>,
     spec:          SessionSpec,
     mode:          EngineMode,
     reaper_tracks: Vec<ReaperTrackId>,
@@ -89,8 +88,9 @@ impl ControlSurface for AudiocloudControlSurface {
         }
 
         // take measurements from peak meters and send to integration task
-        if let Err(err) = self.tx_mtr.try_send(self.get_track_metering()) {
-            warn!(%err, "Could not deliver metering");
+        let metering = ControlSurfaceEvent::Metering(self.get_track_metering());
+        if let Err(err) = self.tx_evt.try_send(metering) {
+            warn!(%err, "Could not send metering");
         }
 
         // update current play state from REAPER, update engine mode, emit events if needed
@@ -102,13 +102,11 @@ impl AudiocloudControlSurface {
     pub fn new(session_id: AppSessionId,
                spec: SessionSpec,
                rx_cmd: Receiver<ControlSurfaceCommandWithResultSender>,
-               tx_evt: Sender<ControlSurfaceEvent>,
-               tx_mtr: Sender<HashMap<ReaperTrackId, MultiChannelTimestampedValue>>)
+               tx_evt: Sender<ControlSurfaceEvent>)
                -> Self {
         let play_state = Reaper::get().get_play_state_ex(CurrentProject);
         let rv = Self { rx_cmd,
                         tx_evt,
-                        tx_mtr,
                         spec,
                         mode: EngineMode::Stopped,
                         reaper_tracks: vec![],
