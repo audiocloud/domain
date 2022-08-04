@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::*;
 
 use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
-use audiocloud_api::model::ModelValue;
+use audiocloud_api::model::{enumerate_multi_channel_value, enumerate_multi_channel_value_bool, ModelValue};
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_api::time::Timestamped;
 use audiocloud_models::netio::netio_4c::*;
@@ -78,10 +78,8 @@ impl Handler<Command> for Netio4cMocked {
             | InstanceDriverCommand::Rewind { .. } => return Err(InstanceDriverError::MediaNotPresent),
             InstanceDriverCommand::SetParameters(mut p) => {
                 if let Some(power) = p.remove(&params::POWER) {
-                    for (i, value) in power {
-                        if let Some(value) = value.to_bool() {
-                            self.state[i] = value;
-                        }
+                    for (i, value) in enumerate_multi_channel_value_bool(power) {
+                        self.state[i] = value;
                     }
                 }
 

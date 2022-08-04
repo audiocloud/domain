@@ -1,19 +1,31 @@
+use std::collections::HashMap;
+
 use audiocloud_api::{
-    audio_engine::CompressedAudio,
-    change::{PlaySession, RenderId, RenderSession},
+    audio_engine::{AudioEngineCommand, AudioEngineEvent, CompressedAudio},
+    change::PlayId,
+    model::MultiChannelTimestampedValue,
 };
+use flume::Sender;
+
+use crate::{control_surface::ReaperTrackId, streaming::StreamingConfig};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ControlSurfaceEvent {
-    RenderCancelled { render: RenderSession },
-    RenderSuccess { render: RenderSession, output: String },
-    RenderStart { render: RenderSession },
-    PlayingStart { play: PlaySession },
-    PlayingStopped { play: PlaySession },
-    Seek { play: PlaySession },
+    EngineEvent(AudioEngineEvent),
+    Metering(HashMap<ReaperTrackId, MultiChannelTimestampedValue>),
+    SetupStreaming(Option<StreamingConfig>),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum AudioStreamingEvent {
     CompressedAudio { audio: CompressedAudio },
 }
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ControlSurfaceCommand {
+    Engine(AudioEngineCommand),
+    StreamingSetupComplete(PlayId),
+    StreamingSetupError(PlayId, String),
+}
+
+pub type ControlSurfaceCommandWithResultSender = (ControlSurfaceCommand, Sender<anyhow::Result<()>>);

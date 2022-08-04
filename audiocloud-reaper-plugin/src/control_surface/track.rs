@@ -17,11 +17,36 @@ pub struct ReaperTrack {
     media:    HashMap<MediaId, ReaperTrackMedia>,
 }
 
+impl ReaperTrack {
+    pub fn new(track_id: TrackId, spec: SessionTrack) -> Self {
+        Self { uuid:     Uuid::new_v4(),
+               track_id: track_id.clone(),
+               spec:     spec.clone(),
+               media:    spec.media
+                             .clone()
+                             .into_iter()
+                             .map(|(k, v)| (k, ReaperTrackMedia::new(v)))
+                             .collect(), }
+    }
+
+    pub fn get_chunk(&self) -> anyhow::Result<String> {
+        Ok(ReaperTrackTemplate(self).render()?)
+    }
+}
+
 #[derive(Debug)]
 struct ReaperTrackMedia {
     uuid: Uuid,
     spec: SessionTrackMedia, // created from a SessionTrackMedia
     path: Option<PathBuf>,
+}
+
+impl ReaperTrackMedia {
+    pub fn new(spec: SessionTrackMedia) -> Self {
+        Self { uuid: Uuid::new_v4(),
+               spec: spec.clone(),
+               path: None, }
+    }
 }
 
 #[derive(Template)]
@@ -47,7 +72,7 @@ impl<'a> ReaperTrackTemplate<'a> {
 struct ReaperTrackMediaTemplate<'a>(&'a ReaperTrackMedia);
 
 impl<'a> ReaperTrackMediaTemplate<'a> {
-    fn uuid_string() -> String {
+    fn uuid_string(&self) -> String {
         reaper_uuid_string(&self.0.uuid)
     }
 
