@@ -126,7 +126,7 @@ impl AudiocloudControlSurface {
 
                 self.tx_evt.send(ControlSurfaceEvent::EngineEvent(event))?;
 
-                self.stop();
+                self.stop()?;
                 self.update_play_state();
             }
         }
@@ -230,14 +230,14 @@ impl AudiocloudControlSurface {
     }
 
     fn start_play(&mut self, play: PlaySession) -> anyhow::Result<()> {
+        self.stop()?;
+        self.update_play_state();
+
         let mixer_id = &play.mixer_id;
         let mixer = self.spec
             .mixers
             .get(&play.mixer_id)
             .ok_or_else(|| anyhow!("No such mixer {mixer_id}"))?;
-
-        self.stop()?;
-        self.update_play_state();
 
         self.tx_evt
             .send(ControlSurfaceEvent::SetupStreaming(Some(StreamingConfig {
@@ -247,7 +247,7 @@ impl AudiocloudControlSurface {
                 play_id: play.play_id.clone(),
             })))?;
 
-        self.set_track_master_send(&play.mixer_id.output_flow(), true)?;
+        self.set_track_master_send(&play.mixer_id.clone().output_flow(), true)?;
 
         self.mode = EngineMode::Playing(play);
 
@@ -273,7 +273,7 @@ impl AudiocloudControlSurface {
                     let success = current_pos >= render.segment.end() * 0.98;
                     let path = self.clear_track_media_items(&render.mixer_id.clone().output_flow());
 
-                    if let Some(path) = path {
+                    if let Ok(Some(path)) = path {
                         if success {
                             let _ = self.tx_evt
                                 .send(ControlSurfaceEvent::EngineEvent(AudioEngineEvent::RenderingFinished {
@@ -287,7 +287,7 @@ impl AudiocloudControlSurface {
                     }
 
                     if !success {
-                        self.tx_evt
+                        let _ = self.tx_evt
                             .send(ControlSurfaceEvent::EngineEvent(AudioEngineEvent::RenderingFailed {
                                 session_id: self.session_id.clone(),
                                 render_id: render.render_id.clone(),
@@ -295,13 +295,17 @@ impl AudiocloudControlSurface {
                             }));
                     }
 
-                    self.clear_all_tracks_parent_sends();
+                    if let Err(err) = self.clear_all_tracks_parent_sends() {
+                        warn!(%err, "Failed to clear all tracks parent sends");
+                    }
                     self.mode = EngineMode::Stopped;
                 }
             }
-            EngineMode::Playing(playing) => {
+            EngineMode::Playing(_) => {
                 if stopped_after_play {
-                    self.clear_all_tracks_parent_sends();
+                    if let Err(err) = self.clear_all_tracks_parent_sends() {
+                        warn!(%err, "Failed to clear all tracks parent sends");
+                    }
                     self.mode = EngineMode::Stopped;
                 }
             }
@@ -320,7 +324,7 @@ impl AudiocloudControlSurface {
                 reaper.set_media_track_info_value(track, TrackAttributeKey::MainSend, match send {
                     true => 1.0,
                     false => 0.0,
-                });
+                })?;
             } else {
                 return Err(anyhow!("Setting master send on track {track_id} but it does not exist"));
             }
@@ -339,7 +343,7 @@ impl AudiocloudControlSurface {
                 reaper.set_media_track_info_value(track, TrackAttributeKey::RecArm, match rec_arm {
                     true => 1.0,
                     false => 0.0,
-                });
+                })?;
             } else {
                 return Err(anyhow!("Setting master send on track {track_id} but it does not exist"));
             }
@@ -348,9 +352,10 @@ impl AudiocloudControlSurface {
         Ok(())
     }
 
-    fn clear_track_media_items(&self, id: &SessionFlowId) -> Option<String> {
-        let index = self.get_track_index(id)?;
+    fn clear_track_media_items(&self, id: &SessionFlowId) -> anyhow::Result<Option<String>> {
+        let index = self.get_track_index(id).ok_or_else(|| anyhow!("Could not locate track with media items {id}"))?;
         let reaper = Reaper::get();
+
         if let Some(track) = reaper.get_track(CurrentProject, index as u32) {
             // find all media files
             let mut location = None;
@@ -367,26 +372,28 @@ impl AudiocloudControlSurface {
                     }
                 }
                 unsafe {
-                    reaper.delete_track_media_item(track, media_item);
+                    reaper.delete_track_media_item(track, media_item)?;
                 }
             }
 
-            location
+            Ok(location)
         } else {
-            None
+            Ok(None)
         }
     }
 
-    fn clear_all_tracks_parent_sends(&self) {
+    fn clear_all_tracks_parent_sends(&self) -> anyhow::Result<()> {
         let reaper = Reaper::get();
         for i in 0.. {
             match reaper.get_track(CurrentProject, i as u32) {
                 Some(track) => unsafe {
-                    reaper.set_media_track_info_value(track, TrackAttributeKey::MainSend, 0.0);
+                    reaper.set_media_track_info_value(track, TrackAttributeKey::MainSend, 0.0)?;
                 },
                 None => break,
             }
         }
+
+        Ok(())
     }
 
     fn get_track_index(&self, id: &SessionFlowId) -> Option<usize> {
