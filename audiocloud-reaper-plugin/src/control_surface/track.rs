@@ -3,30 +3,31 @@ use std::{collections::HashMap, path::PathBuf};
 use askama::Template;
 use audiocloud_api::{
     newtypes::{MediaId, TrackId},
-    session::{SessionObjectId, SessionTrack, SessionTrackMedia, SessionTrackMediaFormat},
+    session::{SessionTrack, SessionTrackMedia, SessionTrackMediaFormat},
 };
 use uuid::Uuid;
 
-use super::ReaperTrackId;
-
 #[derive(Debug)]
 pub struct ReaperTrack {
-    uuid:     Uuid,
+    uuid: Uuid,
     track_id: TrackId,
-    spec:     SessionTrack, // created from a SessionTrack
-    media:    HashMap<MediaId, ReaperTrackMedia>,
+    spec: SessionTrack,
+    // created from a SessionTrack
+    media: HashMap<MediaId, ReaperTrackMedia>,
 }
 
 impl ReaperTrack {
     pub fn new(track_id: TrackId, spec: SessionTrack) -> Self {
-        Self { uuid:     Uuid::new_v4(),
-               track_id: track_id.clone(),
-               spec:     spec.clone(),
-               media:    spec.media
-                             .clone()
-                             .into_iter()
-                             .map(|(k, v)| (k, ReaperTrackMedia::new(v)))
-                             .collect(), }
+        Self {
+            uuid: Uuid::new_v4(),
+            track_id: track_id.clone(),
+            spec: spec.clone(),
+            media: spec.media
+                .clone()
+                .into_iter()
+                .map(|(k, v)| (k, ReaperTrackMedia::new(v)))
+                .collect(),
+        }
     }
 
     pub fn get_chunk(&self) -> anyhow::Result<String> {
@@ -37,15 +38,18 @@ impl ReaperTrack {
 #[derive(Debug)]
 struct ReaperTrackMedia {
     uuid: Uuid,
-    spec: SessionTrackMedia, // created from a SessionTrackMedia
+    spec: SessionTrackMedia,
+    // created from a SessionTrackMedia
     path: Option<PathBuf>,
 }
 
 impl ReaperTrackMedia {
     pub fn new(spec: SessionTrackMedia) -> Self {
-        Self { uuid: Uuid::new_v4(),
-               spec: spec.clone(),
-               path: None, }
+        Self {
+            uuid: Uuid::new_v4(),
+            spec: spec.clone(),
+            path: None,
+        }
     }
 }
 
@@ -55,7 +59,7 @@ struct ReaperTrackTemplate<'a>(&'a ReaperTrack);
 
 impl<'a> ReaperTrackTemplate<'a> {
     fn quoted_name(&self) -> String {
-        quote(ReaperTrackId::Output(SessionObjectId::Track(self.0.track_id.clone())).to_string())
+        quote(self.0.track_id.clone().flow().to_string())
     }
 
     fn uuid_string(&self) -> String {

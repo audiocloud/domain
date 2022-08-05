@@ -1,18 +1,20 @@
 use std::collections::HashMap;
 
+use flume::Sender;
+
 use audiocloud_api::{
     audio_engine::{AudioEngineCommand, AudioEngineEvent, CompressedAudio},
     change::PlayId,
     model::MultiChannelTimestampedValue,
 };
-use flume::Sender;
+use audiocloud_api::session::SessionFlowId;
 
-use crate::{control_surface::ReaperTrackId, streaming::StreamingConfig};
+use crate::streaming::StreamingConfig;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum ControlSurfaceEvent {
     EngineEvent(AudioEngineEvent),
-    Metering(HashMap<ReaperTrackId, MultiChannelTimestampedValue>),
+    Metering(HashMap<SessionFlowId, MultiChannelTimestampedValue>),
     SetupStreaming(Option<StreamingConfig>),
 }
 

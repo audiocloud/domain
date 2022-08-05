@@ -1,15 +1,19 @@
 use std::cell::Cell;
 use std::env;
+use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 
-use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent, CompressedAudio};
-use reaper_low::{static_vst_plugin_context, PluginContext};
+use reaper_low::{PluginContext, static_vst_plugin_context};
 use reaper_medium::{Reaper, ReaperSession};
 use tracing::*;
 use vst::prelude::*;
 
+use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent, CompressedAudio};
+use audiocloud_api::newtypes::AppSessionId;
+
 use crate::control_surface::AudiocloudControlSurface;
+use crate::events::{ControlSurfaceCommand, ControlSurfaceCommandWithResultSender, ControlSurfaceEvent};
 
 pub struct AudiocloudPlugin {}
 
@@ -18,10 +22,12 @@ const SESSION_WRAPPER: Cell<Option<ReaperSession>> = Cell::new(None);
 
 impl Plugin for AudiocloudPlugin {
     fn get_info(&self) -> Info {
-        Info { name: "Audiocloud Plugin".to_string(),
-               unique_id: 0xbad1337,
-               f64_precision: true,
-               ..Default::default() }
+        Info {
+            name: "Audiocloud Plugin".to_string(),
+            unique_id: 0xbad1337,
+            f64_precision: true,
+            ..Default::default()
+        }
     }
 
     fn new(host: HostCallback) -> Self
@@ -40,15 +46,21 @@ impl Plugin for AudiocloudPlugin {
 
         Reaper::make_available_globally(reaper);
 
-        SESSION_WRAPPER.set(Some(session));
-
-        let (tx_cmd, rx_cmd) = flume::unbounded::<AudioEngineCommand>();
-        let (tx_evt, rx_evt) = flume::unbounded::<AudioEngineEvent>();
+        let (tx_cmd, rx_cmd) = flume::unbounded::<ControlSurfaceCommandWithResultSender>();
+        let (tx_evt, rx_evt) = flume::unbounded::<ControlSurfaceEvent>();
         let (tx_aud, rx_aud) = flume::unbounded::<CompressedAudio>();
 
-        session.plugin_register_add_csurf_inst(Box::new(AudiocloudControlSurface::new(rx_cmd, tx_evt)));
+        let session_id = env::var("SESSION_ID").expect("SESSION_ID is set");
+        let spec = env::var("SESSION_SPEC").expect("SESSION_SPEC is set");
 
-        Self { tx_aud }
+        let session_id = AppSessionId::from_str(&session_id).expect("SESSION_ID is valid");
+        let spec = serde_json::from_str(&spec).expect("SESSION_SPEC is valid JSON");
+
+        session.plugin_register_add_csurf_inst(Box::new(AudiocloudControlSurface::new(session_id, spec, rx_cmd, tx_evt))).expect("REAPER plugin register success");
+
+        SESSION_WRAPPER.set(Some(session));
+
+        Self {}
     }
 }
 
