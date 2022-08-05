@@ -153,7 +153,7 @@ impl WebSocketActor {
             DomainSessionCommand::Modify { modifications, .. } => {
                 for modification in modifications {
                     match modification {
-                        ModifySessionSpec::SetInputValues { .. }
+                        ModifySessionSpec::SetConnectionParameterValues { .. }
                         | ModifySessionSpec::SetFixedInstanceParameterValues { .. }
                         | ModifySessionSpec::SetDynamicInstanceParameterValues { .. } => {
                             if !self.security_can(&session_id, |s| s.parameters) {
