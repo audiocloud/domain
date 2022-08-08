@@ -100,6 +100,13 @@ impl ReaperAudioEngine {
                     session.on_instances_updated(&instances)?;
                 }
             }
+            AudioEngineCommand::Close { session_id } => {
+                if let Some(session) = self.sessions.remove(&session_id) {
+                    session.delete()?;
+                } else {
+                    return Err(anyhow!("Session not found"));
+                }
+            }
         }
         Ok(())
     }

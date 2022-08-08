@@ -19,6 +19,10 @@ use crate::audio_engine::ReaperAudioEngine;
 use crate::events::AudioEngineCommandWithResultSender;
 
 pub struct AudioCloudPlugin {
+    activation: Option<AudioCloudPluginActivation>,
+}
+
+struct AudioCloudPluginActivation {
     id:        AppSessionId,
     rx_plugin: flume::Receiver<()>,
     tx_engine: flume::Sender<()>,
@@ -100,23 +104,30 @@ impl Plugin for AudioCloudPlugin {
                             .expect("REAPER project enum success")
                             .project;
 
-        let id = unsafe {
+        let maybe_id = unsafe {
             let mut notes = [0i8; 1024];
             reaper.low()
                   .GetSetProjectNotes(project.as_ptr(), false, notes.as_mut_ptr(), notes.len() as i32);
+
             let cstr = CString::from_raw(notes.as_mut_ptr());
 
-            AppSessionId::from_str(cstr.to_string_lossy().as_ref()).expect("AppSessionId parse success")
+            AppSessionId::from_str(cstr.to_string_lossy().as_ref())
         };
 
         reaper.show_console_msg("Streaming plugin initializing\n");
 
-        let (tx_plugin, rx_plugin) = flume::unbounded::<()>();
-        let (tx_engine, rx_engine) = flume::unbounded::<()>();
+        let activation = maybe_id.ok().map(|id| {
+                                          let (tx_plugin, rx_plugin) = flume::unbounded();
+                                          let (tx_engine, rx_engine) = flume::unbounded();
 
-        Self { id,
-               rx_plugin,
-               tx_engine }
+                                          ReaperAudioEngine::register_plugin(id.clone(), tx_plugin, rx_engine);
+
+                                          AudioCloudPluginActivation { id,
+                                                                       rx_plugin,
+                                                                       tx_engine }
+                                      });
+
+        Self { activation }
     }
 
     fn set_sample_rate(&mut self, rate: f32) {}
@@ -132,8 +143,8 @@ impl Plugin for AudioCloudPlugin {
 
 impl Drop for AudioCloudPlugin {
     fn drop(&mut self) {
-        if let Some(comm) = &self.comm {
-            ReaperAudioEngine::deregister_plugin(&comm.id);
+        if let Some(activation) = &self.activation {
+            ReaperAudioEngine::deregister_plugin(&activation.id);
         }
         Reaper::get().show_console_msg("Streaming plugin dropping\n");
     }

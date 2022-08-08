@@ -5,8 +5,10 @@ use askama::Template;
 use reaper_medium::{MediaTrack, ProjectContext};
 use uuid::Uuid;
 
-use audiocloud_api::newtypes::{AppMediaObjectId, MediaId, TrackId};
-use audiocloud_api::session::{SessionFlowId, SessionTrack};
+use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaId, MediaObjectId, TrackId};
+use audiocloud_api::session::{
+    SessionFlowId, SessionTimeSegment, SessionTrack, SessionTrackChannels, SessionTrackMedia, SessionTrackMediaFormat,
+};
 
 use crate::audio_engine;
 use crate::audio_engine::media_item::{AudioEngineMediaItem, AudioEngineMediaItemTemplate};
@@ -16,6 +18,7 @@ use crate::audio_engine::{append_track, delete_track, set_track_chunk};
 #[derive(Debug)]
 pub struct AudioEngineMediaTrack {
     id:       Uuid,
+    app_id:   AppId,
     track_id: TrackId,
     flow_id:  SessionFlowId,
     track:    MediaTrack,
@@ -26,25 +29,36 @@ pub struct AudioEngineMediaTrack {
 
 impl AudioEngineMediaTrack {
     pub fn new(project: &AudioEngineProject,
+               app_id: AppId,
                track_id: TrackId,
                spec: SessionTrack,
                existing_media: &HashMap<AppMediaObjectId, String>)
                -> anyhow::Result<Self> {
-        let media = Default::default();
-
         project.focus()?;
+
+        let root_dir = project.media_root_dir();
 
         let flow_id = SessionFlowId::TrackOutput(track_id.clone());
 
         let (track, id) = append_track(&flow_id, project.context())?;
 
-        Ok(Self { id,
-                  track_id,
-                  flow_id,
-                  track,
-                  media,
-                  spec,
-                  root_dir: project.media_root_dir() })
+        let mut media = HashMap::new();
+
+        for (media_id, media_spec) in spec.media.clone() {
+            media.insert(media_id.clone(),
+                         AudioEngineMediaItem::new(track, &root_dir, &app_id, media_id, media_spec, existing_media)?);
+        }
+
+        let mut rv = Self { id,
+                            app_id,
+                            track_id,
+                            flow_id,
+                            track,
+                            media,
+                            spec,
+                            root_dir };
+
+        Ok(rv)
     }
 
     pub fn delete(self, context: ProjectContext) {
@@ -71,6 +85,25 @@ impl AudioEngineMediaTrack {
         }
 
         rv
+    }
+
+    pub fn add_media(&mut self,
+                     media_id: MediaId,
+                     spec: SessionTrackMedia,
+                     media: &HashMap<AppMediaObjectId, String>)
+                     -> anyhow::Result<bool> {
+        self.delete_media(&media_id);
+
+        self.media.insert(media_id.clone(),
+                          AudioEngineMediaItem::new(self.track, &self.root_dir, &self.app_id, media_id, spec, media)?);
+
+        Ok(true)
+    }
+
+    pub fn delete_media(&mut self, media_id: &MediaId) {
+        if let Some(media) = self.media.remove(media_id) {
+            media.delete();
+        }
     }
 
     pub fn update_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<()> {

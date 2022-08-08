@@ -1,6 +1,6 @@
 <REAPER_PROJECT 0.1 "6.61/macOS-arm64" 1659941138
   <NOTES 2
-    |{{ id }}
+    |{{ session_id }}
   >
   RIPPLE 0
   GROUPOVERRIDE 0 0 0

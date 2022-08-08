@@ -42,6 +42,7 @@ const CMD_TRANSPORT_RECORD: CommandId = CommandId::new(1013);
 struct AudioEngineProjectTemplate<'a> {
     spec:       &'a SessionSpec,
     session_id: &'a AppSessionId,
+    media_root: String,
 }
 
 impl AudioEngineProject {
@@ -56,7 +57,8 @@ impl AudioEngineProject {
         let session_path = temp_dir.path().join("session.rpp");
         fs::write(&session_path,
                   AudioEngineProjectTemplate { spec:       &spec,
-                                               session_id: &id, }.render()?)?;
+                                               session_id: &id,
+                                               media_root: media_root.to_string_lossy().to_string(), }.render()?)?;
 
         unsafe {
             let path_as_cstr = CString::new(format!("noprompt:{}", session_path.to_string_lossy()))?;
@@ -79,6 +81,10 @@ impl AudioEngineProject {
         rv.set_spec(spec, instances, media)?;
 
         Ok(rv)
+    }
+
+    pub fn delete(&self) -> anyhow::Result<()> {
+        Ok(())
     }
 
     pub fn context(&self) -> ProjectContext {
@@ -161,8 +167,8 @@ impl AudioEngineProject {
                      spec: SessionTrack,
                      media: &HashMap<AppMediaObjectId, String>)
                      -> anyhow::Result<()> {
-        self.tracks
-            .insert(id.clone(), AudioEngineMediaTrack::new(self, id.clone(), spec, media)?);
+        self.tracks.insert(id.clone(),
+                           AudioEngineMediaTrack::new(self, self.id.app_id.clone(), id.clone(), spec, media)?);
 
         Ok(())
     }
@@ -342,22 +348,9 @@ impl AudioEngineProject {
 
                 dirty.insert(SessionFlowId::TrackOutput(track_id));
             }
-            ModifySessionSpec::AddTrackMedia { track_id,
-                                               media_id,
-                                               channels,
-                                               media_segment,
-                                               timeline_segment,
-                                               object_id,
-                                               format, } => {
+            ModifySessionSpec::AddTrackMedia { track_id, spec } => {
                 if let Some(track) = self.tracks.get_mut(&track_id) {
-                    if track.add_media(media_id,
-                                       channels,
-                                       media_segment,
-                                       timeline_segment,
-                                       object_id,
-                                       format,
-                                       media)?
-                    {
+                    if track.add_media(media_id, spec, media)? {
                         dirty.insert(track.get_flow_id().clone());
                     }
                 } else {
@@ -380,7 +373,7 @@ impl AudioEngineProject {
             }
             ModifySessionSpec::DeleteTrackMedia { track_id, media_id } => {
                 if let Some(track) = self.tracks.get_mut(&track_id) {
-                    if track.delete_media(media_id)? {
+                    if track.delete_media(&media_id)? {
                         dirty.insert(track.get_flow_id().clone());
                     }
                 } else {
