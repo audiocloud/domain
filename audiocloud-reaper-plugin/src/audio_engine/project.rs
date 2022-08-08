@@ -1,21 +1,30 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fs;
 use std::path::PathBuf;
 use std::ptr::null_mut;
 
 use anyhow::anyhow;
 use askama::Template;
+use cstr::cstr;
 use reaper_medium::ProjectContext::CurrentProject;
-use reaper_medium::{ChunkCacheHint, CommandId, ProjectContext, ProjectRef, ReaProject, Reaper};
+use reaper_medium::{
+    ChunkCacheHint, CommandId, EditMode, MediaTrack, ProjectContext, ProjectRef, ReaProject, Reaper, ReaperPanValue,
+    ReaperString, ReaperVolumeValue, TrackSendAttributeKey, TrackSendCategory,
+};
 use tempdir::TempDir;
 use tracing::*;
 
 use audiocloud_api::change::{ModifySessionSpec, PlaySession, RenderSession};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::cloud::domains::InstanceRouting;
-use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId, FixedId, FixedInstanceId, MixerId, TrackId};
-use audiocloud_api::session::{SessionConnection, SessionFixedInstance, SessionFlowId, SessionMixer, SessionTrack};
+use audiocloud_api::newtypes::{
+    AppMediaObjectId, AppSessionId, ConnectionId, FixedId, FixedInstanceId, MixerId, TrackId,
+};
+use audiocloud_api::session::{
+    ConnectionValues, SessionConnection, SessionFixedInstance, SessionFlowId, SessionMixer, SessionTrack,
+};
 
 use crate::audio_engine::fixed_instance::AudioEngineFixedInstance;
 use crate::audio_engine::media_track::AudioEngineMediaTrack;
@@ -120,8 +129,10 @@ impl AudioEngineProject {
         Ok(())
     }
 
-    pub fn flows_to<'a>(&'a self, flow: &'a SessionFlowId) -> impl Iterator<Item = &SessionConnection> + 'a {
-        self.spec.connections.values().filter(move |conn| &conn.to == flow)
+    pub fn flows_to<'a>(&'a self,
+                        flow: &'a SessionFlowId)
+                        -> impl Iterator<Item = (&ConnectionId, &SessionConnection)> + 'a {
+        self.spec.connections.iter().filter(move |(_, conn)| &conn.to == flow)
     }
 
     pub fn fixed_input_track_index(&self, fixed_id: &FixedId) -> Option<usize> {
@@ -401,11 +412,25 @@ impl AudioEngineProject {
             ModifySessionSpec::DeleteMixer { mixer_id } => {
                 self.delete_mixer(&mixer_id);
             }
-            ModifySessionSpec::DeleteFixedInstance { .. } => {}
+            ModifySessionSpec::DeleteFixedInstance { fixed_id } => {
+                self.delete_fixed_instance(fixed_id)?;
+            }
             ModifySessionSpec::DeleteDynamicInstance { .. } => {}
-            ModifySessionSpec::DeleteConnection { .. } => {}
-            ModifySessionSpec::AddConnection { .. } => {}
-            ModifySessionSpec::SetConnectionParameterValues { .. } => {}
+            ModifySessionSpec::DeleteConnection { connection_id } => {
+                if let Some(connection) = self.spec.connections.remove(&connection_id) {
+                    dirty.insert(connection.to.clone());
+                }
+            }
+            ModifySessionSpec::AddConnection { to, .. } => {
+                dirty.insert(to);
+            }
+            ModifySessionSpec::SetConnectionParameterValues { connection_id, values } => {
+                if let Some(connection) = self.spec.connections.get_mut(&connection_id) {
+                    self.set_parameter_values(&connection.to, &connection_id, values);
+                } else {
+                    return Err(anyhow!("connection {connection_id} not found"));
+                }
+            }
             ModifySessionSpec::SetFixedInstanceParameterValues { .. } => {}
             ModifySessionSpec::SetDynamicInstanceParameterValues { .. } => {}
         }
@@ -461,4 +486,68 @@ impl AudioEngineProject {
 
         Ok(())
     }
+
+    fn set_parameter_values(&self,
+                            target: &SessionFlowId,
+                            id: &ConnectionId,
+                            values: ConnectionValues)
+                            -> anyhow::Result<()> {
+        let track =
+            match target {
+                SessionFlowId::MixerInput(mixer_id) => self.mixers.get(mixer_id).map(|mixer| mixer.get_input_track()),
+                SessionFlowId::FixedInstanceInput(fixed_id) => {
+                    self.fixed_instances
+                        .get(fixed_id)
+                        .map(|fixed_instance| fixed_instance.get_input_track())
+                }
+                other => return Err(anyhow!("Unsupported target {other}")),
+            }.ok_or_else(|| anyhow!("Connection target {target} not found"))?;
+
+        let index = get_track_receive_index(track, id).ok_or_else(|| {
+                                                          anyhow!("Connection not found on target {target} input track")
+                                                      })?;
+
+        let reaper = Reaper::get();
+
+        // TODO: if we need any dB conversions, now is a good time :)
+
+        if let Some(volume) = values.volume {
+            reaper.set_track_send_ui_vol(track, index, ReaperVolumeValue::new(volume), EditMode::NormalTweak);
+        }
+
+        if let Some(pan) = values.pan {
+            reaper.set_track_send_ui_pan(track, index, ReaperPanValue::new(pan), EditMode::NormalTweak);
+        }
+
+        Ok(())
+    }
+}
+
+fn get_track_receive_index(track: MediaTrack, id: &ConnectionId) -> Option<usize> {
+    const P_EXT_ID: &'static CStr = cstr!("P_EXT:ID");
+
+    let reaper = Reaper::get();
+
+    for i in 0..reaper.get_track_num_sends(track, TrackSendCategory::Receive) {
+        let mut buffer = [0i8; 256];
+        unsafe {
+            if reaper.low().GetSetTrackSendInfo_String(track.as_ptr(),
+                                                       0,
+                                                       i,
+                                                       P_EXT_ID.as_ptr(),
+                                                       buffer.as_mut_ptr(),
+                                                       false)
+            {
+                let ext_id = CStr::from_bytes_with_nul(&buffer[..] as &[u8]).unwrap()
+                                                                            .to_str()
+                                                                            .unwrap();
+
+                if ext_id == id.as_str() {
+                    return Some(i as usize);
+                }
+            }
+        }
+    }
+
+    None
 }

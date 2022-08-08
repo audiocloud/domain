@@ -34,15 +34,17 @@ impl AudioEngineMediaItem {
                media: &HashMap<AppMediaObjectId, String>)
                -> anyhow::Result<Self> {
         let object_id = spec.object_id.clone().for_app(app_id.clone());
+
         let path = media.get(&object_id)
                         .map(|path| media_root.join(path).to_string_lossy().to_string());
 
         let reaper = Reaper::get();
+
         let item = reaper.add_media_item_to_track(track)?;
         let take = reaper.add_take_to_media_item(item)?;
 
         let item_id = get_media_item_uuid(item)?;
-        let take_id = get_media_item_take_uuid(item)?;
+        let take_id = get_media_item_take_uuid(take)?;
 
         Ok(Self { media_id,
                   object_id,
@@ -55,7 +57,7 @@ impl AudioEngineMediaItem {
                   path })
     }
 
-    pub fn delete(&mut self) -> anyhow::Result<()> {
+    pub fn delete(mut self) -> anyhow::Result<()> {
         let reaper = Reaper::get();
         reaper.delete_track_media_item(self.track, self.item)?;
 

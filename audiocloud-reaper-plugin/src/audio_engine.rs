@@ -11,7 +11,7 @@ use uuid::Uuid;
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::cloud::domains::InstanceRouting;
-use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId, FixedInstanceId};
+use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId, ConnectionId, FixedInstanceId};
 use audiocloud_api::session::{MixerChannels, SessionConnection, SessionFlowId};
 use project::AudioEngineProject;
 
@@ -66,10 +66,9 @@ impl ReaperAudioEngine {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            AudioEngineCommand::SetDynamicParameters { session_id,
-                                                       dynamic_id,
-                                                       parameters, } => {
-                if let Some(session) = self.sessions.get_mut(&session_id) {
+            AudioEngineCommand::SetDynamicParameters { session_id, .. } => {
+                if let Some(_) = self.sessions.get_mut(&session_id) {
+                    // TODO: implement dynamic parameters
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
@@ -167,13 +166,16 @@ pub fn beautify_chunk(chunk: String) -> String {
 #[derive(Template)]
 #[template(path = "audio_engine/auxrecv_connection.txt")]
 struct ConnectionTemplate<'a> {
+    id:         &'a ConnectionId,
     project:    &'a AudioEngineProject,
     connection: &'a SessionConnection,
 }
 
 impl<'a> ConnectionTemplate<'a> {
-    pub fn new(project: &'a AudioEngineProject, connection: &'a SessionConnection) -> Self {
-        Self { project, connection }
+    pub fn new(project: &'a AudioEngineProject, id: &'a ConnectionId, connection: &'a SessionConnection) -> Self {
+        Self { id,
+               project,
+               connection }
     }
 
     fn source_reaper_channel(&self) -> i32 {

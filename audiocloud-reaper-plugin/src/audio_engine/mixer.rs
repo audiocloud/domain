@@ -57,6 +57,10 @@ impl AudioEngineMixer {
         &self.output_flow_id
     }
 
+    pub fn get_input_track(&self) -> MediaTrack {
+        self.input_track
+    }
+
     pub fn get_input_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<String> {
         Ok(beautify_chunk(AudioEngineMixerInputTemplate { project, mixer: self }.render()?))
     }

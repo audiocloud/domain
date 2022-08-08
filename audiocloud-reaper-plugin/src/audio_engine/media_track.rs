@@ -92,7 +92,7 @@ impl AudioEngineMediaTrack {
                      spec: SessionTrackMedia,
                      media: &HashMap<AppMediaObjectId, String>)
                      -> anyhow::Result<bool> {
-        self.delete_media(&media_id);
+        self.delete_media(&media_id)?;
 
         self.media.insert(media_id.clone(),
                           AudioEngineMediaItem::new(self.track, &self.root_dir, &self.app_id, media_id, spec, media)?);
@@ -100,10 +100,12 @@ impl AudioEngineMediaTrack {
         Ok(true)
     }
 
-    pub fn delete_media(&mut self, media_id: &MediaId) {
-        if let Some(media) = self.media.remove(media_id) {
-            media.delete();
+    pub fn delete_media(&mut self, media_id: &MediaId) -> anyhow::Result<()> {
+        if let Some(mut media) = self.media.remove(media_id) {
+            media.delete()?;
         }
+
+        Ok(())
     }
 
     pub fn update_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<()> {

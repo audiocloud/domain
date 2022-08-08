@@ -76,6 +76,10 @@ impl AudioEngineFixedInstance {
         &self.return_flow_id
     }
 
+    pub fn get_input_track(&self) -> MediaTrack {
+        self.input_track
+    }
+
     fn use_reainsert(&self) -> bool {
         if let Some(routing) = &self.routing {
             routing.send_count <= 2 && routing.return_count <= 2
