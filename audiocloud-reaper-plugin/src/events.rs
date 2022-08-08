@@ -2,12 +2,11 @@ use std::collections::HashMap;
 
 use flume::Sender;
 
+use audiocloud_api::session::SessionFlowId;
 use audiocloud_api::{
     audio_engine::{AudioEngineCommand, AudioEngineEvent, CompressedAudio},
-    change::PlayId,
     model::MultiChannelTimestampedValue,
 };
-use audiocloud_api::session::SessionFlowId;
 
 use crate::streaming::StreamingConfig;
 
@@ -23,11 +22,4 @@ pub enum AudioStreamingEvent {
     CompressedAudio { audio: CompressedAudio },
 }
 
-#[derive(Debug, PartialEq, Clone)]
-pub enum ControlSurfaceCommand {
-    Engine(AudioEngineCommand),
-    StreamingSetupComplete(PlayId),
-    StreamingSetupError(PlayId, String),
-}
-
-pub type ControlSurfaceCommandWithResultSender = (ControlSurfaceCommand, Sender<anyhow::Result<()>>);
+pub type AudioEngineCommandWithResultSender = (AudioEngineCommand, Sender<anyhow::Result<()>>);

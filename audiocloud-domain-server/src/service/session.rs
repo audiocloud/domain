@@ -129,7 +129,7 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                                                                render_id,
                                                                path });
             }
-            AudioEngineEvent::Exit { .. } => {
+            AudioEngineEvent::Error { .. } => {
                 self.engine_loaded = false;
             }
         }
