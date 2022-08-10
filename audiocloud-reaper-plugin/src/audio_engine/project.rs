@@ -46,16 +46,16 @@ enum ProjectPlayState {
 
 #[derive(Debug)]
 pub struct AudioEngineProject {
-    id:              AppSessionId,
-    project:         ReaProject,
-    tracks:          HashMap<TrackId, AudioEngineMediaTrack>,
-    fixed_instances: HashMap<FixedId, AudioEngineFixedInstance>,
-    mixers:          HashMap<MixerId, AudioEngineMixer>,
-    spec:            SessionSpec,
-    media_root:      PathBuf,
-    temp_dir:        TempDir,
-    session_path:    PathBuf,
-    play_state:      Timestamped<ProjectPlayState>,
+    id:               AppSessionId,
+    project:          ReaProject,
+    tracks:           HashMap<TrackId, AudioEngineMediaTrack>,
+    fixed_instances:  HashMap<FixedId, AudioEngineFixedInstance>,
+    mixers:           HashMap<MixerId, AudioEngineMixer>,
+    spec:             SessionSpec,
+    media_root:       PathBuf,
+    play_state:       Timestamped<ProjectPlayState>,
+    pub temp_dir:     TempDir,
+    pub session_path: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -645,7 +645,7 @@ impl AudioEngineProject {
                           .ok_or_else(|| anyhow!("Track could not be loaded"))?;
 
         unsafe {
-            reaper.set_track_state_chunk(track, chunk.as_str(), ChunkCacheHint::NormalMode);
+            reaper.set_track_state_chunk(track, chunk.as_str(), ChunkCacheHint::NormalMode)?;
         }
 
         Ok(())
@@ -678,13 +678,13 @@ impl AudioEngineProject {
 
         if let Some(volume) = values.volume {
             unsafe {
-                reaper.set_track_send_ui_vol(track, index, ReaperVolumeValue::new(volume), EditMode::NormalTweak);
+                reaper.set_track_send_ui_vol(track, index, ReaperVolumeValue::new(volume), EditMode::NormalTweak)?;
             }
         }
 
         if let Some(pan) = values.pan {
             unsafe {
-                reaper.set_track_send_ui_pan(track, index, ReaperPanValue::new(pan), EditMode::NormalTweak);
+                reaper.set_track_send_ui_pan(track, index, ReaperPanValue::new(pan), EditMode::NormalTweak)?;
             }
         }
 
@@ -762,10 +762,9 @@ fn get_track_receive_index(track: MediaTrack, id: &ConnectionId) -> Option<usize
     None
 }
 
-fn set_track_master_send(track: MediaTrack, send: bool) {
-    let reaper = Reaper::get();
+pub fn set_track_master_send(track: MediaTrack, mut send: bool) {
     unsafe {
-        reaper.get_set_media_track_info(track, TrackAttributeKey::MainSend, &send as *const _ as _);
+        Reaper::get().get_set_media_track_info(track, TrackAttributeKey::MainSend, &mut send as *mut _ as _);
     }
 }
 

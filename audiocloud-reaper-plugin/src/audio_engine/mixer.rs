@@ -4,6 +4,7 @@ use std::path::PathBuf;
 
 use askama::Template;
 use reaper_medium::{MediaTrack, ProjectContext, Reaper, TrackAttributeKey};
+use tracing::warn;
 use uuid::Uuid;
 
 use audiocloud_api::change::RenderSession;
@@ -11,7 +12,9 @@ use audiocloud_api::model::MultiChannelValue;
 use audiocloud_api::newtypes::MixerId;
 use audiocloud_api::session::{SessionFlowId, SessionMixer};
 
-use crate::audio_engine::project::{get_track_peak_meters, AudioEngineProject, AudioEngineProjectTemplateSnapshot};
+use crate::audio_engine::project::{
+    get_track_peak_meters, set_track_master_send, AudioEngineProject, AudioEngineProjectTemplateSnapshot,
+};
 use crate::audio_engine::ConnectionTemplate;
 use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk};
 
@@ -89,12 +92,8 @@ impl AudioEngineMixer {
                      get_track_peak_meters(self.input_track, self.spec.input_channels));
     }
 
-    pub fn set_master_send(&mut self, mut master_send: bool) {
-        unsafe {
-            Reaper::get().get_set_media_track_info(self.output_track,
-                                                   TrackAttributeKey::MainSend,
-                                                   &mut master_send as *mut _ as _);
-        }
+    pub fn set_master_send(&mut self, master_send: bool) {
+        set_track_master_send(self.output_track, master_send);
     }
 
     pub fn prepare_render(&mut self, render: &RenderSession) {
@@ -132,7 +131,9 @@ impl AudioEngineMixer {
                     }
                 }
 
-                reaper.delete_track_media_item(self.output_track, media_item);
+                if let Err(err) = reaper.delete_track_media_item(self.output_track, media_item) {
+                    warn!(%err, "failed to delete media item");
+                }
             }
         }
 

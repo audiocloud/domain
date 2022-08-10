@@ -1,11 +1,10 @@
-use std::cell::Cell;
 use std::ffi::CStr;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 use std::{env, thread};
 
+use once_cell::sync::OnceCell;
 use reaper_low::{static_vst_plugin_context, PluginContext};
 use reaper_medium::{ProjectRef, Reaper, ReaperSession};
 use tracing::*;
@@ -20,6 +19,7 @@ use crate::audio_engine::{PluginRegistry, ReaperAudioEngine, ReaperEngineCommand
 pub struct AudioCloudPlugin {
     activation:         Option<AudioCloudPluginActivation>,
     native_sample_rate: usize,
+    host:               HostCallback,
 }
 
 struct AudioCloudPluginActivation {
@@ -29,7 +29,7 @@ struct AudioCloudPluginActivation {
 }
 
 const FIRST_TIME_BOOT: AtomicBool = AtomicBool::new(false);
-const SESSION_WRAPPER: Cell<Option<ReaperSession>> = Cell::new(None);
+const SESSION_WRAPPER: OnceCell<ReaperSession> = OnceCell::new();
 
 impl Plugin for AudioCloudPlugin {
     fn get_info(&self) -> Info {
@@ -42,67 +42,23 @@ impl Plugin for AudioCloudPlugin {
     fn new(host: HostCallback) -> Self
         where Self: Sized
     {
-        if FIRST_TIME_BOOT.compare_exchange(false, true, SeqCst, SeqCst).is_ok() {
-            init_env();
-            let ctx = PluginContext::from_vst_plugin(&host, static_vst_plugin_context()).expect("REAPER PluginContext init success");
-            let mut session = ReaperSession::load(ctx);
-            let reaper = session.reaper().clone();
+        eprintln!("==== new ====");
 
-            Reaper::make_available_globally(reaper);
+        SESSION_WRAPPER.get_or_init(|| {
+                           eprintln!("==== first time boot ====");
+                           init_env();
+                           init_audio_engine(&host)
+                       });
 
-            let (tx_cmd, rx_cmd) = flume::unbounded();
-            let (tx_evt, rx_evt) = flume::unbounded::<AudioEngineEvent>();
+        eprintln!("==== creating VST ====");
 
-            let nats_url = env::var("NATS_URL").expect("NATS_URL env var must be set");
-            let subscribe_topic = env::var("NATS_CMD_TOPIC").expect("NATS_CMD_TOPIC env var must be set");
-            let publish_topic = env::var("NATS_EVT_TOPIC").expect("NATS_EVT_TOPIC env var must be set");
+        Self { activation: None,
+               native_sample_rate: 192_000,
+               host }
+    }
 
-            let connection = nats::connect(nats_url).expect("NATS connection success");
-            let subscription = connection.subscribe(&subscribe_topic)
-                                         .expect("NATS subscription success");
-
-            thread::spawn({
-                let tx_cmd = tx_cmd.clone();
-                move || {
-                    while let Some(msg) = subscription.next() {
-                        if let Ok(cmd) = MsgPack.deserialize(&msg.data[..]) {
-                            let (tx, rx) = flume::unbounded::<anyhow::Result<()>>();
-                            if let Ok(_) = tx_cmd.send(ReaperEngineCommand::Request((cmd, tx))) {
-                                thread::spawn(move || {
-                                    let result = match rx.recv_timeout(Duration::from_millis(500)) {
-                                        Err(_) => Err(format!("Request timed out")),
-                                        Ok(Err(err)) => Err(err.to_string()),
-                                        Ok(Ok(result)) => Ok(result),
-                                    };
-
-                                    let result = MsgPack.serialize(&result).expect("Response serialization success");
-                                    msg.respond(result).expect("NATS response send");
-                                });
-                            }
-                        }
-                    }
-                }
-            });
-
-            thread::spawn(move || {
-                while let Ok(evt) = rx_evt.recv() {
-                    if let Ok(encoded) = MsgPack.serialize(&evt) {
-                        if let Err(err) = connection.publish(&publish_topic, encoded) {
-                            warn!(%err, "failed to publish event");
-                        }
-                    }
-                }
-            });
-
-            PluginRegistry::init(tx_cmd);
-
-            session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(rx_cmd, tx_evt)))
-                   .expect("REAPER audio engine control surface register success");
-
-            Reaper::get().show_console_msg("--- Audiocloud Plugin first boot ---\n");
-
-            SESSION_WRAPPER.set(Some(session));
-        }
+    fn init(&mut self) {
+        eprintln!("==== init ====");
 
         let reaper = Reaper::get();
         let project = reaper.enum_projects(ProjectRef::Current, 0)
@@ -122,17 +78,14 @@ impl Plugin for AudioCloudPlugin {
 
         reaper.show_console_msg("Streaming plugin initializing\n");
 
-        let activation = maybe_id.ok().map(|id| {
-                                          let (tx_plugin, rx_plugin) = flume::unbounded();
-                                          let tx_engine = PluginRegistry::register(id.clone(), tx_plugin);
+        self.activation = maybe_id.ok().map(|id| {
+                                           let (tx_plugin, rx_plugin) = flume::unbounded();
+                                           let tx_engine = PluginRegistry::register(id.clone(), tx_plugin);
 
-                                          AudioCloudPluginActivation { id,
-                                                                       rx_plugin,
-                                                                       tx_engine }
-                                      });
-
-        Self { activation,
-               native_sample_rate: 192_000 }
+                                           AudioCloudPluginActivation { id,
+                                                                        rx_plugin,
+                                                                        tx_engine }
+                                       });
     }
 
     fn set_sample_rate(&mut self, rate: f32) {
@@ -171,4 +124,68 @@ fn init_env() {
     }
 
     tracing_subscriber::fmt::init();
+}
+
+fn init_audio_engine(host: &HostCallback) -> ReaperSession {
+    let ctx =
+        PluginContext::from_vst_plugin(host, static_vst_plugin_context()).expect("REAPER PluginContext init success");
+    let mut session = ReaperSession::load(ctx);
+    let reaper = session.reaper().clone();
+
+    Reaper::make_available_globally(reaper);
+
+    let (tx_cmd, rx_cmd) = flume::unbounded();
+    let (tx_evt, rx_evt) = flume::unbounded::<AudioEngineEvent>();
+
+    let nats_url = env::var("NATS_URL").expect("NATS_URL env var must be set");
+    let subscribe_topic = env::var("NATS_CMD_TOPIC").expect("NATS_CMD_TOPIC env var must be set");
+    let publish_topic = env::var("NATS_EVT_TOPIC").expect("NATS_EVT_TOPIC env var must be set");
+
+    let connection = nats::connect(nats_url).expect("NATS connection success");
+    let subscription = connection.subscribe(&subscribe_topic)
+                                 .expect("NATS subscription success");
+
+    thread::spawn({
+        let tx_cmd = tx_cmd.clone();
+        move || {
+            while let Some(msg) = subscription.next() {
+                if let Ok(cmd) = MsgPack.deserialize(&msg.data[..]) {
+                    let (tx, rx) = flume::unbounded::<anyhow::Result<()>>();
+                    if let Ok(_) = tx_cmd.send(ReaperEngineCommand::Request((cmd, tx))) {
+                        thread::spawn(move || {
+                            let result = match rx.recv_timeout(Duration::from_millis(500)) {
+                                Err(_) => Err(format!("Request timed out")),
+                                Ok(Err(err)) => Err(err.to_string()),
+                                Ok(Ok(result)) => Ok(result),
+                            };
+
+                            let result = MsgPack.serialize(&result).expect("Response serialization success");
+                            msg.respond(result).expect("NATS response send");
+                        });
+                    }
+                }
+            }
+        }
+    });
+
+    eprintln!("==== spawn ====");
+
+    thread::spawn(move || {
+        while let Ok(evt) = rx_evt.recv() {
+            if let Ok(encoded) = MsgPack.serialize(&evt) {
+                if let Err(err) = connection.publish(&publish_topic, encoded) {
+                    warn!(%err, "failed to publish event");
+                }
+            }
+        }
+    });
+
+    PluginRegistry::init(tx_cmd.clone());
+
+    session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(tx_cmd.clone(), rx_cmd, tx_evt)))
+           .expect("REAPER audio engine control surface register success");
+
+    Reaper::get().show_console_msg("--- Audiocloud Plugin first boot ---\n");
+
+    session
 }

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Mutex;
+use std::thread;
 
 use anyhow::anyhow;
 use askama::Template;
@@ -27,6 +28,7 @@ mod media_item;
 mod media_track;
 mod mixer;
 mod project;
+mod rest_api;
 
 pub struct PluginRegistry {
     pub tx_engine: Sender<ReaperEngineCommand>,
@@ -53,9 +55,9 @@ impl PluginRegistry {
 
     pub fn play(app_session_id: &AppSessionId, play: PlaySession) -> anyhow::Result<()> {
         let lock = PLUGIN_REGISTRY.get()
-                                  .ok_or_else(|| anyhow!("Plugin registry failed to obtain"))?
+                                  .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
                                   .lock()
-                                  .map_err(|_| anyhow!("Plugin registry failed to lock"))?;
+                                  .map_err(|_| anyhow!("failed to lock plugin registry"))?;
 
         let plugin = lock.plugins
                          .get(app_session_id)
@@ -96,7 +98,12 @@ pub struct ReaperAudioEngine {
 }
 
 impl ReaperAudioEngine {
-    pub fn new(rx_cmd: Receiver<ReaperEngineCommand>, tx_evt: Sender<AudioEngineEvent>) -> ReaperAudioEngine {
+    pub fn new(tx_cmd: Sender<ReaperEngineCommand>,
+               rx_cmd: Receiver<ReaperEngineCommand>,
+               tx_evt: Sender<AudioEngineEvent>)
+               -> ReaperAudioEngine {
+        thread::spawn(move || rest_api::run(tx_cmd));
+
         ReaperAudioEngine { sessions: HashMap::new(),
                             rx_cmd,
                             tx_evt }
