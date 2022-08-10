@@ -42,15 +42,11 @@ impl Plugin for AudioCloudPlugin {
     fn new(host: HostCallback) -> Self
         where Self: Sized
     {
-        eprintln!("==== new ====");
-
         SESSION_WRAPPER.get_or_init(|| {
                            eprintln!("==== first time boot ====");
                            init_env();
                            init_audio_engine(&host)
                        });
-
-        eprintln!("==== creating VST ====");
 
         Self { activation: None,
                native_sample_rate: 192_000,
@@ -58,8 +54,6 @@ impl Plugin for AudioCloudPlugin {
     }
 
     fn init(&mut self) {
-        eprintln!("==== init ====");
-
         let reaper = Reaper::get();
         let project = reaper.enum_projects(ProjectRef::Current, 0)
                             .expect("REAPER project enum success")
@@ -75,8 +69,6 @@ impl Plugin for AudioCloudPlugin {
 
             AppSessionId::from_str(cstr.to_string_lossy().as_ref())
         };
-
-        reaper.show_console_msg("Streaming plugin initializing\n");
 
         self.activation = maybe_id.ok().map(|id| {
                                            let (tx_plugin, rx_plugin) = flume::unbounded();
@@ -113,7 +105,6 @@ impl Drop for AudioCloudPlugin {
         if let Some(activation) = &self.activation {
             PluginRegistry::unregister(&activation.id);
         }
-        Reaper::get().show_console_msg("Streaming plugin dropping\n");
     }
 }
 
@@ -168,8 +159,6 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
         }
     });
 
-    eprintln!("==== spawn ====");
-
     thread::spawn(move || {
         while let Ok(evt) = rx_evt.recv() {
             if let Ok(encoded) = MsgPack.serialize(&evt) {
@@ -185,7 +174,7 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
     session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(tx_cmd.clone(), rx_cmd, tx_evt)))
            .expect("REAPER audio engine control surface register success");
 
-    Reaper::get().show_console_msg("--- Audiocloud Plugin first boot ---\n");
+    info!("init complete");
 
     session
 }
