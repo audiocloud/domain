@@ -6,10 +6,11 @@ use reaper_medium::{MediaTrack, ProjectContext};
 use uuid::Uuid;
 
 use audiocloud_api::cloud::domains::InstanceRouting;
+use audiocloud_api::model::MultiChannelValue;
 use audiocloud_api::newtypes::{FixedId, FixedInstanceId};
 use audiocloud_api::session::{SessionFixedInstance, SessionFlowId};
 
-use crate::audio_engine::project::AudioEngineProject;
+use crate::audio_engine::project::{get_track_peak_meters, AudioEngineProject, AudioEngineProjectTemplateSnapshot};
 use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk, ConnectionTemplate};
 
 #[derive(Debug)]
@@ -77,7 +78,7 @@ impl AudioEngineFixedInstance {
     }
 
     pub fn get_input_track(&self) -> MediaTrack {
-        self.input_track
+        self.send_track
     }
 
     fn use_reainsert(&self) -> bool {
@@ -88,7 +89,7 @@ impl AudioEngineFixedInstance {
         }
     }
 
-    pub fn get_send_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<String> {
+    pub fn get_send_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<String> {
         if self.use_reainsert() {
             Ok(beautify_chunk(ReaInsertSendTemplate { project,
                                                       instance: self }.render()?))
@@ -98,7 +99,7 @@ impl AudioEngineFixedInstance {
         }
     }
 
-    pub fn get_return_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<String> {
+    pub fn get_return_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<String> {
         if self.use_reainsert() {
             Ok(beautify_chunk(ReaInsertReturnTemplate { project,
                                                         instance: self }.render()?))
@@ -122,25 +123,35 @@ impl AudioEngineFixedInstance {
         }
     }
 
-    pub fn update_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<()> {
+    pub fn update_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<()> {
         set_track_chunk(self.send_track, &self.get_send_state_chunk(project)?)?;
         set_track_chunk(self.return_track, &self.get_return_state_chunk(project)?)?;
 
         Ok(())
+    }
+
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<SessionFlowId, MultiChannelValue>) {
+        if let Some(routing) = self.routing {
+            peaks.insert(self.send_flow_id.clone(),
+                         get_track_peak_meters(self.send_track, routing.send_count));
+
+            peaks.insert(self.return_flow_id.clone(),
+                         get_track_peak_meters(self.return_track, routing.return_count));
+        }
     }
 }
 
 #[derive(Template)]
 #[template(path = "audio_engine/reainsert_send.txt")]
 struct ReaInsertSendTemplate<'a> {
-    project:  &'a AudioEngineProject,
+    project:  &'a AudioEngineProjectTemplateSnapshot,
     instance: &'a AudioEngineFixedInstance,
 }
 
 #[derive(Template)]
 #[template(path = "audio_engine/hwout_send.txt")]
 struct HwOutSendTemplate<'a> {
-    project:  &'a AudioEngineProject,
+    project:  &'a AudioEngineProjectTemplateSnapshot,
     instance: &'a AudioEngineFixedInstance,
 }
 
@@ -165,7 +176,7 @@ impl<'a> HwOutSendTemplate<'a> {
 #[derive(Template)]
 #[template(path = "audio_engine/hwout_return.txt")]
 struct HwOutReturnTemplate<'a> {
-    project:  &'a AudioEngineProject,
+    project:  &'a AudioEngineProjectTemplateSnapshot,
     instance: &'a AudioEngineFixedInstance,
 }
 
@@ -186,6 +197,6 @@ impl<'a> HwOutReturnTemplate<'a> {
 #[derive(Template)]
 #[template(path = "audio_engine/reainsert_return.txt")]
 struct ReaInsertReturnTemplate<'a> {
-    project:  &'a AudioEngineProject,
+    project:  &'a AudioEngineProjectTemplateSnapshot,
     instance: &'a AudioEngineFixedInstance,
 }

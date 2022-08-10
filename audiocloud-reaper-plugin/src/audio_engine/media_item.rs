@@ -1,16 +1,16 @@
-use askama::Template;
-use audiocloud_api::cloud::media::AppMedia;
-use reaper_medium::{MediaItem, MediaItemTake, MediaTrack, Reaper};
 use std::collections::{HashMap, HashSet};
 use std::ffi::CString;
 use std::path::PathBuf;
+
+use askama::Template;
+use reaper_medium::{MediaItem, MediaItemTake, MediaTrack, Reaper};
 use uuid::Uuid;
 
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaId};
-use audiocloud_api::session::SessionTrackMedia;
+use audiocloud_api::session::{SessionTrackMedia, UpdateSessionTrackMedia};
 
 use crate::audio_engine::media_track::AudioEngineMediaTrack;
-use crate::audio_engine::project::AudioEngineProject;
+use crate::audio_engine::project::AudioEngineProjectTemplateSnapshot;
 
 #[derive(Debug)]
 pub struct AudioEngineMediaItem {
@@ -40,8 +40,8 @@ impl AudioEngineMediaItem {
 
         let reaper = Reaper::get();
 
-        let item = reaper.add_media_item_to_track(track)?;
-        let take = reaper.add_take_to_media_item(item)?;
+        let item = unsafe { reaper.add_media_item_to_track(track)? };
+        let take = unsafe { reaper.add_take_to_media_item(item)? };
 
         let item_id = get_media_item_uuid(item)?;
         let take_id = get_media_item_take_uuid(take)?;
@@ -59,16 +59,18 @@ impl AudioEngineMediaItem {
 
     pub fn delete(mut self) -> anyhow::Result<()> {
         let reaper = Reaper::get();
-        reaper.delete_track_media_item(self.track, self.item)?;
+        unsafe {
+            reaper.delete_track_media_item(self.track, self.item)?;
+        }
 
         Ok(())
     }
 
-    pub fn updated(&mut self,
-                   root_dir: &PathBuf,
-                   available: &HashMap<AppMediaObjectId, String>,
-                   removed: &HashSet<AppMediaObjectId>)
-                   -> bool {
+    pub fn on_media_updated(&mut self,
+                            root_dir: &PathBuf,
+                            available: &HashMap<AppMediaObjectId, String>,
+                            removed: &HashSet<AppMediaObjectId>)
+                            -> bool {
         if self.path.is_some() {
             if removed.contains(&self.object_id) {
                 self.path = None;
@@ -83,6 +85,10 @@ impl AudioEngineMediaItem {
 
         false
     }
+
+    pub fn update(&mut self, update: UpdateSessionTrackMedia) {
+        self.spec.update(update.clone());
+    }
 }
 
 fn get_media_item_uuid(media_item: MediaItem) -> anyhow::Result<Uuid> {
@@ -91,8 +97,11 @@ fn get_media_item_uuid(media_item: MediaItem) -> anyhow::Result<Uuid> {
     let mut buffer = [0i8; 1024];
 
     unsafe {
-        reaper.low()
-              .GetSetMediaItemInfo_String(media_item.as_ptr(), param.into_raw(), buffer.as_mut_ptr(), false)?;
+        if !reaper.low()
+                  .GetSetMediaItemInfo_String(media_item.as_ptr(), param.into_raw(), buffer.as_mut_ptr(), false)
+        {
+            return Err(anyhow::anyhow!("Failed to get media item GUID"));
+        }
 
         let str = CString::from_raw(buffer.as_mut_ptr() as *mut i8).to_string_lossy()
                                                                    .to_string();
@@ -107,8 +116,10 @@ fn get_media_item_take_uuid(media_item_take: MediaItemTake) -> anyhow::Result<Uu
     let mut buffer = [0i8; 1024];
 
     unsafe {
-        reaper.low()
-              .GetSetMediaItemTakeInfo_String(media_item_take.as_ptr(), param.into_raw(), buffer.as_mut_ptr(), false)?;
+        if !reaper.low()
+              .GetSetMediaItemTakeInfo_String(media_item_take.as_ptr(), param.into_raw(), buffer.as_mut_ptr(), false) {
+            return Err(anyhow::anyhow!("Failed to get media item take GUID"));
+        }
 
         let str = CString::from_raw(buffer.as_mut_ptr() as *mut i8).to_string_lossy()
                                                                    .to_string();
@@ -122,13 +133,13 @@ fn get_media_item_take_uuid(media_item_take: MediaItemTake) -> anyhow::Result<Uu
 pub struct AudioEngineMediaItemTemplate<'a> {
     media:   &'a AudioEngineMediaItem,
     track:   &'a AudioEngineMediaTrack,
-    project: &'a AudioEngineProject,
+    project: &'a AudioEngineProjectTemplateSnapshot,
 }
 
 impl<'a> AudioEngineMediaItemTemplate<'a> {
     pub fn new(media: &'a AudioEngineMediaItem,
                track: &'a AudioEngineMediaTrack,
-               project: &'a AudioEngineProject)
+               project: &'a AudioEngineProjectTemplateSnapshot)
                -> Self {
         Self { media, track, project }
     }

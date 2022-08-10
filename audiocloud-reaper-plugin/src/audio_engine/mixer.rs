@@ -1,11 +1,18 @@
+use std::collections::HashMap;
+use std::ffi::CStr;
+use std::path::PathBuf;
+
 use askama::Template;
-use reaper_medium::{MediaTrack, ProjectContext, Reaper};
+use reaper_medium::{MediaTrack, ProjectContext, Reaper, TrackAttributeKey};
 use uuid::Uuid;
 
+use audiocloud_api::change::RenderSession;
+use audiocloud_api::model::MultiChannelValue;
 use audiocloud_api::newtypes::MixerId;
 use audiocloud_api::session::{SessionFlowId, SessionMixer};
 
-use crate::audio_engine::project::AudioEngineProject;
+use crate::audio_engine::project::{get_track_peak_meters, AudioEngineProject, AudioEngineProjectTemplateSnapshot};
+use crate::audio_engine::ConnectionTemplate;
 use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk};
 
 #[derive(Debug)]
@@ -31,8 +38,6 @@ impl AudioEngineMixer {
     pub fn new(project: &AudioEngineProject, mixer_id: MixerId, spec: SessionMixer) -> anyhow::Result<Self> {
         let input_flow_id = SessionFlowId::MixerInput(mixer_id.clone());
         let output_flow_id = SessionFlowId::MixerOutput(mixer_id.clone());
-
-        let reaper = Reaper::get();
 
         project.focus()?;
 
@@ -61,32 +66,90 @@ impl AudioEngineMixer {
         self.input_track
     }
 
-    pub fn get_input_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<String> {
+    pub fn get_input_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<String> {
         Ok(beautify_chunk(AudioEngineMixerInputTemplate { project, mixer: self }.render()?))
     }
 
-    pub fn get_output_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<String> {
+    pub fn get_output_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<String> {
         Ok(beautify_chunk(AudioEngineMixerOutputTemplate { project, mixer: self }.render()?))
     }
 
-    pub fn update_state_chunk(&self, project: &AudioEngineProject) -> anyhow::Result<()> {
+    pub fn update_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<()> {
         set_track_chunk(self.input_track, &self.get_input_state_chunk(project)?)?;
         set_track_chunk(self.output_track, &self.get_output_state_chunk(project)?)?;
 
         Ok(())
+    }
+
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<SessionFlowId, MultiChannelValue>) {
+        peaks.insert(self.input_flow_id.clone(),
+                     get_track_peak_meters(self.input_track, self.spec.input_channels));
+
+        peaks.insert(self.output_flow_id.clone(),
+                     get_track_peak_meters(self.input_track, self.spec.input_channels));
+    }
+
+    pub fn set_master_send(&mut self, mut master_send: bool) {
+        unsafe {
+            Reaper::get().get_set_media_track_info(self.output_track,
+                                                   TrackAttributeKey::MainSend,
+                                                   &mut master_send as *mut _ as _);
+        }
+    }
+
+    pub fn prepare_render(&mut self, render: &RenderSession) {
+        let reaper = Reaper::get();
+
+        unsafe {
+            // arm for recording
+            reaper.get_set_media_track_info(self.output_track, TrackAttributeKey::RecArm, &mut 1i32 as *mut i32 as _);
+
+            // set record mode to "output latency compensated"
+            reaper.get_set_media_track_info(self.output_track,
+                                            TrackAttributeKey::RecMode,
+                                            &mut 3i32 as *mut i32 as _);
+
+            // set record monitoring to off
+            reaper.get_set_media_track_info(self.output_track, TrackAttributeKey::RecMon, &mut 0i32 as *mut i32 as _);
+        }
+    }
+
+    pub fn clear_render(&mut self) -> Option<PathBuf> {
+        let reaper = Reaper::get();
+        let mut rv = None;
+
+        // iterate all media items
+        unsafe {
+            while let Some(media_item) = reaper.get_track_media_item(self.output_track, 0) {
+                if let Some(take) = reaper.get_active_take(media_item) {
+                    if let Some(source) = reaper.get_media_item_take_source(take) {
+                        let mut path_name = [0i8; 1024];
+
+                        reaper.low()
+                              .GetMediaSourceFileName(source.as_ptr(), path_name.as_mut_ptr(), path_name.len() as i32);
+
+                        rv = Some(PathBuf::from(CStr::from_ptr(path_name.as_ptr()).to_string_lossy().to_string()));
+                    }
+                }
+
+                reaper.delete_track_media_item(self.output_track, media_item);
+            }
+        }
+
+        rv
     }
 }
 
 #[derive(Template)]
 #[template(path = "audio_engine/mixer_track_input.txt")]
 struct AudioEngineMixerInputTemplate<'a> {
-    project: &'a AudioEngineProject,
+    project: &'a AudioEngineProjectTemplateSnapshot,
     mixer:   &'a AudioEngineMixer,
 }
 
 #[derive(Template)]
 #[template(path = "audio_engine/mixer_track_output.txt")]
 struct AudioEngineMixerOutputTemplate<'a> {
-    project: &'a AudioEngineProject,
+    project: &'a AudioEngineProjectTemplateSnapshot,
     mixer:   &'a AudioEngineMixer,
 }
