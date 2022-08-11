@@ -18,7 +18,7 @@ use tempdir::TempDir;
 use tracing::*;
 
 use audiocloud_api::audio_engine::AudioEngineEvent;
-use audiocloud_api::change::{ModifySessionSpec, PlayId, PlaySession, RenderSession, UpdatePlaySession};
+use audiocloud_api::change::{ModifySessionSpec, PlayId, PlaySession, RenderId, RenderSession, UpdatePlaySession};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::cloud::domains::InstanceRouting;
 use audiocloud_api::model::{ModelValue, MultiChannelValue};
@@ -57,6 +57,7 @@ pub struct AudioEngineProject {
     pub temp_dir:          TempDir,
     pub session_path:      PathBuf,
     pub reaper_play_state: Timestamped<PlayState>,
+    pub events:            VecDeque<AudioEngineEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +162,7 @@ impl AudioEngineProject {
         let spec = Default::default();
         let play_state = ProjectPlayState::Stopped.into();
         let reaper_play_state = Timestamped::from(Reaper::get().get_play_state_ex(context));
+        let events = VecDeque::new();
 
         let mut rv = Self { id,
                             project,
@@ -172,7 +174,8 @@ impl AudioEngineProject {
                             temp_dir,
                             session_path,
                             play_state,
-                            reaper_play_state };
+                            reaper_play_state,
+                            events };
 
         rv.set_spec(session_spec, instances, media)?;
 
@@ -192,49 +195,30 @@ impl AudioEngineProject {
         }
     }
 
-    pub fn run(&mut self, events: &mut VecDeque<AudioEngineEvent>) -> anyhow::Result<()> {
-        if let ProjectPlayState::PreparingToPlay(preparing) = self.play_state.value() {
+    #[instrument(skip_all, err, fields(id = %self.id))]
+    pub fn run(&mut self) -> anyhow::Result<()> {
+        let context = self.context();
+
+        if let ProjectPlayState::PreparingToPlay(_) = self.play_state.value() {
             if self.play_state.elapsed().num_seconds() > 1 {
                 self.play_state = ProjectPlayState::Stopped.into();
-                events.push_back(AudioEngineEvent::Error { session_id: self.id.clone(),
+                self.events.push_back(AudioEngineEvent::Error { session_id: self.id.clone(),
                                                      error:
                                                          format!("Timed out preparing resampling or compression"), });
             }
         }
 
         let reaper = Reaper::get();
-
-        let context = self.context();
-
         let new_play_state = reaper.get_play_state_ex(context);
+        let cur_pos = reaper.get_play_position_ex(context).get();
 
         if &new_play_state != self.reaper_play_state.value() {
-            match self.play_state.value() {
+            match self.play_state.value().clone() {
                 ProjectPlayState::Playing(play) if !new_play_state.is_playing => {
-                    self.clear_mixer_master_sends();
-                    // a plugin flush is not critical, so we are fine with discarding the error
-                    let _ = PluginRegistry::flush(&self.id, play.play_id);
+                    self.clean_up_end_of_play(play.play_id);
                 }
-                ProjectPlayState::Rendering(render) => {
-                    let pos = reaper.get_play_position_ex(context).get();
-                    if pos > render.segment.end() {
-                        reaper.main_on_command_ex(*CMD_TRANSPORT_STOP_AND_SAVE_MEDIA, 0, context);
-
-                        if let Some(mixer) = self.mixers.get_mut(&render.mixer_id) {
-                            if let Some(path) = mixer.clear_render() {
-                                events.push_back(AudioEngineEvent::RenderingFinished { session_id: self.id.clone(),
-                                                                                       render_id: render.render_id,
-                                                                                       path });
-                            } else {
-                                // we did not get a path
-                                events.push_back(AudioEngineEvent::RenderingFailed { session_id: self.id.clone(),
-                                                                                     render_id:  render.render_id,
-                                                                                     reason:     format!("Rendered file not found"), });
-                            }
-                        }
-
-                        self.play_state = ProjectPlayState::Stopped.into();
-                    }
+                ProjectPlayState::Rendering(render) if render.segment.end() >= cur_pos => {
+                    self.clean_up_end_of_render(render.mixer_id.clone(), render.render_id);
                 }
                 _ => {}
             }
@@ -242,7 +226,39 @@ impl AudioEngineProject {
 
         self.reaper_play_state = Timestamped::from(new_play_state);
 
-        None
+        Ok(())
+    }
+
+    fn clean_up_end_of_render(&mut self, mixer_id: MixerId, render_id: RenderId) {
+        let reaper = Reaper::get();
+        let context = self.context();
+
+        reaper.main_on_command_ex(*CMD_TRANSPORT_STOP_AND_SAVE_MEDIA, 0, context);
+
+        if let Some(mixer) = self.mixers.get_mut(&mixer_id) {
+            if let Some(path) = mixer.clear_render() {
+                self.events
+                    .push_back(AudioEngineEvent::RenderingFinished { session_id: self.id.clone(),
+                                                                     render_id,
+                                                                     path });
+            } else {
+                // we did not get a path
+                self.events
+                    .push_back(AudioEngineEvent::RenderingFailed { session_id: self.id.clone(),
+                                                                   render_id,
+                                                                   reason: format!("Rendered file not found") });
+            }
+
+            self.play_state = ProjectPlayState::Stopped.into();
+        }
+    }
+
+    fn clean_up_end_of_play(&mut self, play_id: PlayId) {
+        self.clear_mixer_master_sends();
+        // a plugin flush is not critical, so we are fine with discarding the error
+        let _ = PluginRegistry::flush(&self.id, play_id);
+
+        self.play_state = ProjectPlayState::Stopped.into();
     }
 
     pub fn context(&self) -> ProjectContext {
@@ -453,6 +469,12 @@ impl AudioEngineProject {
                 if let Some(mixer) = self.mixers.get_mut(&render.mixer_id) {
                     let _ = mixer.clear_render();
                 }
+
+                self.events.push_back(AudioEngineEvent::RenderingFailed {
+                    session_id: self.id.clone(),
+                    render_id: render.render_id,
+                    reason: format!("Rendering stopped prematurely")
+                });
             }
             _ => {
                 reaper.on_stop_button_ex(context);

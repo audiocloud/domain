@@ -307,7 +307,8 @@ impl ControlSurface for ReaperAudioEngine {
         }
 
         for (_, session) in &mut self.sessions {
-            if let Some(event) = session.run() {
+            let _ = session.run();
+            while let Some(event) = session.events.pop_front() {
                 let _ = self.tx_evt.try_send(event);
             }
         }

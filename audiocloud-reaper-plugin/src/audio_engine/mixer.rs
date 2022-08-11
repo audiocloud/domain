@@ -111,7 +111,7 @@ impl AudioEngineMixer {
         }
     }
 
-    pub fn clear_render(&mut self) -> Option<PathBuf> {
+    pub fn clear_render(&mut self) -> Option<String> {
         use TrackAttributeKey::*;
 
         let reaper = Reaper::get();
@@ -127,7 +127,7 @@ impl AudioEngineMixer {
                         reaper.low()
                               .GetMediaSourceFileName(source.as_ptr(), path_name.as_mut_ptr(), path_name.len() as i32);
 
-                        rv = Some(PathBuf::from(CStr::from_ptr(path_name.as_ptr()).to_string_lossy().to_string()));
+                        rv = Some(CStr::from_ptr(path_name.as_ptr()).to_string_lossy().to_string());
                     }
                 }
 
