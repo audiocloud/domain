@@ -23,6 +23,7 @@ tempdir = "0.3"
 cstr = "0.2"
 lazy_static = "1"
 actix-web = "4"
+tracing-actix-web = "0.6"
 
 [dependencies.serde]
 version = "1"

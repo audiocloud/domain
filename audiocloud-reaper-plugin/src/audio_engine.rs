@@ -69,6 +69,21 @@ impl PluginRegistry {
         Ok(())
     }
 
+    pub fn flush(app_session_id: &AppSessionId, play_id: PlayId) -> anyhow::Result<()> {
+        let lock = PLUGIN_REGISTRY.get()
+                                  .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
+                                  .lock()
+                                  .map_err(|_| anyhow!("failed to lock plugin registry"))?;
+
+        let plugin = lock.plugins
+                         .get(app_session_id)
+                         .ok_or_else(|| anyhow!("No plugin for session {app_session_id}"))?;
+
+        plugin.try_send(StreamingPluginCommand::Flush(play_id))?;
+
+        Ok(())
+    }
+
     pub fn has(app_session_id: &AppSessionId) -> anyhow::Result<bool> {
         let lock = PLUGIN_REGISTRY.get()
                                   .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
@@ -98,15 +113,17 @@ pub enum ReaperEngineCommand {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EngineStatus {
-    pub is_playing:   Option<PlayId>,
-    pub is_rendering: Option<RenderId>,
-    pub position:     f64,
-    pub plugin_ready: bool,
+    pub is_playing:           Option<PlayId>,
+    pub is_rendering:         Option<RenderId>,
+    pub is_transport_playing: bool,
+    pub position:             f64,
+    pub plugin_ready:         bool,
 }
 
 #[derive(Debug)]
 pub enum StreamingPluginCommand {
     Play(PlaySession),
+    Flush(PlayId),
 }
 
 #[derive(Debug)]

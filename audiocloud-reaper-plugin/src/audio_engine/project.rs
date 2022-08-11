@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::{CStr, CString};
 use std::fs;
 use std::path::PathBuf;
@@ -10,9 +10,9 @@ use cstr::cstr;
 use lazy_static::lazy_static;
 use reaper_medium::ProjectContext::CurrentProject;
 use reaper_medium::{
-    AutoSeekBehavior, ChunkCacheHint, CommandId, EditMode, MediaTrack, PositionInSeconds, ProjectContext, ProjectRef,
-    ReaProject, Reaper, ReaperPanValue, ReaperVolumeValue, SetEditCurPosOptions, TimeRangeType, TrackAttributeKey,
-    TrackSendCategory, TrackSendRef,
+    AutoSeekBehavior, ChunkCacheHint, CommandId, EditMode, MediaTrack, PlayState, PositionInSeconds, ProjectContext,
+    ProjectRef, ReaProject, Reaper, ReaperPanValue, ReaperVolumeValue, SetEditCurPosOptions, TimeRangeType,
+    TrackAttributeKey, TrackSendCategory, TrackSendRef,
 };
 use tempdir::TempDir;
 use tracing::*;
@@ -37,7 +37,7 @@ use crate::audio_engine::mixer::AudioEngineMixer;
 use crate::audio_engine::{EngineStatus, PluginRegistry};
 
 #[derive(Debug, Clone)]
-enum ProjectPlayState {
+pub enum ProjectPlayState {
     PreparingToPlay(PlaySession),
     Playing(PlaySession),
     Rendering(RenderSession),
@@ -46,16 +46,17 @@ enum ProjectPlayState {
 
 #[derive(Debug)]
 pub struct AudioEngineProject {
-    id:               AppSessionId,
-    project:          ReaProject,
-    tracks:           HashMap<TrackId, AudioEngineMediaTrack>,
-    fixed_instances:  HashMap<FixedId, AudioEngineFixedInstance>,
-    mixers:           HashMap<MixerId, AudioEngineMixer>,
-    spec:             SessionSpec,
-    media_root:       PathBuf,
-    play_state:       Timestamped<ProjectPlayState>,
-    pub temp_dir:     TempDir,
-    pub session_path: PathBuf,
+    id:                    AppSessionId,
+    project:               ReaProject,
+    tracks:                HashMap<TrackId, AudioEngineMediaTrack>,
+    fixed_instances:       HashMap<FixedId, AudioEngineFixedInstance>,
+    mixers:                HashMap<MixerId, AudioEngineMixer>,
+    spec:                  SessionSpec,
+    media_root:            PathBuf,
+    pub play_state:        Timestamped<ProjectPlayState>,
+    pub temp_dir:          TempDir,
+    pub session_path:      PathBuf,
+    pub reaper_play_state: Timestamped<PlayState>,
 }
 
 #[derive(Debug, Clone)]
@@ -109,6 +110,8 @@ lazy_static! {
     static ref CMD_CLOSE_CURRENT_PROJECT_TAB: CommandId = CommandId::new(40860);
     static ref CMD_SWITCH_TO_NEXT_PROJECT_TAB: CommandId = CommandId::new(40861);
     static ref CMD_TRANSPORT_RECORD: CommandId = CommandId::new(1013);
+    static ref CMD_TRANSPORT_STOP_AND_SAVE_MEDIA: CommandId = CommandId::new(40667);
+    static ref CMD_TRANSPORT_STOP_AND_DELETE_MEDIA: CommandId = CommandId::new(40668);
 }
 
 #[derive(Template)]
@@ -148,15 +151,16 @@ impl AudioEngineProject {
                             .ok_or_else(|| anyhow!("No current project even though we just opened one"))?
                             .project;
 
-        reaper.main_on_command_ex(*CMD_REC_MODE_SET_TIME_RANGE_AUTO_PUNCH,
-                                  0,
-                                  ProjectContext::Proj(project));
+        let context = ProjectContext::Proj(project);
+
+        reaper.main_on_command_ex(*CMD_REC_MODE_SET_TIME_RANGE_AUTO_PUNCH, 0, context);
 
         let tracks = Default::default();
         let fixed_instances = Default::default();
         let mixers = Default::default();
         let spec = Default::default();
         let play_state = ProjectPlayState::Stopped.into();
+        let reaper_play_state = Timestamped::from(Reaper::get().get_play_state_ex(context));
 
         let mut rv = Self { id,
                             project,
@@ -167,7 +171,8 @@ impl AudioEngineProject {
                             media_root,
                             temp_dir,
                             session_path,
-                            play_state };
+                            play_state,
+                            reaper_play_state };
 
         rv.set_spec(session_spec, instances, media)?;
 
@@ -187,15 +192,55 @@ impl AudioEngineProject {
         }
     }
 
-    pub fn run(&mut self) -> Option<AudioEngineEvent> {
+    pub fn run(&mut self, events: &mut VecDeque<AudioEngineEvent>) -> anyhow::Result<()> {
         if let ProjectPlayState::PreparingToPlay(preparing) = self.play_state.value() {
             if self.play_state.elapsed().num_seconds() > 1 {
                 self.play_state = ProjectPlayState::Stopped.into();
-                return Some(AudioEngineEvent::Error { session_id: self.id.clone(),
-                                                      error:
-                                                          format!("Timed out preparing resampling or compression"), });
+                events.push_back(AudioEngineEvent::Error { session_id: self.id.clone(),
+                                                     error:
+                                                         format!("Timed out preparing resampling or compression"), });
             }
         }
+
+        let reaper = Reaper::get();
+
+        let context = self.context();
+
+        let new_play_state = reaper.get_play_state_ex(context);
+
+        if &new_play_state != self.reaper_play_state.value() {
+            match self.play_state.value() {
+                ProjectPlayState::Playing(play) if !new_play_state.is_playing => {
+                    self.clear_mixer_master_sends();
+                    // a plugin flush is not critical, so we are fine with discarding the error
+                    let _ = PluginRegistry::flush(&self.id, play.play_id);
+                }
+                ProjectPlayState::Rendering(render) => {
+                    let pos = reaper.get_play_position_ex(context).get();
+                    if pos > render.segment.end() {
+                        reaper.main_on_command_ex(*CMD_TRANSPORT_STOP_AND_SAVE_MEDIA, 0, context);
+
+                        if let Some(mixer) = self.mixers.get_mut(&render.mixer_id) {
+                            if let Some(path) = mixer.clear_render() {
+                                events.push_back(AudioEngineEvent::RenderingFinished { session_id: self.id.clone(),
+                                                                                       render_id: render.render_id,
+                                                                                       path });
+                            } else {
+                                // we did not get a path
+                                events.push_back(AudioEngineEvent::RenderingFailed { session_id: self.id.clone(),
+                                                                                     render_id:  render.render_id,
+                                                                                     reason:     format!("Rendered file not found"), });
+                            }
+                        }
+
+                        self.play_state = ProjectPlayState::Stopped.into();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        self.reaper_play_state = Timestamped::from(new_play_state);
 
         None
     }
@@ -317,18 +362,20 @@ impl AudioEngineProject {
     }
 
     pub fn get_status(&self) -> anyhow::Result<EngineStatus> {
-        Ok(EngineStatus { plugin_ready: PluginRegistry::has(&self.id)?,
-                          is_playing:   if let ProjectPlayState::Playing(play) = self.play_state.value() {
+        Ok(EngineStatus { plugin_ready:         PluginRegistry::has(&self.id)?,
+                          is_transport_playing: self.reaper_play_state.value().is_playing
+                                                || self.reaper_play_state.value().is_recording,
+                          is_playing:           if let ProjectPlayState::Playing(play) = self.play_state.value() {
                               Some(play.play_id.clone())
                           } else {
                               None
                           },
-                          is_rendering: if let ProjectPlayState::Rendering(render) = self.play_state.value() {
+                          is_rendering:         if let ProjectPlayState::Rendering(render) = self.play_state.value() {
                               Some(render.render_id.clone())
                           } else {
                               None
                           },
-                          position:     Reaper::get().get_play_position_ex(self.context()).get(), })
+                          position:             Reaper::get().get_play_position_ex(self.context()).get(), })
     }
 
     pub fn render(&mut self, render: RenderSession) -> anyhow::Result<()> {
@@ -338,8 +385,8 @@ impl AudioEngineProject {
         self.clear_mixer_master_sends();
         self.set_time_range_markers(render.segment);
         self.clear_all_project_markers();
-        self.create_auto_stop_marker(render.segment.end());
         self.set_looping(false);
+        self.set_play_position((render.segment.start - 0.125).max(0.0), false);
 
         if let Some(mixer) = self.mixers.get_mut(&render.mixer_id) {
             mixer.prepare_render(&render);
@@ -397,19 +444,18 @@ impl AudioEngineProject {
 
     pub fn stop(&mut self) -> anyhow::Result<()> {
         let reaper = Reaper::get();
-        reaper.on_stop_button_ex(self.context());
+        let context = self.context();
 
         match self.play_state.value() {
-            ProjectPlayState::PreparingToPlay(_) => {}
-            ProjectPlayState::Playing(_) => {}
-            ProjectPlayState::Stopped => {}
             ProjectPlayState::Rendering(render) => {
                 // this is an incomplete render...
+                reaper.main_on_command_ex(*CMD_TRANSPORT_STOP_AND_DELETE_MEDIA, 0, context);
                 if let Some(mixer) = self.mixers.get_mut(&render.mixer_id) {
-                    if let Some(path) = mixer.clear_render() {
-                        let _ = fs::remove_file(path);
-                    }
+                    let _ = mixer.clear_render();
                 }
+            }
+            _ => {
+                reaper.on_stop_button_ex(context);
             }
         }
 
@@ -752,15 +798,6 @@ impl AudioEngineProject {
             unsafe {
                 reaper.low().DeleteProjectMarkerByIndex(self.project.as_ptr(), 0);
             }
-        }
-    }
-
-    fn create_auto_stop_marker(&self, at: f64) {
-        const STOP_ID: &'static CStr = cstr!("!1016");
-
-        unsafe {
-            Reaper::get().low()
-                         .AddProjectMarker2(self.project.as_ptr(), false, at, at, STOP_ID.as_ptr(), -1, 0);
         }
     }
 }

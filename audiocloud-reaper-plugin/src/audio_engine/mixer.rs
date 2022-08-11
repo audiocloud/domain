@@ -58,14 +58,6 @@ impl AudioEngineMixer {
                   spec })
     }
 
-    pub fn get_input_flow_id(&self) -> &SessionFlowId {
-        &self.input_flow_id
-    }
-
-    pub fn get_output_flow_id(&self) -> &SessionFlowId {
-        &self.output_flow_id
-    }
-
     pub fn get_input_track(&self) -> MediaTrack {
         self.input_track
     }
@@ -105,22 +97,23 @@ impl AudioEngineMixer {
 
     pub fn prepare_render(&mut self, render: &RenderSession) {
         let reaper = Reaper::get();
+        use TrackAttributeKey::*;
 
         unsafe {
             // arm for recording
-            reaper.get_set_media_track_info(self.output_track, TrackAttributeKey::RecArm, &mut 1i32 as *mut i32 as _);
+            reaper.get_set_media_track_info(self.output_track, RecArm, &mut 1i32 as *mut i32 as _);
 
             // set record mode to "output latency compensated"
-            reaper.get_set_media_track_info(self.output_track,
-                                            TrackAttributeKey::RecMode,
-                                            &mut 3i32 as *mut i32 as _);
+            reaper.get_set_media_track_info(self.output_track, RecMode, &mut 3i32 as *mut i32 as _);
 
             // set record monitoring to off
-            reaper.get_set_media_track_info(self.output_track, TrackAttributeKey::RecMon, &mut 0i32 as *mut i32 as _);
+            reaper.get_set_media_track_info(self.output_track, RecMon, &mut 0i32 as *mut i32 as _);
         }
     }
 
     pub fn clear_render(&mut self) -> Option<PathBuf> {
+        use TrackAttributeKey::*;
+
         let reaper = Reaper::get();
         let mut rv = None;
 
@@ -142,6 +135,10 @@ impl AudioEngineMixer {
                     warn!(%err, "failed to delete media item");
                 }
             }
+        }
+
+        unsafe {
+            reaper.get_set_media_track_info(self.output_track, RecArm, &mut 0i32 as *mut i32 as _);
         }
 
         rv

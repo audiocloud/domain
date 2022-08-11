@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::path::PathBuf;
 
 use askama::Template;
