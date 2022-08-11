@@ -1,16 +1,18 @@
+use std::collections::VecDeque;
+use std::ffi::c_void;
+use std::ptr::slice_from_raw_parts;
+
+use anyhow::anyhow;
 use libflac_sys::{
     FLAC__StreamEncoder, FLAC__StreamEncoderWriteStatus, FLAC__byte, FLAC__stream_encoder_delete,
     FLAC__stream_encoder_finish, FLAC__stream_encoder_init_stream, FLAC__stream_encoder_new,
     FLAC__stream_encoder_process, FLAC__stream_encoder_set_bits_per_sample, FLAC__stream_encoder_set_channels,
     FLAC__stream_encoder_set_sample_rate, FLAC__stream_encoder_set_streamable_subset,
 };
-use std::collections::VecDeque;
-use std::ffi::c_void;
-use std::ptr::slice_from_raw_parts;
-
 use r8brain_rs::PrecisionProfile;
 use tracing::*;
 
+use audiocloud_api::audio_engine::CompressedAudio;
 use audiocloud_api::change::PlayId;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -21,7 +23,7 @@ pub struct StreamingConfig {
     pub bit_depth:   usize,
 }
 
-struct AudioBuf {
+pub struct AudioBuf {
     stream:   u64,
     timeline: f64,
     channels: Vec<Vec<f64>>,
@@ -113,6 +115,10 @@ pub struct FlacEncoder {
     bits_per_sample: usize,
     stream_pos:      u64,
     queued_len:      usize,
+    play_id:         PlayId,
+    timeline_pos:    f64,
+    timeline_offset: f64,
+    sample_rate:     f64,
 }
 
 impl Drop for FlacEncoder {
@@ -123,8 +129,12 @@ impl Drop for FlacEncoder {
 
 impl FlacEncoder {
     #[instrument(skip_all)]
-    pub fn new(sample_rate: usize, channels: usize, bits_per_sample: usize) -> Self {
+    pub fn new(play_id: PlayId, sample_rate: usize, channels: usize, bits_per_sample: usize) -> anyhow::Result<Self> {
         debug!(sample_rate, channels, bits_per_sample, "enter");
+
+        if bits_per_sample > 16 {
+            return Err(anyhow!("The reference encoder only supports 16-bit encoding"));
+        }
 
         unsafe {
             let encoder = FLAC__stream_encoder_new();
@@ -146,22 +156,29 @@ impl FlacEncoder {
 
             let tmp_buffer = (0..channels).map(|_| Vec::new()).collect::<Vec<_>>();
 
-            Self { encoder,
-                   internals,
-                   tmp_buffer,
-                   bits_per_sample,
-                   queued_len: 0,
-                   stream_pos: 0 }
+            Ok(Self { encoder,
+                      internals,
+                      tmp_buffer,
+                      bits_per_sample,
+                      play_id,
+                      queued_len: 0,
+                      timeline_pos: 0.0,
+                      timeline_offset: 0.0,
+                      stream_pos: 0,
+                      sample_rate: sample_rate as f64 })
         }
     }
 
-    pub fn process(&mut self, data: AudioBuf, output: &mut VecDeque<EncodedBuf>) {
+    pub fn process(&mut self, data: AudioBuf, output: &mut VecDeque<CompressedAudio>) {
         let converter = match self.bits_per_sample {
-            16 => |s: f64| dasp_sample::conv::f64::to_i16(s) as i32,
-            24 => |s: f64| dasp_sample::conv::f64::to_i24(s).inner(),
-            32 => |s: f64| dasp_sample::conv::f64::to_i32(s),
+            16 => |s: f64| dasp::sample::conv::f64::to_i16(s) as i32,
+            24 => |s: f64| dasp::sample::conv::f64::to_i24(s).inner(),
+            32 => |s: f64| dasp::sample::conv::f64::to_i32(s),
             i => panic!("Only 16, 24 and 32 bits_per_sample supported, not {i}"),
         };
+
+        self.timeline_pos = data.timeline;
+        self.timeline_offset -= (data.channels[0].len() as f64 / self.sample_rate);
 
         let mut pointers = vec![];
         for (input, output) in data.channels.iter().zip(self.tmp_buffer.iter_mut()) {
@@ -181,24 +198,30 @@ impl FlacEncoder {
             self.queued_len += len;
 
             if !self.internals.buffer.is_empty() {
-                output.push_back(EncodedBuf { data:        self.internals.buffer.clone(),
-                                              stream_time: self.stream_pos,
-                                              is_last:     false, });
+                output.push_back(CompressedAudio { play_id:      self.play_id,
+                                                   timeline_pos: self.timeline_pos + self.timeline_offset,
+                                                   stream_pos:   self.stream_pos,
+                                                   buffer:       self.internals.buffer.clone(),
+                                                   last:         false, });
                 self.stream_pos += self.queued_len as u64;
+                self.timeline_offset += (self.queued_len as f64) / self.sample_rate as f64;
+
                 self.queued_len = 0;
                 self.internals.buffer.clear();
             }
         }
     }
 
-    pub fn finish(&mut self, output: &mut VecDeque<EncodedBuf>) {
+    pub fn finish(&mut self, output: &mut VecDeque<CompressedAudio>) {
         unsafe {
             assert_eq!(FLAC__stream_encoder_finish(self.encoder), 1);
         }
 
-        output.push_back(EncodedBuf { data:        self.internals.buffer.clone(),
-                                      stream_time: self.stream_pos,
-                                      is_last:     true, });
+        output.push_back(CompressedAudio { play_id:      self.play_id,
+                                           timeline_pos: self.timeline_pos + self.timeline_offset,
+                                           stream_pos:   self.stream_pos,
+                                           buffer:       self.internals.buffer.clone(),
+                                           last:         true, });
 
         self.internals.buffer.clear();
     }
