@@ -24,13 +24,13 @@ cstr = "0.2"
 lazy_static = "1"
 actix-web = "4"
 
-[dependencies.uuid]
-version = "1"
-features = ["v4"]
-
 [dependencies.serde]
 version = "1"
 features = ["derive"]
+
+[dependencies.uuid]
+version = "1"
+features = ["v4"]
 
 [dependencies.r8brain-rs]
 git = "https://github.com/audiocloud/r8brain-rs.git"

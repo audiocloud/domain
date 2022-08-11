@@ -34,7 +34,7 @@ use audiocloud_api::time::Timestamped;
 use crate::audio_engine::fixed_instance::AudioEngineFixedInstance;
 use crate::audio_engine::media_track::AudioEngineMediaTrack;
 use crate::audio_engine::mixer::AudioEngineMixer;
-use crate::audio_engine::PluginRegistry;
+use crate::audio_engine::{EngineStatus, PluginRegistry};
 
 #[derive(Debug, Clone)]
 enum ProjectPlayState {
@@ -307,6 +307,21 @@ impl AudioEngineProject {
         if let Some(mixer) = self.mixers.remove(mixer_id) {
             mixer.delete(self.context());
         }
+    }
+
+    pub fn get_status(&self) -> anyhow::Result<EngineStatus> {
+        Ok(EngineStatus { plugin_ready: PluginRegistry::has(&self.id)?,
+                          is_playing:   if let ProjectPlayState::Playing(play) = self.play_state.value() {
+                              Some(play.play_id.clone())
+                          } else {
+                              None
+                          },
+                          is_rendering: if let ProjectPlayState::Rendering(render) = self.play_state.value() {
+                              Some(render.render_id.clone())
+                          } else {
+                              None
+                          },
+                          position:     Reaper::get().get_play_position_2_ex(self.context()).get(), })
     }
 
     pub fn render(&mut self, render: RenderSession) -> anyhow::Result<()> {

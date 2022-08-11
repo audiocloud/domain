@@ -8,12 +8,12 @@ use askama::Template;
 use flume::{Receiver, Sender};
 use once_cell::sync::OnceCell;
 use reaper_medium::{ChunkCacheHint, ControlSurface, MediaTrack, ProjectContext, Reaper, TrackDefaultsBehavior};
-use tracing::warn;
+use serde::{Deserialize, Serialize};
+use tracing::*;
 use uuid::Uuid;
 
-use crate::audio_engine::project::AudioEngineProjectTemplateSnapshot;
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent, CompressedAudio};
-use audiocloud_api::change::{PlayId, PlaySession};
+use audiocloud_api::change::{PlayId, PlaySession, RenderId};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::cloud::domains::InstanceRouting;
 use audiocloud_api::model::MultiChannelValue;
@@ -21,6 +21,7 @@ use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId, ConnectionId, Fix
 use audiocloud_api::session::{MixerChannels, SessionConnection, SessionFlowId};
 use project::AudioEngineProject;
 
+use crate::audio_engine::project::AudioEngineProjectTemplateSnapshot;
 use crate::events::AudioEngineCommandWithResultSender;
 
 mod fixed_instance;
@@ -68,6 +69,15 @@ impl PluginRegistry {
         Ok(())
     }
 
+    pub fn has(app_session_id: &AppSessionId) -> anyhow::Result<bool> {
+        let lock = PLUGIN_REGISTRY.get()
+                                  .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
+                                  .lock()
+                                  .map_err(|_| anyhow!("failed to lock plugin registry"))?;
+
+        Ok(lock.plugins.contains_key(app_session_id))
+    }
+
     pub(crate) fn init(tx_engine: Sender<ReaperEngineCommand>) {
         PLUGIN_REGISTRY.set(Mutex::new(PluginRegistry { tx_engine,
                                                         plugins: HashMap::new() }))
@@ -83,6 +93,15 @@ pub enum ReaperEngineCommand {
     PlayReady(AppSessionId, PlayId),
     Audio(AppSessionId, PlayId, CompressedAudio),
     Request(AudioEngineCommandWithResultSender),
+    GetStatus(Sender<anyhow::Result<HashMap<AppSessionId, EngineStatus>>>),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EngineStatus {
+    pub is_playing:   Option<PlayId>,
+    pub is_rendering: Option<RenderId>,
+    pub position:     f64,
+    pub plugin_ready: bool,
 }
 
 #[derive(Debug)]
@@ -97,7 +116,25 @@ pub struct ReaperAudioEngine {
     tx_evt:   Sender<AudioEngineEvent>,
 }
 
+impl Drop for ReaperAudioEngine {
+    fn drop(&mut self) {
+        warn!("ReaperAudioEngine dropped!");
+    }
+}
+
 impl ReaperAudioEngine {
+    pub(crate) fn get_status(&self) -> anyhow::Result<HashMap<AppSessionId, EngineStatus>> {
+        let mut rv = HashMap::new();
+        for (id, session) in &self.sessions {
+            rv.insert(id.clone(), session.get_status()?);
+        }
+
+        Ok(rv)
+    }
+}
+
+impl ReaperAudioEngine {
+    #[instrument(skip_all)]
     pub fn new(tx_cmd: Sender<ReaperEngineCommand>,
                rx_cmd: Receiver<ReaperEngineCommand>,
                tx_evt: Sender<AudioEngineEvent>)
@@ -109,7 +146,9 @@ impl ReaperAudioEngine {
                             tx_evt }
     }
 
+    #[instrument(skip(self), err)]
     fn dispatch_cmd(&mut self, cmd: AudioEngineCommand) -> anyhow::Result<()> {
+        debug!("entered");
         match cmd {
             AudioEngineCommand::SetSpec { session_id,
                                           spec,
@@ -221,6 +260,7 @@ impl ReaperAudioEngine {
 }
 
 impl ControlSurface for ReaperAudioEngine {
+    #[instrument(skip(self))]
     fn run(&mut self) {
         while let Ok(cmd) = self.rx_cmd.try_recv() {
             match cmd {
@@ -242,6 +282,9 @@ impl ControlSurface for ReaperAudioEngine {
                     } else {
                         warn!(%session_id, "Session not found");
                     }
+                }
+                ReaperEngineCommand::GetStatus(send_status) => {
+                    let _ = send_status.send(self.get_status());
                 }
             }
         }

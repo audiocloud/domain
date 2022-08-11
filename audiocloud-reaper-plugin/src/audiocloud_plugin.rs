@@ -1,6 +1,6 @@
 use std::ffi::CStr;
+use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use std::{env, thread};
 
@@ -28,8 +28,7 @@ struct AudioCloudPluginActivation {
     tx_engine: flume::Sender<ReaperEngineCommand>,
 }
 
-const FIRST_TIME_BOOT: AtomicBool = AtomicBool::new(false);
-const SESSION_WRAPPER: OnceCell<ReaperSession> = OnceCell::new();
+static SESSION_WRAPPER: OnceCell<SessionWrapper> = OnceCell::new();
 
 impl Plugin for AudioCloudPlugin {
     fn get_info(&self) -> Info {
@@ -45,7 +44,7 @@ impl Plugin for AudioCloudPlugin {
         SESSION_WRAPPER.get_or_init(|| {
                            eprintln!("==== first time boot ====");
                            init_env();
-                           init_audio_engine(&host)
+                           SessionWrapper(init_audio_engine(&host))
                        });
 
         Self { activation: None,
@@ -69,6 +68,8 @@ impl Plugin for AudioCloudPlugin {
 
             AppSessionId::from_str(cstr.to_string_lossy().as_ref())
         };
+
+        debug!(?maybe_id, "plugin init");
 
         self.activation = maybe_id.ok().map(|id| {
                                            let (tx_plugin, rx_plugin) = flume::unbounded();
@@ -111,18 +112,22 @@ impl Drop for AudioCloudPlugin {
 fn init_env() {
     let _ = dotenv::dotenv();
     if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG", "info,audiocloud_reaper_plugin=debug,audiocloud_api=debug");
+        env::set_var("RUST_LOG",
+                     "info,audiocloud_reaper_plugin=debug,audiocloud_api=debug,vst=warn");
     }
 
     tracing_subscriber::fmt::init();
 }
 
+#[instrument(skip(host))]
 fn init_audio_engine(host: &HostCallback) -> ReaperSession {
+    debug!("initializing audio engine");
     let ctx =
         PluginContext::from_vst_plugin(host, static_vst_plugin_context()).expect("REAPER PluginContext init success");
     let mut session = ReaperSession::load(ctx);
     let reaper = session.reaper().clone();
 
+    debug!("Reaper interface now available globally");
     Reaper::make_available_globally(reaper);
 
     let (tx_cmd, rx_cmd) = flume::unbounded();
@@ -132,7 +137,10 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
     let subscribe_topic = env::var("NATS_CMD_TOPIC").expect("NATS_CMD_TOPIC env var must be set");
     let publish_topic = env::var("NATS_EVT_TOPIC").expect("NATS_EVT_TOPIC env var must be set");
 
+    debug!("Connecting to NATS");
     let connection = nats::connect(nats_url).expect("NATS connection success");
+
+    debug!(topic = %subscribe_topic, "Subscribing to events");
     let subscription = connection.subscribe(&subscribe_topic)
                                  .expect("NATS subscription success");
 
@@ -169,12 +177,39 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
         }
     });
 
+    debug!("Init plugin registry");
     PluginRegistry::init(tx_cmd.clone());
 
-    session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(tx_cmd.clone(), rx_cmd, tx_evt)))
+    session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(tx_cmd, rx_cmd, tx_evt)))
            .expect("REAPER audio engine control surface register success");
 
     info!("init complete");
 
     session
 }
+
+struct SessionWrapper(ReaperSession);
+
+impl DerefMut for SessionWrapper {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Deref for SessionWrapper {
+    type Target = ReaperSession;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl Drop for SessionWrapper {
+    fn drop(&mut self) {
+        debug!("SessionWrapper dropped!");
+    }
+}
+
+unsafe impl Send for SessionWrapper {}
+
+unsafe impl Sync for SessionWrapper {}
