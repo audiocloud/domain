@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use askama::Template;
 use reaper_medium::{MediaTrack, ProjectContext, Reaper, TrackAttributeKey};
-use tracing::warn;
+use tracing::*;
 use uuid::Uuid;
 
 use audiocloud_api::change::RenderSession;
@@ -38,6 +38,7 @@ impl AudioEngineMixer {
 }
 
 impl AudioEngineMixer {
+    #[instrument(skip_all, err)]
     pub fn new(project: &AudioEngineProject, mixer_id: MixerId, spec: SessionMixer) -> anyhow::Result<Self> {
         let input_flow_id = SessionFlowId::MixerInput(mixer_id.clone());
         let output_flow_id = SessionFlowId::MixerOutput(mixer_id.clone());
@@ -77,9 +78,15 @@ impl AudioEngineMixer {
         Ok(beautify_chunk(AudioEngineMixerOutputTemplate { project, mixer: self }.render()?))
     }
 
+    #[instrument(skip_all, err, fields(id = %self.mixer_id))]
     pub fn update_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<()> {
-        set_track_chunk(self.input_track, &self.get_input_state_chunk(project)?)?;
-        set_track_chunk(self.output_track, &self.get_output_state_chunk(project)?)?;
+        set_track_chunk(project.context(),
+                        self.input_track,
+                        &self.get_input_state_chunk(project)?)?;
+
+        set_track_chunk(project.context(),
+                        self.output_track,
+                        &self.get_output_state_chunk(project)?)?;
 
         Ok(())
     }

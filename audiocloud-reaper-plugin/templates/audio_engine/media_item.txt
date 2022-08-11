@@ -6,7 +6,7 @@
     NAME "{{ media.media_id.to_string() }}"
     {% match media.path %}
         {% when Some with (path) %}
-        GUID {{ media.take_id.hyphenated().to_string()|upper }}
+        GUID {{ media.take_id.braced().to_string()|upper }}
         <SOURCE SECTION
             STARTPOS {{ media.spec.media_segment.start }}
             LENGTH {{ media.spec.media_segment.length }}

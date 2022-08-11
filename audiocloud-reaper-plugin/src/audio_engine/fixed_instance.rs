@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use askama::Template;
 use itertools::Itertools;
 use reaper_medium::{MediaTrack, ProjectContext};
+use tracing::*;
 use uuid::Uuid;
 
 use audiocloud_api::cloud::domains::InstanceRouting;
@@ -28,6 +29,7 @@ pub struct AudioEngineFixedInstance {
 }
 
 impl AudioEngineFixedInstance {
+    #[instrument(skip_all, err)]
     pub fn new(project: &AudioEngineProject,
                fixed_id: FixedId,
                spec: SessionFixedInstance,
@@ -123,9 +125,12 @@ impl AudioEngineFixedInstance {
         }
     }
 
+    #[instrument(skip_all, err, fields(id = %self.fixed_id))]
     pub fn update_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<()> {
-        set_track_chunk(self.send_track, &self.get_send_state_chunk(project)?)?;
-        set_track_chunk(self.return_track, &self.get_return_state_chunk(project)?)?;
+        set_track_chunk(project.context(), self.send_track, &self.get_send_state_chunk(project)?)?;
+        set_track_chunk(project.context(),
+                        self.return_track,
+                        &self.get_return_state_chunk(project)?)?;
 
         Ok(())
     }

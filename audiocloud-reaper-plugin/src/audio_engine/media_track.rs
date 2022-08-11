@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use askama::Template;
 use reaper_medium::{MediaTrack, ProjectContext};
+use tracing::*;
 use uuid::Uuid;
 
 use audiocloud_api::model::MultiChannelValue;
@@ -16,9 +17,9 @@ use crate::audio_engine::{append_track, delete_track, set_track_chunk};
 
 #[derive(Debug)]
 pub struct AudioEngineMediaTrack {
-    id:       Uuid,
+    id:       TrackId,
+    track_id: Uuid,
     app_id:   AppId,
-    track_id: TrackId,
     flow_id:  SessionFlowId,
     track:    MediaTrack,
     media:    HashMap<MediaId, AudioEngineMediaItem>,
@@ -27,6 +28,7 @@ pub struct AudioEngineMediaTrack {
 }
 
 impl AudioEngineMediaTrack {
+    #[instrument(skip_all, err)]
     pub fn new(project: &AudioEngineProject,
                app_id: AppId,
                track_id: TrackId,
@@ -48,9 +50,9 @@ impl AudioEngineMediaTrack {
                          AudioEngineMediaItem::new(track, &root_dir, &app_id, media_id, media_spec, existing_media)?);
         }
 
-        let rv = Self { id,
+        let rv = Self { track_id: id,
                         app_id,
-                        track_id,
+                        id: track_id,
                         flow_id,
                         track,
                         media,
@@ -60,6 +62,7 @@ impl AudioEngineMediaTrack {
         Ok(rv)
     }
 
+    #[instrument(skip_all)]
     pub fn delete(self, context: ProjectContext) {
         delete_track(context, self.track);
     }
@@ -86,6 +89,7 @@ impl AudioEngineMediaTrack {
         rv
     }
 
+    #[instrument(skip_all, err)]
     pub fn set_media_values(&mut self,
                             media_id: MediaId,
                             update: UpdateSessionTrackMedia,
@@ -103,6 +107,7 @@ impl AudioEngineMediaTrack {
         }
     }
 
+    #[instrument(skip_all, err)]
     pub fn add_media(&mut self,
                      media_id: MediaId,
                      spec: SessionTrackMedia,
@@ -116,6 +121,7 @@ impl AudioEngineMediaTrack {
         Ok(true)
     }
 
+    #[instrument(skip_all, err)]
     pub fn delete_media(&mut self, media_id: &MediaId) -> anyhow::Result<bool> {
         if let Some(media) = self.media.remove(media_id) {
             media.delete()?;
@@ -125,8 +131,9 @@ impl AudioEngineMediaTrack {
         }
     }
 
+    #[instrument(skip_all, err, fields(id = %self.id))]
     pub fn update_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<()> {
-        set_track_chunk(self.track, &self.get_state_chunk(project)?)?;
+        set_track_chunk(project.context(), self.track, &self.get_state_chunk(project)?)?;
 
         Ok(())
     }

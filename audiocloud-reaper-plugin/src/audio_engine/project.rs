@@ -65,6 +65,10 @@ pub struct AudioEngineProjectTemplateSnapshot {
 }
 
 impl AudioEngineProjectTemplateSnapshot {
+    pub fn context(&self) -> ProjectContext {
+        self.context
+    }
+
     pub fn track_index(&self, flow_id: SessionFlowId) -> Option<usize> {
         let reaper = Reaper::get();
         let mut index = 0;
@@ -116,6 +120,7 @@ struct AudioEngineProjectTemplate<'a> {
 }
 
 impl AudioEngineProject {
+    #[instrument(skip_all, err)]
     pub fn new(id: AppSessionId,
                temp_dir: TempDir,
                session_spec: SessionSpec,
@@ -218,6 +223,7 @@ impl AudioEngineProject {
         rv
     }
 
+    #[instrument(skip_all, err)]
     pub fn focus(&self) -> anyhow::Result<()> {
         let reaper = Reaper::get();
         let mut first = None;
@@ -249,6 +255,7 @@ impl Drop for AudioEngineProject {
         if self.project.as_ptr() != null_mut() {
             let reaper = Reaper::get();
             if let Ok(_) = self.focus() {
+                debug!(id = %self.id, "Closing project");
                 reaper.main_on_command_ex(*CMD_CLOSE_CURRENT_PROJECT_TAB, 0, self.context());
             } else {
                 warn!("Project could not be focused for closing");

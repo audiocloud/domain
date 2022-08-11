@@ -381,19 +381,29 @@ pub(crate) fn append_track(flow_id: &SessionFlowId, context: ProjectContext) -> 
     Ok((track, track_id))
 }
 
+#[instrument(skip_all)]
 pub(crate) fn delete_track(context: ProjectContext, track: MediaTrack) {
     let reaper = Reaper::get();
     if reaper.validate_ptr_2(context, track) {
         unsafe {
             reaper.delete_track(track);
         }
+        debug!("deleted");
+    } else {
+        warn!(?track, "invalid track");
     }
 }
 
-pub(crate) fn set_track_chunk(track: MediaTrack, chunk: &str) -> anyhow::Result<()> {
+#[instrument(skip_all, err)]
+pub(crate) fn set_track_chunk(context: ProjectContext, track: MediaTrack, chunk: &str) -> anyhow::Result<()> {
     let reaper = Reaper::get();
     unsafe {
-        reaper.set_track_state_chunk(track, chunk, ChunkCacheHint::NormalMode)?;
+        if reaper.validate_ptr_2(context, track) {
+            reaper.set_track_state_chunk(track, chunk, ChunkCacheHint::NormalMode)?;
+            debug!(?chunk, "chunk set");
+        } else {
+            warn!(?track, "invalid track");
+        }
     }
 
     Ok(())
