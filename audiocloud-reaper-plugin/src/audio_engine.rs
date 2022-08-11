@@ -146,9 +146,9 @@ impl ReaperAudioEngine {
                             tx_evt }
     }
 
-    #[instrument(skip(self), err)]
+    #[instrument(skip_all, err)]
     fn dispatch_cmd(&mut self, cmd: AudioEngineCommand) -> anyhow::Result<()> {
-        debug!("entered");
+        debug!(?cmd, "entered");
         match cmd {
             AudioEngineCommand::SetSpec { session_id,
                                           spec,

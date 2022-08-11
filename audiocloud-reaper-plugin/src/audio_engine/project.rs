@@ -321,7 +321,7 @@ impl AudioEngineProject {
                           } else {
                               None
                           },
-                          position:     Reaper::get().get_play_position_2_ex(self.context()).get(), })
+                          position:     Reaper::get().get_play_position_ex(self.context()).get(), })
     }
 
     pub fn render(&mut self, render: RenderSession) -> anyhow::Result<()> {
@@ -411,11 +411,19 @@ impl AudioEngineProject {
         Ok(())
     }
 
+    #[instrument(skip_all, err)]
     pub fn set_spec(&mut self,
                     spec: SessionSpec,
                     instances: HashMap<FixedInstanceId, InstanceRouting>,
                     media: HashMap<AppMediaObjectId, String>)
                     -> anyhow::Result<()> {
+        if &self.spec == &spec {
+            debug!("incoming spec is the same, not changing anything");
+            return Ok(());
+        }
+
+        debug!(?spec, "new spec");
+
         self.stop()?;
         self.clear();
 
