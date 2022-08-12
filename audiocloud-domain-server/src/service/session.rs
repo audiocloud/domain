@@ -105,20 +105,27 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                 }
             }
             AudioEngineEvent::Playing { session_id,
-                                        playing,
+                                        play_id,
                                         audio,
                                         peak_meters,
                                         dynamic_reports, } => {
-                if !self.state.play_state.value().is_playing(playing.play_id) {
-                    self.state.play_state = SessionPlayState::Playing(playing).into();
-                    self.emit_state();
+                if let DesiredSessionPlayState::Play(play) = self.state.desired_play_state.value() {
+                    if play.play_id == play_id && !self.state.play_state.value().is_playing(play_id) {
+                        self.state.play_state = SessionPlayState::Playing(play.clone()).into();
+                        self.emit_state();
+                    }
                 }
+
                 self.packet.push_audio_packets(audio);
             }
-            AudioEngineEvent::Rendering { session_id, rendering } => {
-                if !self.state.play_state.value().is_rendering(rendering.render_id) {
-                    self.state.play_state = SessionPlayState::Rendering(rendering).into();
-                    self.emit_state();
+            AudioEngineEvent::Rendering { session_id,
+                                          render_id,
+                                          completion, } => {
+                if let DesiredSessionPlayState::Render(render) = self.state.desired_play_state.value() {
+                    if render.render_id == render_id && !self.state.play_state.value().is_rendering(render_id) {
+                        self.state.play_state = SessionPlayState::Rendering(render.clone()).into();
+                        self.emit_state();
+                    }
                 }
             }
             AudioEngineEvent::RenderingFinished { session_id,
@@ -129,8 +136,19 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                                                                render_id,
                                                                path });
             }
-            AudioEngineEvent::Error { .. } => {
+            AudioEngineEvent::Error { session_id, error } => {
+                // TODO:
                 self.engine_loaded = false;
+            }
+            AudioEngineEvent::PlayingFailed { session_id,
+                                              play_id,
+                                              error, } => {
+                // TODO:
+            }
+            AudioEngineEvent::RenderingFailed { session_id,
+                                                render_id,
+                                                reason, } => {
+                // TODO:
             }
         }
     }

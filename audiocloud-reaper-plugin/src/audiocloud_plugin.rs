@@ -131,6 +131,7 @@ impl AudioCloudPluginActivation {
         let drain = self.make_drain();
 
         while let Ok(cmd) = self.rx_plugin.try_recv() {
+            // creating an encoder may be invasive, maybe a scoped thread and a mutex is better to handle it?
             self.dispatch_cmd(cmd, native_channels, native_sample_rate)?;
         }
 
