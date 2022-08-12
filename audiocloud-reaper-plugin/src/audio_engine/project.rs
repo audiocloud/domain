@@ -52,7 +52,8 @@ pub struct AudioEngineProject {
     fixed_instances:       HashMap<FixedId, AudioEngineFixedInstance>,
     mixers:                HashMap<MixerId, AudioEngineMixer>,
     spec:                  SessionSpec,
-    media_root:            PathBuf,
+    local_media_root:      PathBuf,
+    shared_media_root:     PathBuf,
     pub play_state:        Timestamped<ProjectPlayState>,
     pub temp_dir:          TempDir,
     pub session_path:      PathBuf,
@@ -127,19 +128,21 @@ impl AudioEngineProject {
     #[instrument(skip_all, err)]
     pub fn new(id: AppSessionId,
                temp_dir: TempDir,
+               shared_media_root: PathBuf,
                session_spec: SessionSpec,
                instances: HashMap<FixedInstanceId, InstanceRouting>,
                media: HashMap<AppMediaObjectId, String>)
                -> anyhow::Result<Self> {
         let reaper = Reaper::get();
 
-        let media_root = temp_dir.path().join("media");
+        // this is not OK we need to configure it
+        let local_media_root = temp_dir.path().join("media");
         let session_path = temp_dir.path().join("session.rpp");
 
         fs::write(&session_path,
                   AudioEngineProjectTemplate { spec:       &session_spec,
                                                session_id: &id,
-                                               media_root: media_root.to_string_lossy().to_string(), }.render()?)?;
+                                               media_root: local_media_root.to_string_lossy().to_string(), }.render()?)?;
 
         reaper.main_on_command_ex(*CMD_CREATE_PROJECT_TAB, 0, CurrentProject);
 
@@ -170,7 +173,8 @@ impl AudioEngineProject {
                             fixed_instances,
                             mixers,
                             spec,
-                            media_root,
+                            local_media_root,
+                            shared_media_root,
                             temp_dir,
                             session_path,
                             play_state,
@@ -265,8 +269,8 @@ impl AudioEngineProject {
         ProjectContext::Proj(self.project)
     }
 
-    pub fn media_root_dir(&self) -> PathBuf {
-        self.media_root.clone()
+    pub fn shared_media_root_dir(&self) -> PathBuf {
+        self.shared_media_root.clone()
     }
 
     pub fn get_peak_meters(&self) -> HashMap<SessionFlowId, MultiChannelValue> {
@@ -429,7 +433,7 @@ impl AudioEngineProject {
         self.set_play_position(play.start_at, false);
         self.set_looping(play.looping);
 
-        PluginRegistry::play(&self.id, play.clone())?;
+        PluginRegistry::play(&self.id, play.clone(), self.context())?;
 
         self.play_state = ProjectPlayState::PreparingToPlay(play).into();
 

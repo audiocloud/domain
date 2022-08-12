@@ -11,9 +11,10 @@ use libflac_sys::{
 };
 use r8brain_rs::PrecisionProfile;
 use tracing::*;
+use vst::buffer::AudioBuffer;
 
 use audiocloud_api::audio_engine::CompressedAudio;
-use audiocloud_api::change::PlayId;
+use audiocloud_api::change::{PlayId, PlaySession};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct StreamingConfig {
@@ -169,16 +170,18 @@ impl FlacEncoder {
         }
     }
 
-    pub fn process(&mut self, data: AudioBuf, output: &mut VecDeque<CompressedAudio>) {
+    pub fn process(&mut self, data: AudioBuf, output: &mut VecDeque<CompressedAudio>) -> anyhow::Result<()> {
         let converter = match self.bits_per_sample {
             16 => |s: f64| dasp::sample::conv::f64::to_i16(s) as i32,
             24 => |s: f64| dasp::sample::conv::f64::to_i24(s).inner(),
             32 => |s: f64| dasp::sample::conv::f64::to_i32(s),
-            i => panic!("Only 16, 24 and 32 bits_per_sample supported, not {i}"),
+            i => {
+                return Err(anyhow!("Only 16, 24 and 32 bits_per_sample supported, not {i}"));
+            }
         };
 
         self.timeline_pos = data.timeline;
-        self.timeline_offset -= (data.channels[0].len() as f64 / self.sample_rate);
+        self.timeline_offset -= data.channels[0].len() as f64 / self.sample_rate;
 
         let mut pointers = vec![];
         for (input, output) in data.channels.iter().zip(self.tmp_buffer.iter_mut()) {
@@ -191,8 +194,9 @@ impl FlacEncoder {
 
         if len > 0 {
             unsafe {
-                assert_eq!(FLAC__stream_encoder_process(self.encoder, pointers.as_ptr(), len as u32),
-                           1);
+                if FLAC__stream_encoder_process(self.encoder, pointers.as_ptr(), len as u32) != 1 {
+                    return Err(anyhow!("FLAC__stream_encoder_process failed"));
+                }
             }
 
             self.queued_len += len;
@@ -210,11 +214,15 @@ impl FlacEncoder {
                 self.internals.buffer.clear();
             }
         }
+
+        Ok(())
     }
 
-    pub fn finish(&mut self, output: &mut VecDeque<CompressedAudio>) {
+    pub fn finish(&mut self, output: &mut VecDeque<CompressedAudio>) -> anyhow::Result<()> {
         unsafe {
-            assert_eq!(FLAC__stream_encoder_finish(self.encoder), 1);
+            if FLAC__stream_encoder_finish(self.encoder) != 1 {
+                return Err(anyhow!("FLAC__stream_encoder_finish failed"));
+            }
         }
 
         output.push_back(CompressedAudio { play_id:      self.play_id,
@@ -224,6 +232,8 @@ impl FlacEncoder {
                                            last:         true, });
 
         self.internals.buffer.clear();
+
+        Ok(())
     }
 }
 
@@ -243,4 +253,76 @@ unsafe extern "C" fn write(_encoder: *const FLAC__StreamEncoder,
 
 struct SharedInternals {
     buffer: Vec<u8>,
+}
+
+pub struct EncoderChain {
+    resampler:      Option<Resampler>,
+    encoder:        FlacEncoder,
+    queue:          VecDeque<AudioBuf>,
+    stream:         u64,
+    pub play:       PlaySession,
+    pub compressed: VecDeque<CompressedAudio>,
+}
+
+unsafe impl Send for EncoderChain {}
+
+impl EncoderChain {
+    pub fn new(play: PlaySession, native_channels: usize, native_sample_rate: usize) -> anyhow::Result<Self> {
+        let play_sample_rate: usize = play.sample_rate.into();
+        let resampler = if native_sample_rate == play_sample_rate {
+            None
+        } else {
+            Some(Resampler::new(native_channels, play_sample_rate as f64, native_sample_rate as f64))
+        };
+
+        let encoder = FlacEncoder::new(play.play_id, native_sample_rate, native_channels, play.bit_depth.into())?;
+
+        let queue = VecDeque::new();
+        let compressed = VecDeque::new();
+        let stream = 0;
+
+        Ok(Self { play,
+                  resampler,
+                  encoder,
+                  queue,
+                  compressed,
+                  stream })
+    }
+
+    pub fn process(&mut self, buf: &mut AudioBuffer<f64>, timeline: f64) -> anyhow::Result<()> {
+        let (inputs, _) = buf.split();
+
+        let buf = AudioBuf { timeline,
+                             stream: self.stream,
+                             channels: (0..inputs.len()).map(|i| Vec::from_iter(inputs.get(i).into_iter().copied()))
+                                                        .collect() };
+
+        self.stream += buf.channels[0].len() as u64;
+
+        if let Some(resampler) = self.resampler.as_mut() {
+            resampler.resample(buf, &mut self.queue)?;
+        } else {
+            self.queue.push_back(buf);
+        }
+
+        while let Some(buf) = self.queue.pop_front() {
+            self.encoder.process(buf, &mut self.compressed)?;
+        }
+
+        Ok(())
+    }
+
+    pub fn finish(mut self) -> anyhow::Result<VecDeque<CompressedAudio>> {
+        if let Some(resampler) = self.resampler.as_mut() {
+            resampler.finish(&mut self.queue)?;
+        }
+
+        while let Some(buf) = self.queue.pop_front() {
+            self.encoder.process(buf, &mut self.compressed)?;
+        }
+
+        self.encoder.finish(&mut self.compressed)?;
+
+        Ok(self.compressed)
+    }
 }

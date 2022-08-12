@@ -40,8 +40,10 @@ impl AudioEngineMediaItem {
 
         debug!(%object_id, "object_id");
 
-        let path = media.get(&object_id)
-                        .map(|path| media_root.join(path).to_string_lossy().to_string());
+        let path = match media.get(&object_id) {
+            Some(path) => Some(media_root.join(path).canonicalize()?.to_string_lossy().to_string()),
+            None => None,
+        };
 
         debug!(?path, "path");
 

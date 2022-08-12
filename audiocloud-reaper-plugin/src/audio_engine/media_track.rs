@@ -37,7 +37,7 @@ impl AudioEngineMediaTrack {
                -> anyhow::Result<Self> {
         project.focus()?;
 
-        let root_dir = project.media_root_dir();
+        let root_dir = project.shared_media_root_dir();
 
         let flow_id = SessionFlowId::TrackOutput(track_id.clone());
 

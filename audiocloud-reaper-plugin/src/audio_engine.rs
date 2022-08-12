@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::thread;
 
@@ -54,7 +55,7 @@ impl PluginRegistry {
         lock.plugins.remove(id);
     }
 
-    pub fn play(app_session_id: &AppSessionId, play: PlaySession) -> anyhow::Result<()> {
+    pub fn play(app_session_id: &AppSessionId, play: PlaySession, context: ProjectContext) -> anyhow::Result<()> {
         let lock = PLUGIN_REGISTRY.get()
                                   .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
                                   .lock()
@@ -64,7 +65,8 @@ impl PluginRegistry {
                          .get(app_session_id)
                          .ok_or_else(|| anyhow!("No plugin for session {app_session_id}"))?;
 
-        plugin.try_send(StreamingPluginCommand::Play(play))?;
+        let _ = plugin.try_send(StreamingPluginCommand::Play { context: ProjectContext::CurrentProject,
+                                                               play });
 
         Ok(())
     }
@@ -79,7 +81,7 @@ impl PluginRegistry {
                          .get(app_session_id)
                          .ok_or_else(|| anyhow!("No plugin for session {app_session_id}"))?;
 
-        plugin.try_send(StreamingPluginCommand::Flush(play_id))?;
+        let _ = plugin.try_send(StreamingPluginCommand::Flush { play_id });
 
         Ok(())
     }
@@ -106,6 +108,7 @@ static PLUGIN_REGISTRY: OnceCell<Mutex<PluginRegistry>> = OnceCell::new();
 #[derive(Debug)]
 pub enum ReaperEngineCommand {
     PlayReady(AppSessionId, PlayId),
+    PlayError(AppSessionId, String),
     Audio(AppSessionId, PlayId, CompressedAudio),
     Request(AudioEngineCommandWithResultSender),
     GetStatus(Sender<anyhow::Result<HashMap<AppSessionId, EngineStatus>>>),
@@ -122,15 +125,21 @@ pub struct EngineStatus {
 
 #[derive(Debug)]
 pub enum StreamingPluginCommand {
-    Play(PlaySession),
-    Flush(PlayId),
+    Play {
+        context: ProjectContext,
+        play:    PlaySession,
+    },
+    Flush {
+        play_id: PlayId,
+    },
 }
 
 #[derive(Debug)]
 pub struct ReaperAudioEngine {
-    sessions: HashMap<AppSessionId, AudioEngineProject>,
-    rx_cmd:   Receiver<ReaperEngineCommand>,
-    tx_evt:   Sender<AudioEngineEvent>,
+    shared_media_root: PathBuf,
+    sessions:          HashMap<AppSessionId, AudioEngineProject>,
+    rx_cmd:            Receiver<ReaperEngineCommand>,
+    tx_evt:            Sender<AudioEngineEvent>,
 }
 
 impl Drop for ReaperAudioEngine {
@@ -152,13 +161,15 @@ impl ReaperAudioEngine {
 
 impl ReaperAudioEngine {
     #[instrument(skip_all)]
-    pub fn new(tx_cmd: Sender<ReaperEngineCommand>,
+    pub fn new(shared_media_root: PathBuf,
+               tx_cmd: Sender<ReaperEngineCommand>,
                rx_cmd: Receiver<ReaperEngineCommand>,
                tx_evt: Sender<AudioEngineEvent>)
                -> ReaperAudioEngine {
         thread::spawn(move || rest_api::run(tx_cmd));
 
         ReaperAudioEngine { sessions: HashMap::new(),
+                            shared_media_root,
                             rx_cmd,
                             tx_evt }
     }
@@ -255,7 +266,12 @@ impl ReaperAudioEngine {
         let temp_dir = tempdir::TempDir::new("audiocloud-session")?;
 
         self.sessions.insert(session_id.clone(),
-                             AudioEngineProject::new(session_id, temp_dir, spec, instances, media)?);
+                             AudioEngineProject::new(session_id,
+                                                     temp_dir,
+                                                     self.shared_media_root.clone(),
+                                                     spec,
+                                                     instances,
+                                                     media)?);
 
         Ok(())
     }
@@ -302,6 +318,9 @@ impl ControlSurface for ReaperAudioEngine {
                 }
                 ReaperEngineCommand::GetStatus(send_status) => {
                     let _ = send_status.send(self.get_status());
+                }
+                ReaperEngineCommand::PlayError(session_id, error) => {
+                    let _ = self.tx_evt.send(AudioEngineEvent::Error { session_id, error });
                 }
             }
         }

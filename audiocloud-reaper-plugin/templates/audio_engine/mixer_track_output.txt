@@ -3,7 +3,7 @@
     NCHAN {{ mixer.spec.output_channels }}
     VOLPAN 1.0 0.0 -1.0
     MUTESOLO 0 0 0
-    SHOWINMIX 1 0.6 0.5 0 0.5 -1 -1 -1
+    SHOWINMIX 1 0.6 0.5 1 0.5 -1 -1 -1
     TRACKID {{ mixer.output_id.braced().to_string()|upper }}
     MAINSEND 0
     {% match project.mixer_input_track_index(mixer.mixer_id) %}

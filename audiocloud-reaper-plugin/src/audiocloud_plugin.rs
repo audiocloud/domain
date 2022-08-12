@@ -1,20 +1,24 @@
+use std::collections::VecDeque;
 use std::ffi::CStr;
 use std::ops::{Deref, DerefMut};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 use std::{env, thread};
 
 use once_cell::sync::OnceCell;
 use reaper_low::{static_vst_plugin_context, PluginContext};
-use reaper_medium::{ProjectRef, Reaper, ReaperSession};
+use reaper_medium::{ProjectContext, ProjectRef, Reaper, ReaperSession};
 use tracing::*;
 use vst::prelude::*;
 
-use audiocloud_api::audio_engine::AudioEngineEvent;
+use audiocloud_api::audio_engine::{AudioEngineEvent, CompressedAudio};
+use audiocloud_api::change::PlayId;
 use audiocloud_api::codec::{Codec, MsgPack};
 use audiocloud_api::newtypes::AppSessionId;
 
 use crate::audio_engine::{PluginRegistry, ReaperAudioEngine, ReaperEngineCommand, StreamingPluginCommand};
+use crate::streaming::EncoderChain;
 
 pub struct AudioCloudPlugin {
     activation:         Option<AudioCloudPluginActivation>,
@@ -26,6 +30,8 @@ struct AudioCloudPluginActivation {
     id:        AppSessionId,
     rx_plugin: flume::Receiver<StreamingPluginCommand>,
     tx_engine: flume::Sender<ReaperEngineCommand>,
+    chain:     Option<EncoderChain>,
+    context:   ProjectContext,
 }
 
 static SESSION_WRAPPER: OnceCell<SessionWrapper> = OnceCell::new();
@@ -35,6 +41,8 @@ impl Plugin for AudioCloudPlugin {
         Info { name: "Audiocloud Plugin".to_string(),
                unique_id: 0xbad1337,
                f64_precision: true,
+               inputs: 2,
+               outputs: 0,
                ..Default::default() }
     }
 
@@ -77,7 +85,9 @@ impl Plugin for AudioCloudPlugin {
 
                                            AudioCloudPluginActivation { id,
                                                                         rx_plugin,
-                                                                        tx_engine }
+                                                                        tx_engine,
+                                                                        chain: None,
+                                                                        context: ProjectContext::CurrentProject }
                                        });
     }
 
@@ -98,6 +108,84 @@ impl Plugin for AudioCloudPlugin {
                inputs = buffer.input_count(),
                outputs = buffer.output_count(),
                "process_f64");
+
+        if let Some(activation) = self.activation.as_mut() {
+            if let Err(err) = activation.process(buffer, 2, self.native_sample_rate) {
+                activation.error(err.to_string());
+            }
+        }
+    }
+}
+
+impl AudioCloudPluginActivation {
+    pub fn error(&self, error: String) {
+        let _ = self.tx_engine
+                    .try_send(ReaperEngineCommand::PlayError(self.id.clone(), error));
+    }
+
+    pub(crate) fn process(&mut self,
+                          buf: &mut AudioBuffer<f64>,
+                          native_channels: usize,
+                          native_sample_rate: usize)
+                          -> anyhow::Result<()> {
+        let drain = self.make_drain();
+
+        while let Ok(cmd) = self.rx_plugin.try_recv() {
+            self.dispatch_cmd(cmd, native_channels, native_sample_rate)?;
+        }
+
+        if let Some(chain) = self.chain.as_mut() {
+            chain.process(buf, Reaper::get().get_play_position_2_ex(self.context).get())?;
+            drain(chain.play.play_id, &mut chain.compressed)?;
+        }
+
+        Ok(())
+    }
+
+    fn dispatch_cmd(&mut self,
+                    cmd: StreamingPluginCommand,
+                    native_channels: usize,
+                    native_sample_rate: usize)
+                    -> anyhow::Result<()> {
+        let drain = self.make_drain();
+
+        match cmd {
+            StreamingPluginCommand::Play { context, play } => {
+                if let Some(chain) = self.chain.take() {
+                    let play_id = chain.play.play_id;
+                    let mut compressed = chain.finish()?;
+                    drain(play_id, &mut compressed)?;
+                }
+
+                self.chain = Some(EncoderChain::new(play, native_channels, native_sample_rate)?);
+                self.context = context;
+            }
+            StreamingPluginCommand::Flush { play_id } => {
+                if let Some(mut chain) = self.chain.take() {
+                    if chain.play.play_id == play_id {
+                        let mut compressed = chain.finish()?;
+                        drain(play_id, &mut compressed)?;
+                    }
+
+                    self.chain = None;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn make_drain(&self) -> impl Fn(PlayId, &mut VecDeque<CompressedAudio>) -> anyhow::Result<()> {
+        let id = self.id.clone();
+        let tx_engine = self.tx_engine.clone();
+
+        move |play_id: PlayId, compressed: &mut VecDeque<CompressedAudio>| -> anyhow::Result<()> {
+            while let Some(compressed_audio) = compressed.pop_front() {
+                tx_engine.send(ReaperEngineCommand::Audio(id.clone(), play_id, compressed_audio))?;
+            }
+
+            Ok(())
+        }
     }
 }
 
@@ -136,6 +224,13 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
     let nats_url = env::var("NATS_URL").expect("NATS_URL env var must be set");
     let subscribe_topic = env::var("NATS_CMD_TOPIC").expect("NATS_CMD_TOPIC env var must be set");
     let publish_topic = env::var("NATS_EVT_TOPIC").expect("NATS_EVT_TOPIC env var must be set");
+    let shared_media_root =
+        PathBuf::from(env::var("SHARED_MEDIA_ROOT")
+            .expect("SHARED_MEDIA_ROOT env var must be set"))
+            .canonicalize()
+            .expect("SHARED_MEDIA_ROOT must be a valid path");
+
+    info!(?shared_media_root, "Shared media located at");
 
     debug!("Connecting to NATS");
     let connection = nats::connect(nats_url).expect("NATS connection success");
@@ -180,7 +275,7 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
     debug!("Init plugin registry");
     PluginRegistry::init(tx_cmd.clone());
 
-    session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(tx_cmd, rx_cmd, tx_evt)))
+    session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(shared_media_root, tx_cmd, rx_cmd, tx_evt)))
            .expect("REAPER audio engine control surface register success");
 
     info!("init complete");
