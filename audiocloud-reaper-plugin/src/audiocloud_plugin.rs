@@ -184,6 +184,7 @@ impl AudioCloudPluginActivation {
 
         move |play_id: PlayId, compressed: &mut VecDeque<CompressedAudio>| -> anyhow::Result<()> {
             while let Some(compressed_audio) = compressed.pop_front() {
+                debug!(play_id = %play_id, bytes = compressed_audio.buffer.len(), stream_pos = compressed_audio.stream_pos, timeline_pos = compressed_audio.timeline_pos, "drain");
                 tx_engine.send(ReaperEngineCommand::Audio(id.clone(), play_id, compressed_audio))?;
             }
 
