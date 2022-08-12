@@ -106,6 +106,7 @@ impl AudioEngineProjectTemplateSnapshot {
     }
 }
 
+// NOTE: requires SWS extensions
 lazy_static! {
     static ref CMD_REC_MODE_SET_TIME_RANGE_AUTO_PUNCH: CommandId = CommandId::new(40076);
     static ref CMD_CREATE_PROJECT_TAB: CommandId = CommandId::new(40859);
@@ -195,6 +196,7 @@ impl AudioEngineProject {
         if let ProjectPlayState::PreparingToPlay(play) = self.play_state.value() {
             if play.play_id == play_id {
                 self.play_state = ProjectPlayState::Playing(play.clone()).into();
+                Reaper::get().on_play_button_ex(self.context());
             }
         }
     }
@@ -203,29 +205,35 @@ impl AudioEngineProject {
     pub fn run(&mut self) -> anyhow::Result<()> {
         let context = self.context();
 
-        if let ProjectPlayState::PreparingToPlay(_) = self.play_state.value() {
-            if self.play_state.elapsed().num_seconds() > 1 {
-                self.play_state = ProjectPlayState::Stopped.into();
-                self.events.push_back(AudioEngineEvent::Error { session_id: self.id.clone(),
-                                                     error:
-                                                         format!("Timed out preparing resampling or compression"), });
-            }
-        }
-
         let reaper = Reaper::get();
         let new_play_state = reaper.get_play_state_ex(context);
         let cur_pos = reaper.get_play_position_ex(context).get();
 
-        if &new_play_state != self.reaper_play_state.value() {
-            match self.play_state.value().clone() {
-                ProjectPlayState::Playing(play) if !new_play_state.is_playing => {
+        match self.play_state.value().clone() {
+            ProjectPlayState::PreparingToPlay(play) => {
+                debug!(play_id = %play.play_id, "waiting for plugin to be ready...");
+                if self.play_state.elapsed().num_seconds() > 1 {
+                    self.play_state = ProjectPlayState::Stopped.into();
+                    self.events.push_back(AudioEngineEvent::Error { session_id: self.id.clone(),
+                        error:
+                        format!("Timed out preparing resampling or compression"), });
+                }
+            }
+            ProjectPlayState::Playing(play) => {
+                debug!(cur_pos, end = play.segment.end(), "playing...");
+                if !new_play_state.is_playing && self.reaper_play_state.value().is_playing {
+                    debug!(play_id = %play.play_id, "reached end of play");
                     self.clean_up_end_of_play(play.play_id);
                 }
-                ProjectPlayState::Rendering(render) if render.segment.end() >= cur_pos => {
+            }
+            ProjectPlayState::Rendering(render) => {
+                debug!(cur_pos, end = render.segment.end(), "rendering...");
+                if cur_pos >= render.segment.end() {
+                    debug!(render_id = %render.render_id, "reached end of render");
                     self.clean_up_end_of_render(render.mixer_id.clone(), render.render_id);
                 }
-                _ => {}
             }
+            _ => {}
         }
 
         self.reaper_play_state = Timestamped::from(new_play_state);
@@ -252,9 +260,9 @@ impl AudioEngineProject {
                                                                    render_id,
                                                                    reason: format!("Rendered file not found") });
             }
-
-            self.play_state = ProjectPlayState::Stopped.into();
         }
+
+        self.play_state = ProjectPlayState::Stopped.into();
     }
 
     fn clean_up_end_of_play(&mut self, play_id: PlayId) {

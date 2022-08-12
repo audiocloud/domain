@@ -157,8 +157,11 @@ impl AudioCloudPluginActivation {
                     drain(play_id, &mut compressed)?;
                 }
 
+                let play_id = play.play_id.clone();
                 self.chain = Some(EncoderChain::new(play, native_channels, native_sample_rate)?);
                 self.context = context;
+                let _ = self.tx_engine
+                            .send(ReaperEngineCommand::PlayReady(self.id.clone(), play_id));
             }
             StreamingPluginCommand::Flush { play_id } => {
                 if let Some(mut chain) = self.chain.take() {

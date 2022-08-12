@@ -276,11 +276,11 @@ impl ReaperAudioEngine {
         Ok(())
     }
 
-    pub fn send_play_event(&mut self,
-                           session_id: AppSessionId,
-                           play_id: PlayId,
-                           audio: CompressedAudio,
-                           peak_meters: HashMap<SessionFlowId, MultiChannelValue>) {
+    pub fn send_playing_audio_event(&mut self,
+                                    session_id: AppSessionId,
+                                    play_id: PlayId,
+                                    audio: CompressedAudio,
+                                    peak_meters: HashMap<SessionFlowId, MultiChannelValue>) {
         let dynamic_reports = Default::default();
         let event = AudioEngineEvent::Playing { session_id,
                                                 play_id,
@@ -299,7 +299,7 @@ impl ControlSurface for ReaperAudioEngine {
             match cmd {
                 ReaperEngineCommand::Audio(session_id, play_id, audio) => {
                     if let Some(session) = self.sessions.get(&session_id) {
-                        self.send_play_event(session_id, play_id, audio, session.get_peak_meters());
+                        self.send_playing_audio_event(session_id, play_id, audio, session.get_peak_meters());
                     } else {
                         warn!(%session_id, "Session not found");
                     }
@@ -328,6 +328,7 @@ impl ControlSurface for ReaperAudioEngine {
         for (_, session) in &mut self.sessions {
             let _ = session.run();
             while let Some(event) = session.events.pop_front() {
+                debug!(?event, "emitting");
                 let _ = self.tx_evt.try_send(event);
             }
         }
