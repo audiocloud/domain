@@ -22,7 +22,7 @@ pub struct NatsClient {
 pub async fn init(opts: NatsOpts) -> anyhow::Result<()> {
     let client = nats_aflowt::connect(&opts.nats_url).await?;
     let ac_evt = client.subscribe("ac.inst.*.*.*").await?;
-    let rpr_evt = client.subscribe("ac.rpr.*.*").await?;
+    let rpr_evt = client.subscribe("ac.engines.*.*").await?;
 
     Ok(())
 }

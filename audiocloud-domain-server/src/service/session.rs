@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
 
+use std::mem;
 use std::time::Duration;
 
 use actix::{Actor, AsyncContext, Context, Handler, Supervised, SystemService};
@@ -21,19 +22,18 @@ use supervisor::{BecomeOnline, SessionsSupervisor};
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 use crate::tracker::RequestTracker;
 
-pub mod audio_engine;
 pub mod messages;
+pub mod session_audio_engine;
 pub mod session_instances;
 pub mod supervisor;
 
 pub struct SessionActor {
-    id:                   AppSessionId,
-    session:              Session,
-    packet:               SessionPacket,
-    instances:            session_instances::SessionInstances,
-    state:                SessionState,
-    audio_engine_tracker: RequestTracker,
-    engine_loaded:        bool,
+    id:           AppSessionId,
+    session:      Session,
+    packet:       SessionPacket,
+    instances:    session_instances::SessionInstances,
+    audio_engine: session_audio_engine::SessionAudioEngine,
+    state:        SessionState,
 }
 
 impl Actor for SessionActor {
@@ -143,12 +143,18 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
             AudioEngineEvent::PlayingFailed { session_id,
                                               play_id,
                                               error, } => {
-                // TODO:
+                self.packet.add_play_error(play_id, error);
+                self.state.play_state = SessionPlayState::Stopped.into();
+                self.flush_packet();
+                self.emit_state();
             }
             AudioEngineEvent::RenderingFailed { session_id,
                                                 render_id,
                                                 reason, } => {
-                // TODO:
+                self.packet.add_render_error(render_id, reason);
+                self.state.play_state = SessionPlayState::Stopped.into();
+                self.flush_packet();
+                self.emit_state();
             }
         }
     }
@@ -185,6 +191,10 @@ impl SessionActor {
                state:                Default::default(),
                audio_engine_tracker: Default::default(),
                engine_loaded:        false, }
+    }
+
+    fn flush_packet(&mut self) {
+        let packet = mem::take(&mut self.packet);
     }
 
     fn update(&mut self, ctx: &mut Context<Self>) {
@@ -227,7 +237,7 @@ impl SessionActor {
             SessionMode::Idle => {
                 self.update_idle(ctx);
             }
-            SessionMode::Rendering(_) | SessionMode::Playing(_) => {}
+            _ => {}
         }
     }
 

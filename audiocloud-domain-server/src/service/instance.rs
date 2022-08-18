@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, Supervised, Supervisor, SystemService};
@@ -13,11 +13,12 @@ use tracing::*;
 use audiocloud_api::cloud::domains::{BootDomain, DomainFixedInstance};
 use audiocloud_api::driver::InstanceDriverEvent;
 use audiocloud_api::instance::{
-    DesiredInstancePlayState, InstancePlayState, InstancePowerState, ReportInstancePlayState, ReportInstancePowerState,
+    power, DesiredInstancePlayState, InstancePlayState, InstancePowerState, ReportInstancePlayState,
+    ReportInstancePowerState,
 };
 use audiocloud_api::model::ModelCapability::PowerDistributor;
-use audiocloud_api::model::{multi_channel_value, Model, MultiChannelValue};
-use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId, ReportId};
+use audiocloud_api::model::{multi_channel_value, Model};
+use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId};
 use audiocloud_api::session::{InstanceParameters, InstanceReports};
 use audiocloud_api::time::{Timestamp, Timestamped};
 
@@ -58,8 +59,12 @@ impl Supervised for InstanceActor {
 }
 
 impl InstanceActor {
+    #[instrument(skip_all)]
     pub fn new(id_spec: FixedInstanceId, spec: DomainFixedInstance, model_spec: Model) -> Self {
         debug!(id = %id_spec, "Creating new instance actor");
+
+        let reports = model_spec.default_reports();
+
         Self { id:               id_spec,
                owner:            None,
                last_state_emit:  None,
@@ -72,6 +77,7 @@ impl InstanceActor {
                parameters_dirty: false, }
     }
 
+    #[instrument(skip_all)]
     fn update(&mut self, ctx: &mut Context<Self>) {
         self.update_power(ctx);
 
@@ -86,6 +92,7 @@ impl InstanceActor {
         }
     }
 
+    #[instrument(skip_all)]
     fn update_play(&mut self, ctx: &mut Context<Self>) {
         if let Some(play) = &mut self.play {
             if !play.state.value().satisfies(play.desired.value()) {
@@ -97,6 +104,7 @@ impl InstanceActor {
         }
     }
 
+    #[instrument(skip_all)]
     fn update_power(&mut self, ctx: &mut Context<Self>) {
         if let Some(power) = &mut self.power {
             use InstancePowerState::*;
@@ -150,6 +158,7 @@ impl InstanceActor {
         }
     }
 
+    #[instrument(skip_all)]
     fn set_connected(&mut self, connected: bool, ctx: &mut Context<Self>) {
         if self.connected.value() != &connected {
             self.connected = Timestamped::new(connected);
@@ -157,29 +166,59 @@ impl InstanceActor {
         }
     }
 
+    #[instrument(skip_all)]
     fn set_reports(&mut self, reports: InstanceReports, _ctx: &mut Context<Self>) {
+        let mut overwritten = HashSet::new();
+
         for (report_id, report_value) in reports {
-            self.reports
-                .entry(report_id.clone())
-                .or_default()
-                .extend(report_value.into_iter());
+            let report = self.reports.entry(report_id.clone()).or_default();
+            let is_volatile = self.model
+                                  .reports
+                                  .get(&report_id)
+                                  .map(|r| r.volatile)
+                                  .unwrap_or_default();
+
+            let mut overwritten_report = false;
+            for (channel, value) in report_value.into_iter().enumerate() {
+                if let (Some(target), Some(new_value)) = (report.get_mut(channel), value) {
+                    let modified = target.as_ref().map(|t| t.value() != new_value.value()).unwrap_or(true);
+                    if is_volatile || modified {
+                        overwritten_report = true;
+                        *target = Some(new_value);
+                    }
+                }
+            }
+
+            if overwritten_report {
+                overwritten.insert(report_id.clone());
+            }
+        }
+
+        if overwritten.is_empty() {
+            return;
+        }
+
+        let mut reports_to_issue = HashMap::new();
+        for report_id in &overwritten {
+            if let Some(report) = self.reports.get(report_id) {
+                reports_to_issue.insert(report_id.clone(), report.clone());
+            }
         }
 
         self.issue_system_async(NotifyInstanceReports { instance_id: self.id.clone(),
-                                                        reports:     self.reports.clone(), });
+                                                        reports:     reports_to_issue, });
 
-        if self.model.capabilities.contains(&PowerDistributor) {
-            if let Some(power) = self.reports.get(&audiocloud_api::instance::power::reports::POWER) {
-                if let Some(num_channels) = power.keys().max() {
-                    let mut values = vec![false; *num_channels];
-                    for (channel, value) in power.iter() {
-                        values[*channel] = value.value().to_bool().unwrap_or_default();
-                    }
+        let maybe_power_report = self.reports.get(&power::reports::POWER);
+        let is_power_controller = self.model.capabilities.contains(&PowerDistributor);
+        let power_changed = overwritten.contains(&power::reports::POWER);
 
-                    self.issue_system_async(NotifyInstancePower { instance_id: self.id.clone(),
-                                                                  power:       values, });
-                }
-            }
+        if let (Some(power), true, true) = (maybe_power_report, power_changed, is_power_controller) {
+            let values = power.iter()
+                              .map(|v| v.and_then(|v| v.value().to_bool()).unwrap_or_default())
+                              .collect();
+
+            self.issue_system_async(NotifyInstancePower { instance_id: self.id.clone(),
+                                                          power:       values, });
         }
     }
 
