@@ -1,4 +1,5 @@
 use clap::Args;
+use futures::TryStreamExt;
 use mongodb::bson::doc;
 use mongodb::{Client, Collection};
 use serde::{Deserialize, Serialize};
@@ -11,6 +12,7 @@ use audiocloud_api::newtypes::AppMediaObjectId;
 pub struct PersistedMediaObject {
     pub _id:      AppMediaObjectId,
     pub metadata: Option<MediaMetadata>,
+    pub path:     Option<String>,
     pub download: Option<DownloadFromDomain>,
     pub upload:   Option<UploadToDomain>,
 }
@@ -20,7 +22,8 @@ impl PersistedMediaObject {
         Self { _id,
                metadata: None,
                upload: None,
-               download: None }
+               download: None,
+               path: None }
     }
 }
 
@@ -49,6 +52,19 @@ impl Db {
     #[instrument(skip(self), err)]
     pub async fn get_media_status(&self, id: &AppMediaObjectId) -> anyhow::Result<Option<PersistedMediaObject>> {
         Ok(self.files.find_one(doc! {"_id": id.to_string()}, None).await?)
+    }
+
+    #[instrument(skip(self, ids), err)]
+    pub async fn get_media_status_multiple(&self,
+                                           ids: impl Iterator<Item = &AppMediaObjectId>)
+                                           -> anyhow::Result<Vec<PersistedMediaObject>> {
+        let ids = ids.map(|id| id.to_string()).collect::<Vec<_>>();
+
+        Ok(self.files
+               .find(doc! {"_id": {"$in": ids}}, None)
+               .await?
+               .try_collect::<Vec<_>>()
+               .await?)
     }
 
     #[instrument(skip(self), err)]
