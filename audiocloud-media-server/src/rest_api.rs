@@ -2,10 +2,10 @@ use actix_web::error::ErrorInternalServerError;
 use actix_web::{get, post, web, Error, Responder};
 use web::{Data, Json, Path};
 
-use audiocloud_api::media::{DownloadFromDomain, ImportInDomain, UploadToDomain};
+use audiocloud_api::media::{DownloadFromDomain, ImportInDomain, MediaObject, UploadToDomain};
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaObjectId};
 
-use crate::db::Db;
+use crate::db::{Db, PersistedDownload, PersistedMediaObject, PersistedUpload};
 
 pub fn rest_api(cfg: &mut web::ServiceConfig) {
     cfg.service(get_media_state)
@@ -20,7 +20,10 @@ async fn get_media_state(db: Data<Db>, path: Path<(AppId, MediaObjectId)>) -> im
     let (app_id, media_object_id) = path.into_inner();
     let id = AppMediaObjectId::new(app_id, media_object_id);
 
-    let state = db.get_media_status(&id).await.map_err(ErrorInternalServerError)?;
+    let state = db.get_media_status(&id)
+                  .await
+                  .map_err(ErrorInternalServerError)?
+                  .map(to_public_state);
 
     Ok::<_, Error>(web::Json(state))
 }
@@ -29,7 +32,10 @@ async fn get_media_state(db: Data<Db>, path: Path<(AppId, MediaObjectId)>) -> im
 async fn get_multiple_media_state(db: Data<Db>, Json(ids): Json<Vec<AppMediaObjectId>>) -> impl Responder {
     let states = db.get_media_status_multiple(ids.iter())
                    .await
-                   .map_err(ErrorInternalServerError)?;
+                   .map_err(ErrorInternalServerError)?
+                   .into_iter()
+                   .map(to_public_state)
+                   .collect::<Vec<_>>();
 
     Ok::<_, Error>(web::Json(states))
 }
@@ -44,12 +50,12 @@ async fn create_upload(db: Data<Db>,
 
     let state = db.update_media_status(&id, |media| {
                       media.metadata = Some(upload.metadata());
-                      media.upload = Some(upload);
+                      media.upload = Some(PersistedUpload::new(upload));
                   })
                   .await
                   .map_err(ErrorInternalServerError)?;
 
-    Ok::<_, Error>(Json(state))
+    Ok::<_, Error>(Json(to_public_state(state)))
 }
 
 #[post("apps/{app_id}/media/{media_object_id}/download")]
@@ -61,12 +67,12 @@ async fn create_download(db: Data<Db>,
     let id = AppMediaObjectId::new(app_id, media_object_id);
 
     let state = db.update_media_status(&id, |media| {
-                      media.download = Some(download);
+                      media.download = Some(PersistedDownload::new(download));
                   })
                   .await
                   .map_err(ErrorInternalServerError)?;
 
-    Ok::<_, Error>(Json(state))
+    Ok::<_, Error>(Json(to_public_state(state)))
 }
 
 #[post("apps/{app_id}/media/{media_object_id}/import")]
@@ -84,5 +90,19 @@ async fn import_in_domain(db: Data<Db>,
                   .await
                   .map_err(ErrorInternalServerError)?;
 
-    Ok::<_, Error>(Json(state))
+    Ok::<_, Error>(Json(to_public_state(state)))
+}
+
+fn to_public_state(state: PersistedMediaObject) -> MediaObject {
+    let PersistedMediaObject { _id,
+                               metadata,
+                               path,
+                               download,
+                               upload, } = state;
+
+    MediaObject { id: _id,
+                  metadata,
+                  path,
+                  download: download.map(|d| d.state),
+                  upload: upload.map(|u| u.state) }
 }

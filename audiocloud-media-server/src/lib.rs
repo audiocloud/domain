@@ -4,6 +4,7 @@ use crate::db::DbConfig;
 
 pub mod db;
 pub mod rest_api;
+pub mod service;
 
 #[derive(Debug, Parser)]
 pub struct Config {

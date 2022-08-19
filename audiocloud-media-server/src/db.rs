@@ -5,7 +5,7 @@ use mongodb::{Client, Collection};
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-use audiocloud_api::media::{DownloadFromDomain, MediaMetadata, UploadToDomain};
+use audiocloud_api::media::{DownloadFromDomain, MediaDownloadState, MediaMetadata, MediaUploadState, UploadToDomain};
 use audiocloud_api::newtypes::AppMediaObjectId;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -13,8 +13,34 @@ pub struct PersistedMediaObject {
     pub _id:      AppMediaObjectId,
     pub metadata: Option<MediaMetadata>,
     pub path:     Option<String>,
-    pub download: Option<DownloadFromDomain>,
-    pub upload:   Option<UploadToDomain>,
+    pub download: Option<PersistedDownload>,
+    pub upload:   Option<PersistedUpload>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PersistedDownload {
+    pub spec:  DownloadFromDomain,
+    pub state: MediaDownloadState,
+}
+
+impl PersistedDownload {
+    pub fn new(spec: DownloadFromDomain) -> Self {
+        Self { spec,
+               state: MediaDownloadState::Pending }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct PersistedUpload {
+    pub spec:  UploadToDomain,
+    pub state: MediaUploadState,
+}
+
+impl PersistedUpload {
+    pub fn new(spec: UploadToDomain) -> Self {
+        Self { spec,
+               state: MediaUploadState::Pending }
+    }
 }
 
 impl PersistedMediaObject {
