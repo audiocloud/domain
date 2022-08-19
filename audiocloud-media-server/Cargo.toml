@@ -1,0 +1,43 @@
+[package]
+name = "audiocloud-media-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nats-aflowt = "0.16"
+actix-web = "4"
+once_cell = "1"
+tracing = "0.1"
+futures = "0.3"
+anyhow = "1"
+dotenv = "0.15"
+
+[dependencies.mongodb]
+version = "2"
+
+[dependencies.uuid]
+version = "1"
+features = ["v4"]
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dependencies.clap]
+version = "3"
+features = ["derive", "env"]
+
+[dependencies.chrono]
+version = "0.4"
+features = ["serde"]
+
+[dependencies.reqwest]
+version = "0.11"
+feautres = ["stream", "brotli", "gzip", "multipart"]
+
+[dependencies.tracing-subscriber]
+version = "0.3"
+features = ["time", "env-filter"]
+
+[dependencies.audiocloud-api]
+path = "../../apis/audiocloud-api"
