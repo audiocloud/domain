@@ -7,7 +7,6 @@ use audiocloud_api::cloud::domains::InstanceRouting;
 use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId, FixedInstanceId};
 
 use crate::audio_engine::AudioEngineClient;
-use crate::tracker::RequestTracker;
 
 pub struct SessionAudioEngineClient {
     client:      AudioEngineClient,
