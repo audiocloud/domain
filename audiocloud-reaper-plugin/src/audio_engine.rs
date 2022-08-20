@@ -188,7 +188,7 @@ impl ReaperAudioEngine {
                     self.create_session(session_id, spec, instances, media_ready)?;
                 }
             }
-            AudioEngineCommand::Media { ready, removed } => {
+            AudioEngineCommand::Media { media_ready: ready, removed } => {
                 for session in self.sessions.values_mut() {
                     session.on_media_updated(&ready, &removed)?;
                 }

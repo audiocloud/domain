@@ -7,7 +7,9 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 
 #[get("/healthz")]
 async fn healthz() -> impl Responder {
-    web::Json(json!({
-                "healthy": true
-              }))
+    let res = json!({
+      "healthy": true
+    });
+
+    web::Json(res)
 }

@@ -20,7 +20,6 @@ use messages::{
 use supervisor::{BecomeOnline, SessionsSupervisor};
 
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
-use crate::tracker::RequestTracker;
 
 pub mod messages;
 pub mod session_audio_engine;
@@ -32,7 +31,7 @@ pub struct SessionActor {
     session:      Session,
     packet:       SessionPacket,
     instances:    session_instances::SessionInstances,
-    audio_engine: session_audio_engine::SessionAudioEngine,
+    audio_engine: session_audio_engine::SessionAudioEngineClient,
     state:        SessionState,
 }
 
@@ -95,9 +94,7 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
 
     fn handle(&mut self, msg: NotifyAudioEngineEvent, ctx: &mut Self::Context) -> Self::Result {
         match msg.event {
-            AudioEngineEvent::Loaded => {
-                self.engine_loaded = false;
-            }
+            AudioEngineEvent::Loaded => {}
             AudioEngineEvent::Stopped { session_id } => {
                 if !self.state.play_state.value().is_stopped() {
                     self.state.play_state = SessionPlayState::Stopped.into();
@@ -138,7 +135,6 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
             }
             AudioEngineEvent::Error { session_id, error } => {
                 // TODO:
-                self.engine_loaded = false;
             }
             AudioEngineEvent::PlayingFailed { session_id,
                                               play_id,
@@ -166,7 +162,6 @@ impl Handler<SetSessionDesiredState> for SessionActor {
     fn handle(&mut self, msg: SetSessionDesiredState, ctx: &mut Self::Context) -> Self::Result {
         if self.state.desired_play_state.value() != &msg.desired {
             self.state.desired_play_state = msg.desired.into();
-            self.audio_engine_tracker.reset();
 
             self.stop();
             self.update(ctx);
@@ -183,14 +178,13 @@ impl Handler<ExecuteSessionCommand> for SessionActor {
 }
 
 impl SessionActor {
-    pub fn new(id: &AppSessionId, session: &Session) -> Self {
-        Self { id:                   id.clone(),
-               session:              session.clone(),
-               packet:               Default::default(),
-               instances:            Default::default(),
-               state:                Default::default(),
-               audio_engine_tracker: Default::default(),
-               engine_loaded:        false, }
+    pub fn new(id: &AppSessionId, session: &Session, audio_engine: AudioEngine) -> Self {
+        Self { id:           id.clone(),
+               session:      session.clone(),
+               packet:       Default::default(),
+               instances:    Default::default(),
+               audio_engine: audio_engine.client(id),
+               state:        Default::default(), }
     }
 
     fn flush_packet(&mut self) {

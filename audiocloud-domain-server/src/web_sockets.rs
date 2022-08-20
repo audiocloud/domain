@@ -15,6 +15,7 @@ use bytes::Bytes;
 use maplit::hashmap;
 use serde::Deserialize;
 use tracing::error;
+use web::Query;
 
 use audiocloud_api::change::ModifySessionSpec;
 use audiocloud_api::codec::{Codec, MsgPack};
@@ -43,11 +44,10 @@ struct AuthParams {
 async fn ws_handler(req: HttpRequest,
                     stream: web::Payload,
                     ids: web::Path<(AppId, SessionId)>,
-                    auth: web::Query<AuthParams>)
+                    Query(AuthParams { secure_key }): Query<AuthParams>)
                     -> impl Responder {
     let (app_id, session_id) = ids.into_inner();
     let app_session_id = AppSessionId::new(app_id, session_id);
-    let AuthParams { secure_key } = auth.into_inner();
 
     let resp = ws::start(WebSocketActor { id:         get_next_socket_id(),
                                           security:   hashmap! {},

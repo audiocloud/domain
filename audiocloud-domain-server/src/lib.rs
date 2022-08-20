@@ -5,3 +5,4 @@ pub mod rest;
 pub mod service;
 pub mod tracker;
 pub mod web_sockets;
+pub mod audio_engine;
