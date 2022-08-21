@@ -5,7 +5,7 @@ use clap::Parser;
 use tracing::*;
 
 use audiocloud_domain_server::data::DataOpts;
-use audiocloud_domain_server::{data, rest, service, web_sockets};
+use audiocloud_domain_server::{data, rest_api, service, web_sockets};
 
 #[derive(Parser)]
 struct Opts {
@@ -58,7 +58,7 @@ async fn main() -> anyhow::Result<()> {
     // create actix
     HttpServer::new(|| {
         App::new().wrap(tracing_actix_web::TracingLogger::default())
-                  .configure(rest::configure)
+                  .configure(rest_api::configure)
                   .configure(web_sockets::configure)
     }).bind((opts.bind.as_str(), opts.port))?
       .run()
