@@ -3,22 +3,26 @@
 use std::mem;
 use std::time::Duration;
 
-use actix::{Actor, AsyncContext, Context, Handler, Supervised, SystemService};
+use actix::{
+    Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, SystemService, WrapFuture,
+};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use anyhow::anyhow;
 
-use audiocloud_api::app::SessionPacket;
+use audiocloud_api::app::{SessionPacket, SessionPacketError};
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
 use audiocloud_api::change::{DesiredSessionPlayState, PlayId, RenderId, SessionPlayState, SessionState};
 use audiocloud_api::instance::DesiredInstancePlayState;
 use audiocloud_api::newtypes::AppSessionId;
 use audiocloud_api::session::{Session, SessionMode};
+use audiocloud_api::time::Timestamped;
 use messages::{
     ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyRenderComplete, NotifySessionSpec, NotifySessionState,
     SetSessionDesiredState,
 };
 use supervisor::{BecomeOnline, SessionsSupervisor};
 
+use crate::audio_engine::AudioEngineClient;
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 
 pub mod messages;
@@ -178,12 +182,12 @@ impl Handler<ExecuteSessionCommand> for SessionActor {
 }
 
 impl SessionActor {
-    pub fn new(id: &AppSessionId, session: &Session, audio_engine: AudioEngine) -> Self {
+    pub fn new(id: &AppSessionId, session: &Session, audio_engine: &AudioEngineClient) -> Self {
         Self { id:           id.clone(),
                session:      session.clone(),
                packet:       Default::default(),
                instances:    Default::default(),
-               audio_engine: audio_engine.client(id),
+               audio_engine: audio_engine.for_session(id.clone()),
                state:        Default::default(), }
     }
 
@@ -197,21 +201,45 @@ impl SessionActor {
             (SessionMode::Idle, DesiredSessionPlayState::Play(play)) => {
                 modified = true;
                 self.prepare_to_play(play.play_id.clone());
+                self.audio_engine
+                    .clone()
+                    .play(play.clone())
+                    .into_actor(self)
+                    .map(Self::handle_audio_engine_error)
+                    .wait(ctx);
             }
             (SessionMode::Idle, DesiredSessionPlayState::Render(render)) => {
                 modified = true;
                 self.prepare_to_render(render.render_id.clone(), render.segment.length);
+                self.audio_engine
+                    .clone()
+                    .render(render.clone())
+                    .into_actor(self)
+                    .map(Self::handle_audio_engine_error)
+                    .wait(ctx);
             }
             (SessionMode::Rendering(render_id), desired) => {
                 if !matches!(desired, DesiredSessionPlayState::Render(r) if render_id == &r.render_id) {
                     modified = true;
                     self.prepare_render_stop(render_id.clone());
+                    self.audio_engine
+                        .clone()
+                        .stop()
+                        .into_actor(self)
+                        .map(Self::handle_audio_engine_error)
+                        .wait(ctx);
                 }
             }
             (SessionMode::Playing(play_id), desired) => {
                 if !matches!(desired, DesiredSessionPlayState::Play(p) if play_id == &p.play_id) {
                     modified = true;
                     self.prepare_play_stop(play_id.clone());
+                    self.audio_engine
+                        .clone()
+                        .stop()
+                        .into_actor(self)
+                        .map(Self::handle_audio_engine_error)
+                        .wait(ctx);
                 }
             }
             _ => {}
@@ -252,14 +280,20 @@ impl SessionActor {
 
     fn prepare_play_stop(&mut self, play_id: PlayId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-
         self.state.mode = SessionMode::StoppingPlay(play_id).into();
     }
 
     fn prepare_render_stop(&mut self, render_id: RenderId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-
         self.state.mode = SessionMode::StoppingRender(render_id).into();
+    }
+
+    fn handle_audio_engine_error(result: anyhow::Result<()>, actor: &mut Self, ctx: &mut Context<Self>) {
+        if let Err(e) = result {
+            actor.packet
+                 .errors
+                 .push(Timestamped::new(SessionPacketError::General(e.to_string())));
+        }
     }
 
     fn stop(&mut self) {
@@ -274,23 +308,14 @@ impl SessionActor {
         }
     }
 
-    fn update_stopping(&mut self, ctx: &mut Context<Self>) {
-        if !self.state.play_state.value().is_stopped() {
-            if self.audio_engine_tracker.should_retry() {
-                self.request_audio_engine_command(AudioEngineCommand::Stop { session_id: self.id.clone(), });
-                self.audio_engine_tracker.retried();
-            }
-        } else if self.engine_loaded {
-            self.set_idle();
-        }
-    }
+    fn update_stopping(&mut self, ctx: &mut Context<Self>) {}
 
     fn set_idle(&mut self) {
         self.state.mode = SessionMode::Idle.into();
     }
 
     fn update_play_state(&mut self, ctx: &mut Context<Self>) {
-        if !self.instances.update(&self.session.spec) || !self.engine_loaded {
+        if !self.instances.update(&self.session.spec) {
             return;
         }
 
@@ -300,19 +325,7 @@ impl SessionActor {
                 .value()
                 .satisfies(self.state.desired_play_state.value())
         {
-            if self.audio_engine_tracker.should_retry() {
-                let command = match self.state.desired_play_state.value() {
-                    DesiredSessionPlayState::Play(play) => AudioEngineCommand::Play { session_id: self.id.clone(),
-                                                                                      play:       play.clone(), },
-                    DesiredSessionPlayState::Render(render) => {
-                        AudioEngineCommand::Render { session_id: self.id.clone(),
-                                                     render:     render.clone(), }
-                    }
-                    DesiredSessionPlayState::Stopped => AudioEngineCommand::Stop { session_id: self.id.clone(), },
-                };
-                self.request_audio_engine_command(command);
-                self.audio_engine_tracker.retried();
-            }
+            // TODO: retry?
         } else {
             // update mode based on desired state
             self.state.mode =

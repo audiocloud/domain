@@ -8,6 +8,7 @@ use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId, FixedInstanceId};
 
 use crate::audio_engine::AudioEngineClient;
 
+#[derive(Clone)]
 pub struct SessionAudioEngineClient {
     client:      AudioEngineClient,
     session_id:  AppSessionId,
