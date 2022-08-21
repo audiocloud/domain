@@ -8,6 +8,7 @@ use actix::{
 };
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use anyhow::anyhow;
+use chrono::Utc;
 
 use audiocloud_api::app::{SessionPacket, SessionPacketError};
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
@@ -24,19 +25,23 @@ use supervisor::{BecomeOnline, SessionsSupervisor};
 
 use crate::audio_engine::AudioEngineClient;
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
+use crate::service::session::messages::NotifySessionPacket;
 
 pub mod messages;
 pub mod session_audio_engine;
 pub mod session_instances;
+pub mod session_media;
 pub mod supervisor;
 
 pub struct SessionActor {
-    id:           AppSessionId,
-    session:      Session,
-    packet:       SessionPacket,
-    instances:    session_instances::SessionInstances,
-    audio_engine: session_audio_engine::SessionAudioEngineClient,
-    state:        SessionState,
+    id:                 AppSessionId,
+    session:            Session,
+    packet:             SessionPacket,
+    media:              session_media::SessionMedia,
+    instances:          session_instances::SessionInstances,
+    audio_engine:       session_audio_engine::SessionAudioEngineClient,
+    state:              SessionState,
+    min_transmit_audio: usize,
 }
 
 impl Actor for SessionActor {
@@ -117,7 +122,9 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                     }
                 }
 
+                self.packet.push_peak_meters(peak_meters);
                 self.packet.push_audio_packets(audio);
+                self.maybe_emit_packet();
             }
             AudioEngineEvent::Rendering { session_id,
                                           render_id,
@@ -138,7 +145,9 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                                                                path });
             }
             AudioEngineEvent::Error { session_id, error } => {
-                // TODO:
+                self.packet
+                    .errors
+                    .push(Timestamped::new(SessionPacketError::General(error.to_string())));
             }
             AudioEngineEvent::PlayingFailed { session_id,
                                               play_id,
@@ -183,12 +192,14 @@ impl Handler<ExecuteSessionCommand> for SessionActor {
 
 impl SessionActor {
     pub fn new(id: &AppSessionId, session: &Session, audio_engine: &AudioEngineClient) -> Self {
-        Self { id:           id.clone(),
-               session:      session.clone(),
-               packet:       Default::default(),
-               instances:    Default::default(),
-               audio_engine: audio_engine.for_session(id.clone()),
-               state:        Default::default(), }
+        Self { id:                 id.clone(),
+               session:            session.clone(),
+               state:              Default::default(),
+               media:              Default::default(),
+               packet:             Default::default(),
+               instances:          Default::default(),
+               audio_engine:       audio_engine.for_session(id.clone()),
+               min_transmit_audio: 2, }
     }
 
     fn flush_packet(&mut self) {
@@ -349,8 +360,18 @@ impl SessionActor {
                                                      state:      self.state.clone(), });
     }
 
-    fn request_audio_engine_command(&self, cmd: AudioEngineCommand) {
-        todo!()
+    fn maybe_emit_packet(&mut self) {
+        if (Utc::now() - self.packet.created_at) > chrono::Duration::milliseconds(500)
+           || self.packet.compressed_audio.len() > self.min_transmit_audio
+        {
+            self.packet.play_state = self.state.play_state.value().clone();
+            self.packet.desired_play_state = self.state.desired_play_state.value().clone();
+            self.packet.waiting_for_instances = self.instances.waiting_for_instances();
+            self.packet.waiting_for_media = self.media.waiting_for_media();
+
+            self.issue_system_async(NotifySessionPacket { session_id: self.id.clone(),
+                                                          packet:     mem::take(&mut self.packet), });
+        }
     }
 }
 

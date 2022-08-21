@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use actix::SystemService;
 
@@ -98,6 +98,30 @@ impl SessionInstances {
                 rv &= instance.update(instance_id, &self.play);
             } else {
                 rv = false;
+            }
+        }
+
+        rv
+    }
+
+    pub fn waiting_for_instances(&self) -> HashSet<FixedInstanceId> {
+        let mut rv = HashSet::new();
+
+        for (instance_id, instance) in self.instances.iter() {
+            let power_satisfied = instance.state
+                                          .power
+                                          .as_ref()
+                                          .map(|power| power.actual.value().satisfies(power.desired.value().clone()))
+                                          .unwrap_or(true);
+
+            let play_satisfied = instance.state
+                                         .play
+                                         .as_ref()
+                                         .map(|play| play.actual.value().satisfies(play.desired.value()))
+                                         .unwrap_or(true);
+
+            if !power_satisfied || !play_satisfied {
+                rv.insert(instance_id.clone());
             }
         }
 
