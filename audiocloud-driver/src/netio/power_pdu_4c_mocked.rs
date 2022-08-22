@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use tracing::*;
 
 use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
-use audiocloud_api::model::{enumerate_multi_channel_value, enumerate_multi_channel_value_bool, ModelValue};
+use audiocloud_api::model::{enumerate_multi_channel_value_bool, ModelValue};
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_api::time::Timestamped;
 use audiocloud_models::netio::netio_4c::*;
@@ -59,7 +59,7 @@ impl Netio4cMocked {
                                .cloned()
                                .map(ModelValue::Bool)
                                .map(Timestamped::from)
-                               .enumerate()
+                               .map(Some)
                                .collect();
 
         self.emit(InstanceDriverEvent::Reports { reports: hashmap! { reports::POWER.clone() => power_values }, });

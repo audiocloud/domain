@@ -1,11 +1,10 @@
 #![allow(unused_variables)]
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use actix::{
-    fut, spawn, Actor, ActorFutureExt, Addr, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running,
-    Supervised, WrapFuture,
+    spawn, Actor, ActorFutureExt, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running, Supervised,
+    WrapFuture,
 };
 use futures::TryFutureExt;
 use maplit::hashmap;
@@ -79,8 +78,8 @@ impl Handler<Command> for PowerPdu4c {
                 if let Some(power) = params.remove(&params::POWER) {
                     let mut outputs = vec![];
 
-                    for (i, desired_state) in power {
-                        if let Some(desired_state) = desired_state.to_bool() {
+                    for (i, desired_state) in power.into_iter().enumerate() {
+                        if let Some(desired_state) = desired_state.and_then(ModelValue::into_bool) {
                             let desired_state = if desired_state {
                                 PowerAction::On
                             } else {
@@ -142,16 +141,16 @@ impl PowerPdu4c {
     }
 
     fn handle_response(id: FixedInstanceId, response: NetioPowerResponse) {
-        let mut power_values = HashMap::new();
-        let mut current_values = HashMap::new();
+        let mut power_values = Vec::new();
+        let mut current_values = Vec::new();
 
         for channel in response.outputs {
             let power_value = Timestamped::from(ModelValue::Bool(channel.state == PowerState::On));
             let current_value = Timestamped::from(ModelValue::Number(channel.current as f64 / 1000.0));
             let channel_id = (channel.id as usize) - 1;
 
-            power_values.insert(channel_id, power_value);
-            current_values.insert(channel_id, current_value);
+            power_values.push(Some(power_value));
+            current_values.push(Some(current_value));
         }
 
         let reports = hashmap! {

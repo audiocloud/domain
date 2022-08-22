@@ -67,7 +67,7 @@ impl UnipotRegion {
         for (i, bit) in self.bits.iter().copied().enumerate() {
             let bit_value = value & (1 << i);
             // TODO: implement
-            write_bit_16(memory, bit, bit_value != 0);
+            // write_bit_16(memory, bit, bit_value != 0);
         }
     }
 }
@@ -103,9 +103,9 @@ impl Handler<Command> for Dual1084 {
             | InstanceDriverCommand::Rewind { .. } => Err(InstanceDriverError::MediaNotPresent),
             InstanceDriverCommand::SetParameters(mut params) => {
                 if let Some(low_gain) = params.remove(&dual_1084::LOW_GAIN) {
-                    for (ch, value) in low_gain.into_iter() {
+                    for (ch, value) in low_gain.into_iter().enumerate() {
                         // TODO: implement
-                        let value = restrech(value, &self.low_gain_param, 3, 128);
+                        // let value = restrech(value, &self.low_gain_param, 3, 128);
 
                         // TODO: is '3' the correct number here?
                         self.low_gain[ch].write(&mut self.io_exp_data[3], value);
@@ -113,7 +113,7 @@ impl Handler<Command> for Dual1084 {
                 }
 
                 // TODO: implement
-                self.write_io_expanders();
+                // self.write_io_expanders();
 
                 Ok(())
             }

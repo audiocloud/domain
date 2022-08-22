@@ -8,9 +8,10 @@ use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
 
 use audiocloud_api::change::SessionState;
-use audiocloud_api::newtypes::AppSessionId;
+use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
 use audiocloud_api::session::Session;
 
+use crate::audio_engine::AudioEngineClient;
 use crate::data::get_boot_cfg;
 use crate::service::session::messages::{
     ExecuteSessionCommand, NotifySessionSpec, NotifySessionState, SetSessionDesiredState,
@@ -21,7 +22,17 @@ pub struct SessionsSupervisor {
     active:   HashMap<AppSessionId, Addr<SessionActor>>,
     sessions: HashMap<AppSessionId, Session>,
     state:    HashMap<AppSessionId, SessionState>,
+    engines:  HashMap<AudioEngineId, AudioEngineClient>,
     online:   bool,
+}
+
+impl SessionsSupervisor {
+    fn allocate_engine(&self) -> Option<AudioEngineId> {
+        self.engines
+            .iter()
+            .min_by(|(_, engine_a), (_, engine_b)| engine_a.num_sessions().cmp(&engine_b.num_sessions()))
+            .map(|(id, _)| id.clone())
+    }
 }
 
 impl Actor for SessionsSupervisor {
@@ -42,10 +53,12 @@ impl Supervised for SessionsSupervisor {
 impl Default for SessionsSupervisor {
     fn default() -> Self {
         let sessions = get_boot_cfg().sessions.clone();
-        Self { active: Default::default(),
-               sessions,
+
+        Self { sessions,
+               online: false,
+               active: Default::default(),
                state: Default::default(),
-               online: false }
+               engines: Default::default() }
     }
 }
 
@@ -77,9 +90,12 @@ impl Handler<BecomeOnline> for SessionsSupervisor {
     fn handle(&mut self, msg: BecomeOnline, ctx: &mut Self::Context) -> Self::Result {
         if !self.online {
             self.online = true;
-            for (id, session) in &self.sessions {
+            for (id, session) in self.sessions.iter() {
                 if session.time.contains_now() {
-                    let actor = SessionActor::new(id, session);
+                    let engine = self.allocate_engine().expect("no audio engine available");
+                    let engine = self.engines.get(&engine).expect("audio engine not found");
+                    let actor = SessionActor::new(id, session, &engine);
+
                     self.active.insert(id.clone(), Supervisor::start(move |_| actor));
                 }
             }

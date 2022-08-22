@@ -717,10 +717,7 @@ impl AudioEngineProject {
         self.mixers.clear();
     }
 
-    pub fn on_media_updated(&mut self,
-                            available: &HashMap<AppMediaObjectId, String>,
-                            removed: &HashSet<AppMediaObjectId>)
-                            -> anyhow::Result<()> {
+    pub fn on_media_updated(&mut self, available: &HashMap<AppMediaObjectId, String>) -> anyhow::Result<()> {
         let snapshot = self.template_snapshot();
         for track in self.tracks.values_mut() {
             if track.on_media_updated(available, removed) {

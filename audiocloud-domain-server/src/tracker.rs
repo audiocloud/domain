@@ -22,6 +22,10 @@ impl RequestTracker {
         *self = Self::Completed;
     }
 
+    pub fn is_completed(&self) -> bool {
+        matches!(self, Self::Completed)
+    }
+
     pub fn should_retry(&self) -> bool {
         matches!(self, Self::Pending { next_retry } if *next_retry >= Utc::now())
     }

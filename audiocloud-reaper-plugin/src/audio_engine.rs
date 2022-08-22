@@ -176,74 +176,78 @@ impl ReaperAudioEngine {
 
     #[instrument(skip_all, err)]
     fn dispatch_cmd(&mut self, cmd: AudioEngineCommand) -> anyhow::Result<()> {
+        use AudioEngineCommand::*;
+
         debug!(?cmd, "entered");
+
         match cmd {
-            AudioEngineCommand::SetSpec { session_id,
-                                          spec,
-                                          instances,
-                                          media_ready, } => {
+            SetSpec { session_id,
+                      spec,
+                      instances,
+                      media_ready, } => {
                 if let Some(project) = self.sessions.get_mut(&session_id) {
                     project.set_spec(spec, instances, media_ready)?;
                 } else {
                     self.create_session(session_id, spec, instances, media_ready)?;
                 }
             }
-            AudioEngineCommand::Media { media_ready: ready, removed } => {
-                for session in self.sessions.values_mut() {
-                    session.on_media_updated(&ready, &removed)?;
+            Media { session_id,
+                    media_ready: ready, } => {
+                if let Some(session) = self.sessions.get_mut(&session_id) {
+                    session.on_media_updated(&ready)?;
                 }
             }
-            AudioEngineCommand::ModifySpec { session_id,
-                                             transaction,
-                                             instances,
-                                             media_ready, } => {
+            ModifySpec { session_id,
+                         transaction,
+                         instances,
+                         media_ready, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.modify_spec(transaction, instances, media_ready)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            AudioEngineCommand::SetDynamicParameters { session_id, .. } => {
+            SetDynamicParameters { session_id, .. } => {
                 if let Some(_) = self.sessions.get_mut(&session_id) {
                     // TODO: implement dynamic parameters
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            AudioEngineCommand::Render { session_id, render } => {
+            Render { session_id, render } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.render(render)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            AudioEngineCommand::Play { session_id, play } => {
+            Play { session_id, play } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.play(play)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            AudioEngineCommand::UpdatePlay { session_id, update } => {
+            UpdatePlay { session_id, update } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.update_play(update)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            AudioEngineCommand::Stop { session_id } => {
+            Stop { session_id } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.stop()?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            AudioEngineCommand::Instances { instances } => {
-                for session in self.sessions.values_mut() {
+            Instances { session_id, instances } => {
+                if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.on_instances_updated(&instances)?;
                 }
             }
-            AudioEngineCommand::Close { session_id } => {
+            Close { session_id } => {
                 if let Some(session) = self.sessions.remove(&session_id) {
                     drop(session);
                 } else {
