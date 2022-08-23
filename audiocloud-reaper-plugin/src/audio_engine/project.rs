@@ -470,7 +470,15 @@ impl AudioEngineProject {
         Ok(())
     }
 
-    pub fn stop(&mut self) -> anyhow::Result<()> {
+    pub fn stop_render(&mut self, render_id: RenderId) -> anyhow::Result<()> {
+        self.stop()
+    }
+
+    pub fn stop_play(&mut self, play_id: PlayId) -> anyhow::Result<()> {
+        self.stop()
+    }
+
+    fn stop(&mut self) -> anyhow::Result<()> {
         let reaper = Reaper::get();
         let context = self.context();
 
@@ -720,7 +728,7 @@ impl AudioEngineProject {
     pub fn on_media_updated(&mut self, available: &HashMap<AppMediaObjectId, String>) -> anyhow::Result<()> {
         let snapshot = self.template_snapshot();
         for track in self.tracks.values_mut() {
-            if track.on_media_updated(available, removed) {
+            if track.on_media_updated(available) {
                 track.update_state_chunk(&snapshot)?;
             }
         }

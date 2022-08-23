@@ -75,13 +75,10 @@ impl AudioEngineMediaTrack {
         Ok(audio_engine::beautify_chunk(AudioEngineMediaTrackTemplate { project, track: self }.render()?))
     }
 
-    pub fn on_media_updated(&mut self,
-                            available: &HashMap<AppMediaObjectId, String>,
-                            removed: &HashSet<AppMediaObjectId>)
-                            -> bool {
+    pub fn on_media_updated(&mut self, available: &HashMap<AppMediaObjectId, String>) -> bool {
         let mut rv = false;
         for media in self.media.values_mut() {
-            if media.on_media_updated(&self.root_dir, available, removed) {
+            if media.on_media_updated(&self.root_dir, available) {
                 rv |= true;
             }
         }
@@ -101,7 +98,7 @@ impl AudioEngineMediaTrack {
 
         if let Some(media_item) = self.media.get_mut(&media_id) {
             media_item.update(update);
-            Ok(media_item.on_media_updated(&self.root_dir, media, &HashSet::new()))
+            Ok(media_item.on_media_updated(&self.root_dir, media))
         } else {
             Err(anyhow::anyhow!("No media item found for {}", media_id))
         }

@@ -83,20 +83,10 @@ impl AudioEngineMediaItem {
     }
 
     #[instrument(skip_all)]
-    pub fn on_media_updated(&mut self,
-                            root_dir: &PathBuf,
-                            available: &HashMap<AppMediaObjectId, String>,
-                            removed: &HashSet<AppMediaObjectId>)
-                            -> bool {
-        debug!(?root_dir, ?available, ?removed, "entered");
+    pub fn on_media_updated(&mut self, root_dir: &PathBuf, available: &HashMap<AppMediaObjectId, String>) -> bool {
+        debug!(?root_dir, ?available, "entered");
 
-        if self.path.is_some() {
-            if removed.contains(&self.object_id) {
-                self.path = None;
-                debug!("our path was removed, queue to sync");
-                return true;
-            }
-        } else {
+        if self.path.is_none() {
             if let Some(path) = available.get(&self.object_id) {
                 let new_path = Some(root_dir.join(path).to_str().unwrap().to_string());
                 if &new_path != &self.path {
