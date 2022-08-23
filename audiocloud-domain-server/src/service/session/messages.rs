@@ -8,7 +8,9 @@ use audiocloud_api::change::{DesiredSessionPlayState, RenderId, SessionState};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::domain::DomainSessionCommand;
 use audiocloud_api::media::MediaServiceEvent;
-use audiocloud_api::newtypes::{AppSessionId, AudioEngineId, MediaServiceId, SecureKey};
+use audiocloud_api::newtypes::{
+    AppMediaObjectId, AppSessionId, AudioEngineId, MediaObjectId, MediaServiceId, SecureKey,
+};
 use audiocloud_api::session::SessionSecurity;
 
 #[derive(Message, Clone, Debug)]
@@ -79,6 +81,10 @@ pub struct NotifyRenderComplete {
     pub session_id: AppSessionId,
     pub render_id:  RenderId,
     pub path:       String,
+    pub object_id:  AppMediaObjectId,
+    pub put_url:    String,
+    pub notify_url: String,
+    pub context:    String,
 }
 
 #[derive(Message, Clone, Debug)]

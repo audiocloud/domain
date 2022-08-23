@@ -18,7 +18,7 @@ use audiocloud_api::change::{
 use audiocloud_api::instance::DesiredInstancePlayState;
 use audiocloud_api::media::MediaServiceEvent;
 use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
-use audiocloud_api::session::{Session, SessionMode};
+use audiocloud_api::session::Session;
 use audiocloud_api::time::Timestamped;
 use messages::{
     ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyRenderComplete, NotifySessionSpec, NotifySessionState,
@@ -144,10 +144,22 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
             RenderingFinished { session_id,
                                 render_id,
                                 path, } => {
-                self.state.play_state = SessionPlayState::Stopped.into();
-                self.issue_system_async(NotifyRenderComplete { session_id: self.id.clone(),
-                                                               render_id,
-                                                               path });
+                if let SessionPlayState::Rendering(render) = self.state.play_state.value() {
+                    if render.render_id == render_id {
+                        self.issue_system_async(NotifyRenderComplete { render_id,
+                                                                       path,
+                                                                       session_id: self.id.clone(),
+                                                                       object_id: render.object_id.clone(),
+                                                                       put_url: render.put_url.clone(),
+                                                                       notify_url: render.notify_url.clone(),
+                                                                       context: render.context.to_string() });
+
+                        self.state.play_state = SessionPlayState::Stopped.into();
+                        self.emit_state();
+                    }
+                }
+
+                self.set_stopped_state();
             }
             Error { session_id, error } => {
                 self.packet
@@ -192,12 +204,8 @@ impl Handler<SetSessionDesiredState> for SessionActor {
     type Result = ();
 
     fn handle(&mut self, msg: SetSessionDesiredState, ctx: &mut Self::Context) -> Self::Result {
-        if self.state.desired_play_state.value() != &msg.desired {
-            self.state.desired_play_state = msg.desired.into();
-
-            self.stop();
-            self.update(ctx);
-        }
+        self.state.desired_play_state = msg.desired.into();
+        self.update(ctx);
     }
 }
 
@@ -228,41 +236,41 @@ impl SessionActor {
 
     fn update(&mut self, ctx: &mut Context<Self>) {
         use DesiredSessionPlayState::*;
-        use SessionMode::*;
+        use SessionPlayState::*;
 
         let mut modified = false;
 
-        match (self.state.mode.value(), self.state.desired_play_state.value()) {
-            (Idle, Play(play)) => {
+        match (self.state.play_state.value(), self.state.desired_play_state.value()) {
+            (SessionPlayState::Stopped, Play(play)) => {
                 modified = true;
 
                 self.tracker.reset();
-                self.prepare_to_play(play.play_id.clone());
+                self.prepare_to_play(play.clone());
             }
-            (Idle, Render(render)) => {
+            (SessionPlayState::Stopped, Render(render)) => {
                 modified = true;
 
                 self.tracker.reset();
-                self.prepare_to_render(render.render_id.clone(), render.segment.length);
+                self.prepare_to_render(render.clone());
             }
-            (Rendering(render_id), _) => {
+            (Rendering(render), desired) if !desired.is_rendering_of(render) => {
                 modified = true;
 
-                self.prepare_render_stop(render_id);
-                self.send_stop_render(ctx, render_id);
+                self.prepare_render_stop(&render.render_id);
+                self.send_stop_render(ctx, &render.render_id);
             }
-            (Playing(play_id), _) => {
+            (Playing(play), desired) if !desired.is_playing_of(play) => {
                 modified = true;
 
-                self.prepare_play_stop(play_id);
-                self.send_stop_play(ctx, play_id);
+                self.prepare_play_stop(&play.play_id);
+                self.send_stop_play(ctx, &play.play_id);
             }
-            (PreparingToRender(render_id), Render(render)) if render_id == &render.render_id => {
+            (PreparingToRender(prepare_render), Render(render)) if &prepare_render.render_id == &render.render_id => {
                 if !self.instances.any_waiting() && !self.media.any_waiting() && self.tracker.should_retry() {
                     self.send_render(ctx, render);
                 }
             }
-            (PreparingToPlay(play_id), Play(play)) if play_id == &play.play_id => {
+            (PreparingToPlay(prepare_play), Play(play)) if &prepare_play.play_id == &play.play_id => {
                 if !self.instances.any_waiting() && self.tracker.should_retry() {
                     self.send_play(ctx, play);
                 }
@@ -313,29 +321,29 @@ impl SessionActor {
         self.tracker.retried();
     }
 
-    fn prepare_to_play(&mut self, play_id: PlayId) {
+    fn prepare_to_play(&mut self, play: PlaySession) {
         self.instances
-            .set_desired_state(DesiredInstancePlayState::Playing { play_id: play_id.clone(), });
+            .set_desired_state(DesiredInstancePlayState::Playing { play_id: play.play_id.clone(), });
 
-        self.state.mode = SessionMode::PreparingToPlay(play_id).into();
+        self.state.play_state = SessionPlayState::PreparingToPlay(play).into();
     }
 
-    fn prepare_to_render(&mut self, render_id: RenderId, segment_length: f64) {
+    fn prepare_to_render(&mut self, render: RenderSession) {
         self.instances
-            .set_desired_state(DesiredInstancePlayState::Rendering { render_id: render_id.clone(),
-                                                                     length:    segment_length, });
+            .set_desired_state(DesiredInstancePlayState::Rendering { render_id: render.render_id.clone(),
+                                                                     length:    render.segment.length, });
 
-        self.state.mode = SessionMode::PreparingToRender(render_id).into();
+        self.state.play_state = SessionPlayState::PreparingToRender(render).into();
     }
 
     fn prepare_play_stop(&mut self, play_id: &PlayId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-        self.state.mode = SessionMode::StoppingPlay(play_id.clone()).into();
+        self.state.play_state = SessionPlayState::StoppingPlay(play_id.clone()).into();
     }
 
     fn prepare_render_stop(&mut self, render_id: &RenderId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-        self.state.mode = SessionMode::StoppingRender(render_id.clone()).into();
+        self.state.play_state = SessionPlayState::StoppingRender(render_id.clone()).into();
     }
 
     fn handle_audio_engine_error(result: anyhow::Result<()>, actor: &mut Self, ctx: &mut Context<Self>) {
@@ -344,22 +352,6 @@ impl SessionActor {
                  .errors
                  .push(Timestamped::new(SessionPacketError::General(e.to_string())));
         }
-    }
-
-    fn stop(&mut self) {
-        match self.state.mode.value() {
-            SessionMode::Playing(play_id) | SessionMode::PreparingToPlay(play_id) => {
-                self.state.mode = SessionMode::StoppingPlay(play_id.clone()).into();
-            }
-            SessionMode::Rendering(render_id) | SessionMode::PreparingToRender(render_id) => {
-                self.state.mode = SessionMode::StoppingRender(render_id.clone()).into();
-            }
-            _ => {}
-        }
-    }
-
-    fn set_idle(&mut self) {
-        self.state.mode = SessionMode::Idle.into();
     }
 
     fn emit_spec(&self) {
