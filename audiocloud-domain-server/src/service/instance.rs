@@ -3,7 +3,10 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, Supervised, Supervisor, SystemService};
+use actix::{
+    Actor, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Message, Supervised, Supervisor,
+    SystemService, WrapFuture,
+};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use anyhow::anyhow;
 use chrono::Utc;
@@ -11,19 +14,20 @@ use maplit::hashmap;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{BootDomain, DomainFixedInstance};
-use audiocloud_api::driver::InstanceDriverEvent;
+use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverEvent};
 use audiocloud_api::instance::{
     power, DesiredInstancePlayState, InstancePlayState, InstancePowerState, ReportInstancePlayState,
     ReportInstancePowerState,
 };
 use audiocloud_api::model::ModelCapability::PowerDistributor;
 use audiocloud_api::model::{multi_channel_value, Model};
-use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId};
+use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId, ParameterId};
 use audiocloud_api::session::{InstanceParameters, InstanceReports};
 use audiocloud_api::time::{Timestamp, Timestamped};
 
 use crate::data::get_boot_cfg;
 use crate::data::instance::{InstancePlay, InstancePower};
+use crate::instance;
 use crate::service::session::messages::NotifySessionSpec;
 
 pub fn init() {
@@ -37,7 +41,7 @@ pub struct InstanceActor {
     model:            Model,
     parameters:       InstanceParameters,
     reports:          InstanceReports,
-    parameters_dirty: bool,
+    parameters_dirty: HashSet<ParameterId>,
     owner:            Option<AppSessionId>,
     connected:        Timestamped<bool>,
     last_state_emit:  Option<Timestamp>,
@@ -74,7 +78,7 @@ impl InstanceActor {
                model:            model_spec,
                parameters:       Default::default(),
                reports:          Default::default(),
-               parameters_dirty: false, }
+               parameters_dirty: Default::default(), }
     }
 
     #[instrument(skip_all)]
@@ -89,6 +93,34 @@ impl InstanceActor {
                .unwrap_or(true)
         {
             self.emit_instance_state(ctx);
+        }
+
+        if !self.parameters_dirty.is_empty() {
+            self.send_dirty_parameters(ctx);
+        }
+    }
+
+    fn handle_instance_driver_error(result: anyhow::Result<()>, actor: &mut Self, ctx: &mut Context<Self>) {
+        if let Err(e) = result {
+            // TODO: anything more meaningful? retries?
+            warn!(%e, "Error on instance driver request");
+        }
+    }
+
+    #[instrument(skip_all)]
+    fn send_dirty_parameters(&mut self, ctx: &mut Context<InstanceActor>) {
+        let mut rv = HashMap::new();
+        for id in self.parameters_dirty.drain() {
+            if let Some(parameter) = self.parameters.get(&id) {
+                rv.insert(id, parameter.clone());
+            }
+        }
+
+        if !rv.is_empty() {
+            let cmd = InstanceDriverCommand::SetParameters(rv);
+            instance::request(self.id.clone(), cmd).into_actor(self)
+                                                   .map(Self::handle_instance_driver_error)
+                                                   .wait(ctx);
         }
     }
 
@@ -297,9 +329,35 @@ impl Handler<NotifySessionSpec> for InstanceActor {
 impl Handler<SetInstanceParameters> for InstanceActor {
     type Result = ();
 
-    fn handle(&mut self, msg: SetInstanceParameters, _ctx: &mut Self::Context) -> Self::Result {
-        // TODO: merge parameters
-        self.parameters_dirty = true;
+    fn handle(&mut self, msg: SetInstanceParameters, ctx: &mut Self::Context) -> Self::Result {
+        for (parameter_id, parameter_multi_value) in msg.parameters {
+            if let Some(current_multi_value) = self.parameters.get_mut(&parameter_id) {
+                let mut dirty = false;
+                let max_count = parameter_multi_value.len();
+                if max_count > current_multi_value.len() {
+                    current_multi_value.resize(max_count, None);
+                    dirty = true;
+                }
+
+                for (index, maybe_new_value) in parameter_multi_value.into_iter().enumerate() {
+                    if let Some(new_value) = maybe_new_value {
+                        if current_multi_value[index].as_ref()
+                                                     .map(|v| v != &new_value)
+                                                     .unwrap_or(true)
+                        {
+                            dirty = true;
+                            current_multi_value[index] = Some(new_value);
+                        }
+                    }
+                }
+
+                if dirty {
+                    self.parameters_dirty.insert(parameter_id.clone());
+                }
+            }
+        }
+
+        self.send_dirty_parameters(ctx);
     }
 }
 

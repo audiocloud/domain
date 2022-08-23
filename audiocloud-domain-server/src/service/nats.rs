@@ -7,10 +7,10 @@ use tracing::*;
 
 use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
 use audiocloud_api::codec::{Codec, Json, MsgPack};
-use audiocloud_api::driver::InstanceDriverEvent;
+use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::error::SerializableResult;
 use audiocloud_api::media::MediaServiceEvent;
-use audiocloud_api::newtypes::{AudioEngineId, MediaServiceId, ModelId};
+use audiocloud_api::newtypes::{AudioEngineId, FixedInstanceId, MediaServiceId, ModelId};
 
 use crate::service::instance::{InstancesSupervisor, NotifyInstanceDriver};
 use crate::service::session::messages::{NotifyAudioEngineEvent, NotifyMediaServiceEvent};
@@ -38,9 +38,22 @@ impl NatsClient {
                                       request: AudioEngineCommand)
                                       -> anyhow::Result<()> {
         let encoded = MsgPack.serialize(&request)?;
-        let topic = format!("ac.audio_engine.{}.cmd", engine_id);
+        let topic = format!("ac.aeng.{}.cmd", engine_id);
         let response = self.connection.request(&topic, encoded).await?;
         MsgPack.deserialize::<SerializableResult>(&response.data)?.into()
+    }
+
+    pub async fn request_instance_driver(&self,
+                                         fixed_instance_id: &FixedInstanceId,
+                                         request: InstanceDriverCommand)
+                                         -> anyhow::Result<()> {
+        let encoded = Json.serialize(&request)?;
+        let topic = format!("ac.inst.{}.{}.{}.cmd",
+                            &fixed_instance_id.manufacturer, &fixed_instance_id.name, &fixed_instance_id.instance);
+
+        let response = self.connection.request(&topic, encoded).await?;
+
+        Ok(Json.deserialize::<Result<(), InstanceDriverError>>(&response.data)??)
     }
 }
 
