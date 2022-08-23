@@ -18,7 +18,7 @@ use audiocloud_api::instance::{
 };
 use audiocloud_api::model::ModelCapability::PowerDistributor;
 use audiocloud_api::model::{multi_channel_value, Model};
-use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId};
+use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId, ParameterId};
 use audiocloud_api::session::{InstanceParameters, InstanceReports};
 use audiocloud_api::time::{Timestamp, Timestamped};
 
@@ -37,7 +37,7 @@ pub struct InstanceActor {
     model:            Model,
     parameters:       InstanceParameters,
     reports:          InstanceReports,
-    parameters_dirty: bool,
+    parameters_dirty: HashSet<ParameterId>,
     owner:            Option<AppSessionId>,
     connected:        Timestamped<bool>,
     last_state_emit:  Option<Timestamp>,
@@ -74,7 +74,7 @@ impl InstanceActor {
                model:            model_spec,
                parameters:       Default::default(),
                reports:          Default::default(),
-               parameters_dirty: false, }
+               parameters_dirty: Default::default(), }
     }
 
     #[instrument(skip_all)]
@@ -89,6 +89,19 @@ impl InstanceActor {
                .unwrap_or(true)
         {
             self.emit_instance_state(ctx);
+        }
+
+        if !self.parameters_dirty.is_empty() {
+            let mut rv = HashMap::new();
+            for id in self.parameters_dirty.drain() {
+                if let Some(parameter) = self.parameters.get(&id) {
+                    rv.insert(id, parameter.clone());
+                }
+            }
+
+            if !rv.is_empty() {
+                // TODO: send the parameters to the driver
+            }
         }
     }
 
@@ -298,8 +311,32 @@ impl Handler<SetInstanceParameters> for InstanceActor {
     type Result = ();
 
     fn handle(&mut self, msg: SetInstanceParameters, _ctx: &mut Self::Context) -> Self::Result {
-        // TODO: merge parameters
-        self.parameters_dirty = true;
+        for (parameter_id, parameter_multi_value) in msg.parameters {
+            if let Some(current_multi_value) = self.parameters.get_mut(&parameter_id) {
+                let mut dirty = false;
+                let max_count = parameter_multi_value.len();
+                if max_count > current_multi_value.len() {
+                    current_multi_value.resize(max_count, None);
+                    dirty = true;
+                }
+
+                for (index, maybe_new_value) in parameter_multi_value.into_iter().enumerate() {
+                    if let Some(new_value) = maybe_new_value {
+                        if current_multi_value[index].as_ref()
+                                                     .map(|v| v != &new_value)
+                                                     .unwrap_or(true)
+                        {
+                            dirty = true;
+                            current_multi_value[index] = Some(new_value);
+                        }
+                    }
+                }
+
+                if dirty {
+                    self.parameters_dirty.insert(parameter_id.clone());
+                }
+            }
+        }
     }
 }
 
