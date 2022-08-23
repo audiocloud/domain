@@ -26,6 +26,7 @@ use messages::{
 };
 use supervisor::{BecomeOnline, SessionsSupervisor};
 
+use crate::audio_engine;
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
 use crate::service::nats::get_nats_client;
 use crate::service::session::messages::{NotifyMediaServiceEvent, NotifySessionPacket};
@@ -256,33 +257,35 @@ impl SessionActor {
             (Rendering(render), desired) if !desired.is_rendering_of(render) => {
                 modified = true;
 
-                self.prepare_render_stop(&render.render_id);
-                self.send_stop_render(ctx, &render.render_id);
+                let render_id = render.render_id.clone();
+                self.prepare_render_stop(render_id);
+                self.send_stop_render(ctx, render_id);
             }
             (Playing(play), desired) if !desired.is_playing_of(play) => {
                 modified = true;
+                let play_id = play.play_id.clone();
 
-                self.prepare_play_stop(&play.play_id);
-                self.send_stop_play(ctx, &play.play_id);
+                self.prepare_play_stop(play_id);
+                self.send_stop_play(ctx, play_id);
             }
             (PreparingToRender(prepare_render), Render(render)) if &prepare_render.render_id == &render.render_id => {
                 if !self.instances.any_waiting() && !self.media.any_waiting() && self.tracker.should_retry() {
-                    self.send_render(ctx, render);
+                    self.send_render(ctx, render.clone());
                 }
             }
             (PreparingToPlay(prepare_play), Play(play)) if &prepare_play.play_id == &play.play_id => {
                 if !self.instances.any_waiting() && self.tracker.should_retry() {
-                    self.send_play(ctx, play);
+                    self.send_play(ctx, play.clone());
                 }
             }
             (StoppingRender(render_id), _) => {
                 if self.tracker.should_retry() {
-                    self.send_stop_render(ctx, render_id);
+                    self.send_stop_render(ctx, render_id.clone());
                 }
             }
             (StoppingPlay(play_id), _) => {
                 if self.tracker.should_retry() {
-                    self.send_stop_play(ctx, play_id);
+                    self.send_stop_play(ctx, play_id.clone());
                 }
             }
             _ => {}
@@ -293,31 +296,31 @@ impl SessionActor {
         }
     }
 
-    fn send_stop_render(&mut self, ctx: &mut Context<SessionActor>, render_id: &RenderId) {
+    fn send_stop_render(&mut self, ctx: &mut Context<SessionActor>, render_id: RenderId) {
         self.audio_engine_request(ctx,
                                   AudioEngineCommand::StopRender { session_id: self.id.clone(),
-                                                                   render_id:  render_id.clone(), });
+                                                                   render_id });
         self.tracker.retried();
     }
 
-    fn send_stop_play(&mut self, ctx: &mut Context<SessionActor>, play_id: &PlayId) {
+    fn send_stop_play(&mut self, ctx: &mut Context<SessionActor>, play_id: PlayId) {
         self.audio_engine_request(ctx,
                                   AudioEngineCommand::StopPlay { session_id: self.id.clone(),
-                                                                 play_id:    play_id.clone(), });
+                                                                 play_id });
         self.tracker.retried();
     }
 
-    fn send_play(&mut self, ctx: &mut Context<SessionActor>, play: &PlaySession) {
+    fn send_play(&mut self, ctx: &mut Context<SessionActor>, play: PlaySession) {
         self.audio_engine_request(ctx,
                                   AudioEngineCommand::Play { session_id: self.id.clone(),
-                                                             play:       play.clone(), });
+                                                             play });
         self.tracker.retried();
     }
 
-    fn send_render(&mut self, ctx: &mut Context<SessionActor>, render: &RenderSession) {
+    fn send_render(&mut self, ctx: &mut Context<SessionActor>, render: RenderSession) {
         self.audio_engine_request(ctx,
                                   AudioEngineCommand::Render { session_id: self.id.clone(),
-                                                               render:     render.clone(), });
+                                                               render });
         self.tracker.retried();
     }
 
@@ -336,14 +339,14 @@ impl SessionActor {
         self.state.play_state = SessionPlayState::PreparingToRender(render).into();
     }
 
-    fn prepare_play_stop(&mut self, play_id: &PlayId) {
+    fn prepare_play_stop(&mut self, play_id: PlayId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-        self.state.play_state = SessionPlayState::StoppingPlay(play_id.clone()).into();
+        self.state.play_state = SessionPlayState::StoppingPlay(play_id).into();
     }
 
-    fn prepare_render_stop(&mut self, render_id: &RenderId) {
+    fn prepare_render_stop(&mut self, render_id: RenderId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-        self.state.play_state = SessionPlayState::StoppingRender(render_id.clone()).into();
+        self.state.play_state = SessionPlayState::StoppingRender(render_id).into();
     }
 
     fn handle_audio_engine_error(result: anyhow::Result<()>, actor: &mut Self, ctx: &mut Context<Self>) {
@@ -373,8 +376,10 @@ impl SessionActor {
             self.packet.waiting_for_instances = self.instances.waiting_for_instances();
             self.packet.waiting_for_media = self.media.waiting_for_media();
 
+            let packet = mem::take(&mut self.packet);
+
             self.issue_system_async(NotifySessionPacket { session_id: self.id.clone(),
-                                                          packet:     mem::take(&mut self.packet), });
+                                                          packet });
         }
     }
 
@@ -385,10 +390,9 @@ impl SessionActor {
     }
 
     fn audio_engine_request(&self, ctx: &mut Context<Self>, request: AudioEngineCommand) {
-        get_nats_client().request_audio_engine(&self.audio_engine.clone(), request)
-                         .into_actor(self)
-                         .map(Self::handle_audio_engine_error)
-                         .wait(ctx);
+        audio_engine::request(self.audio_engine.clone(), request).into_actor(self)
+                                                                 .map(Self::handle_audio_engine_error)
+                                                                 .wait(ctx);
     }
 }
 

@@ -214,7 +214,7 @@ impl InstanceActor {
 
         if let (Some(power), true, true) = (maybe_power_report, power_changed, is_power_controller) {
             let values = power.iter()
-                              .map(|v| v.and_then(|v| v.value().to_bool()).unwrap_or_default())
+                              .map(|v| v.as_ref().and_then(|v| v.value().to_bool()).unwrap_or_default())
                               .collect();
 
             self.issue_system_async(NotifyInstancePower { instance_id: self.id.clone(),

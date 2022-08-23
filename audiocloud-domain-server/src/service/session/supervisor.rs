@@ -96,9 +96,10 @@ impl Handler<BecomeOnline> for SessionsSupervisor {
                 if session.time.contains_now() {
                     if let Some(engine_id) = self.allocate_engine() {
                         let actor = SessionActor::new(id, session, engine_id.clone());
+                        self.active.insert(id.clone(), Supervisor::start(move |_| actor));
+                    } else {
+                        warn!(%id, "No available audio engines to start session");
                     }
-
-                    self.active.insert(id.clone(), Supervisor::start(move |_| actor));
                 }
             }
         }
