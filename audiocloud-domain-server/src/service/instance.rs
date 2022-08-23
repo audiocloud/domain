@@ -129,8 +129,22 @@ impl InstanceActor {
         if let Some(play) = &mut self.play {
             if !play.state.value().satisfies(play.desired.value()) {
                 if play.tracker.should_retry() {
-                    // TODO: send command to drivers
+                    let cmd = match play.desired.value() {
+                        DesiredInstancePlayState::Playing { play_id } => {
+                            InstanceDriverCommand::Play { play_id: play_id.clone(), }
+                        }
+                        DesiredInstancePlayState::Rendering { length, render_id } => {
+                            InstanceDriverCommand::Render { length:    *length,
+                                                            render_id: render_id.clone(), }
+                        }
+                        DesiredInstancePlayState::Stopped => InstanceDriverCommand::Stop,
+                    };
+
                     play.tracker.retried();
+
+                    instance::request(self.id.clone(), cmd).into_actor(self)
+                                                           .map(Self::handle_instance_driver_error)
+                                                           .wait(ctx);
                 }
             }
         }
