@@ -7,7 +7,8 @@ use audiocloud_api::audio_engine::AudioEngineEvent;
 use audiocloud_api::change::{DesiredSessionPlayState, RenderId, SessionState};
 use audiocloud_api::cloud::apps::SessionSpec;
 use audiocloud_api::domain::DomainSessionCommand;
-use audiocloud_api::newtypes::{AppSessionId, SecureKey};
+use audiocloud_api::media::MediaServiceEvent;
+use audiocloud_api::newtypes::{AppSessionId, AudioEngineId, MediaServiceId, SecureKey};
 use audiocloud_api::session::SessionSecurity;
 
 #[derive(Message, Clone, Debug)]
@@ -61,8 +62,15 @@ pub struct NotifySessionState {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyAudioEngineEvent {
-    pub session_id: AppSessionId,
-    pub event:      AudioEngineEvent,
+    pub engine_id: AudioEngineId,
+    pub event:     AudioEngineEvent,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct NotifyMediaServiceEvent {
+    pub media_service_id: MediaServiceId,
+    pub event:            MediaServiceEvent,
 }
 
 #[derive(Message, Clone, Debug)]

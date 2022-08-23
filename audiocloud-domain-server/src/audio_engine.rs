@@ -1,6 +1,6 @@
 use crate::service::nats::get_nats_client;
 use audiocloud_api::audio_engine::AudioEngineCommand;
-use audiocloud_api::newtypes::AppSessionId;
+use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
 use std::collections::HashSet;
 
 use crate::service::session::session_audio_engine::SessionAudioEngineClient;
@@ -27,4 +27,9 @@ impl AudioEngineClient {
     pub async fn request(&self, request: AudioEngineCommand) -> anyhow::Result<()> {
         get_nats_client().request_audio_engine(&self.id, request).await
     }
+}
+
+pub async fn request(engine_id: AudioEngineId, request: AudioEngineCommand) -> anyhow::Result<()> {
+    get_nats_client().request_audio_engine(&engine_id, request)
+                     .await
 }

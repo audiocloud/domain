@@ -235,7 +235,7 @@ impl ReaperAudioEngine {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            Stop { session_id } => {
+            StopRender { session_id } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.stop()?;
                 } else {

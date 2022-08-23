@@ -2,7 +2,7 @@ use actix_web::error::ErrorInternalServerError;
 use actix_web::{get, post, web, Error, Responder};
 use web::{Data, Json, Path};
 
-use audiocloud_api::media::{DownloadFromDomain, ImportInDomain, MediaObject, UploadToDomain};
+use audiocloud_api::media::{DownloadFromDomain, ImportToDomain, MediaObject, UploadToDomain};
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaObjectId};
 
 use crate::db::{Db, PersistedDownload, PersistedMediaObject, PersistedUpload};
@@ -78,7 +78,7 @@ async fn create_download(db: Data<Db>,
 #[post("apps/{app_id}/media/{media_object_id}/import")]
 async fn import_in_domain(db: Data<Db>,
                           path: Path<(AppId, MediaObjectId)>,
-                          Json(import): Json<ImportInDomain>)
+                          Json(import): Json<ImportToDomain>)
                           -> impl Responder {
     let (app_id, media_object_id) = path.into_inner();
     let id = AppMediaObjectId::new(app_id, media_object_id);

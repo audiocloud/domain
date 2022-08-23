@@ -66,7 +66,7 @@ impl AudioEngineClient {
     }
 
     pub async fn stop(&self, session_id: AppSessionId) -> anyhow::Result<()> {
-        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::Stop { session_id }, tx)))
+        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::StopRender { session_id }, tx)))
             .await
     }
 

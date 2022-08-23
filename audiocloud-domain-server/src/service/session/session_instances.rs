@@ -108,17 +108,7 @@ impl SessionInstances {
         let mut rv = HashSet::new();
 
         for (instance_id, instance) in self.instances.iter() {
-            let power_satisfied = instance.state
-                                          .power
-                                          .as_ref()
-                                          .map(|power| power.actual.value().satisfies(power.desired.value().clone()))
-                                          .unwrap_or(true);
-
-            let play_satisfied = instance.state
-                                         .play
-                                         .as_ref()
-                                         .map(|play| play.actual.value().satisfies(play.desired.value()))
-                                         .unwrap_or(true);
+            let (power_satisfied, play_satisfied) = is_satisfied(instance);
 
             if !power_satisfied || !play_satisfied {
                 rv.insert(instance_id.clone());
@@ -127,4 +117,27 @@ impl SessionInstances {
 
         rv
     }
+
+    pub fn any_waiting(&self) -> bool {
+        self.instances.values().any(|i| {
+                                   let (power_satisfied, play_satisfied) = is_satisfied(i);
+                                   !power_satisfied || !play_satisfied
+                               })
+    }
+}
+
+fn is_satisfied(i: &SessionInstance) -> (bool, bool) {
+    let power_satisfied = i.state
+                           .power
+                           .as_ref()
+                           .map(|power| power.actual.value().satisfies(power.desired.value().clone()))
+                           .unwrap_or(true);
+
+    let play_satisfied = i.state
+                          .play
+                          .as_ref()
+                          .map(|play| play.actual.value().satisfies(play.desired.value()))
+                          .unwrap_or(true);
+
+    (power_satisfied, play_satisfied)
 }

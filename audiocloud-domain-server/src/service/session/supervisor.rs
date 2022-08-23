@@ -6,6 +6,7 @@ use actix::{
 };
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
+use tracing::warn;
 
 use audiocloud_api::change::SessionState;
 use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
@@ -14,7 +15,8 @@ use audiocloud_api::session::Session;
 use crate::audio_engine::AudioEngineClient;
 use crate::data::get_boot_cfg;
 use crate::service::session::messages::{
-    ExecuteSessionCommand, NotifySessionSpec, NotifySessionState, SetSessionDesiredState,
+    ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyMediaServiceEvent, NotifySessionSpec, NotifySessionState,
+    SetSessionDesiredState,
 };
 use crate::service::session::SessionActor;
 
@@ -92,9 +94,9 @@ impl Handler<BecomeOnline> for SessionsSupervisor {
             self.online = true;
             for (id, session) in self.sessions.iter() {
                 if session.time.contains_now() {
-                    let engine = self.allocate_engine().expect("no audio engine available");
-                    let engine = self.engines.get(&engine).expect("audio engine not found");
-                    let actor = SessionActor::new(id, session, &engine);
+                    if let Some(engine_id) = self.allocate_engine() {
+                        let actor = SessionActor::new(id, session, engine_id.clone());
+                    }
 
                     self.active.insert(id.clone(), Supervisor::start(move |_| actor));
                 }
@@ -108,6 +110,38 @@ impl Handler<NotifySessionState> for SessionsSupervisor {
 
     fn handle(&mut self, msg: NotifySessionState, ctx: &mut Self::Context) -> Self::Result {
         self.state.insert(msg.session_id, msg.state);
+    }
+}
+
+impl Handler<NotifyAudioEngineEvent> for SessionsSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NotifyAudioEngineEvent, ctx: &mut Self::Context) -> Self::Result {
+        let session_id = msg.event.session_id();
+        match self.active.get(session_id) {
+            Some(session) => {
+                session.do_send(msg);
+            }
+            None => {
+                warn!(%session_id, "Dropping audio engine event for unknown / inactive session");
+            }
+        }
+    }
+}
+
+impl Handler<NotifyMediaServiceEvent> for SessionsSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NotifyMediaServiceEvent, ctx: &mut Self::Context) -> Self::Result {
+        let session_id = msg.event.session_id();
+        match self.active.get(session_id) {
+            Some(session) => {
+                session.do_send(msg);
+            }
+            None => {
+                warn!(%session_id, "Dropping media service event for unknown / inactive session");
+            }
+        }
     }
 }
 
