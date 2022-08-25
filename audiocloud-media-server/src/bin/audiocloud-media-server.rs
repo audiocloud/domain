@@ -24,7 +24,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::parse();
 
-    info!(" -- read config");
+    info!(?config, " -- read config");
 
     let db = Db::new(&config.db).await?;
 
