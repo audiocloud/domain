@@ -5,8 +5,9 @@ use actix_web::{web, App, HttpServer};
 use clap::Parser;
 use tracing::*;
 
+use audiocloud_media_server::config::Config;
 use audiocloud_media_server::db::Db;
-use audiocloud_media_server::{rest_api, Config};
+use audiocloud_media_server::{rest_api, service};
 
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
@@ -28,6 +29,10 @@ async fn main() -> anyhow::Result<()> {
     let db = Db::new(&config.db).await?;
 
     info!(" -- DB initialized");
+
+    service::init(db.clone());
+
+    info!(" -- Service initialized");
 
     HttpServer::new({
         let web_db = web::Data::new(db);

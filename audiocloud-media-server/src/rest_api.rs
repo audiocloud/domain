@@ -1,18 +1,22 @@
-use actix_web::error::ErrorInternalServerError;
-use actix_web::{get, post, web, Error, Responder};
+use actix_web::error::{ErrorInternalServerError, ErrorNotFound};
+use actix_web::{delete, get, post, put, web, Error, Responder};
+use anyhow::anyhow;
+use serde_json::json;
 use web::{Data, Json, Path};
 
-use audiocloud_api::media::{DownloadFromDomain, ImportToDomain, MediaObject, UploadToDomain};
-use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaObjectId};
+use audiocloud_api::media::{DownloadFromDomain, ImportToDomain, MediaObject, UpdateMediaSession, UploadToDomain};
+use audiocloud_api::newtypes::{AppId, AppMediaObjectId, AppSessionId, MediaObjectId, SessionId};
 
-use crate::db::{Db, PersistedDownload, PersistedMediaObject, PersistedUpload};
+use crate::db::{Db, PersistedDownload, PersistedMediaObject, PersistedSession, PersistedUpload};
 
 pub fn rest_api(cfg: &mut web::ServiceConfig) {
     cfg.service(get_media_state)
        .service(get_multiple_media_state)
        .service(create_upload)
        .service(create_download)
-       .service(import_in_domain);
+       .service(import_in_domain)
+       .service(update_session)
+       .service(delete_session);
 }
 
 #[get("apps/{app_id}/media/{media_object_id}")]
@@ -50,7 +54,7 @@ async fn create_upload(db: Data<Db>,
 
     let state = db.update_media_status(&id, |media| {
                       media.metadata = Some(upload.metadata());
-                      media.upload = Some(PersistedUpload::new(upload));
+                      media.upload = PersistedUpload::new(Some(upload));
                   })
                   .await
                   .map_err(ErrorInternalServerError)?;
@@ -67,7 +71,7 @@ async fn create_download(db: Data<Db>,
     let id = AppMediaObjectId::new(app_id, media_object_id);
 
     let state = db.update_media_status(&id, |media| {
-                      media.download = Some(PersistedDownload::new(download));
+                      media.download = PersistedDownload::new(Some(download));
                   })
                   .await
                   .map_err(ErrorInternalServerError)?;
@@ -93,6 +97,37 @@ async fn import_in_domain(db: Data<Db>,
     Ok::<_, Error>(Json(to_public_state(state)))
 }
 
+#[put("apps/{app_id}/sessions/{session_id}")]
+async fn update_session(db: Data<Db>,
+                        path: Path<(AppId, SessionId)>,
+                        Json(data): Json<UpdateMediaSession>)
+                        -> impl Responder {
+    let (app_id, session_id) = path.into_inner();
+
+    let persisted = PersistedSession { _id:           AppSessionId::new(app_id, session_id),
+                                       ends_at:       data.ends_at,
+                                       media_objects: data.media_objects, };
+
+    let update_type = db.set_session_state(persisted)
+                        .await
+                        .map_err(ErrorInternalServerError)?;
+
+    Ok::<_, Error>(Json(json!({ "update": update_type })))
+}
+
+#[delete("apps/{app_id}/sessions/{session_id}")]
+async fn delete_session(db: Data<Db>, path: Path<(AppId, SessionId)>) -> impl Responder {
+    let (app_id, session_id) = path.into_inner();
+    let id = AppSessionId::new(app_id, session_id);
+
+    let deleted = db.delete_session_state(&id).await.map_err(ErrorInternalServerError)?;
+    if !deleted {
+        return Err(ErrorNotFound(anyhow!("Session '{id}' not found")));
+    }
+
+    Ok::<_, Error>(web::Json(json!({ "deleted": deleted })))
+}
+
 fn to_public_state(state: PersistedMediaObject) -> MediaObject {
     let PersistedMediaObject { _id,
                                metadata,
@@ -103,6 +138,6 @@ fn to_public_state(state: PersistedMediaObject) -> MediaObject {
     MediaObject { id: _id,
                   metadata,
                   path,
-                  download: download.map(|d| d.state),
-                  upload: upload.map(|u| u.state) }
+                  download: download.state,
+                  upload: upload.state }
 }
