@@ -14,6 +14,7 @@ use tokio::time::timeout;
 use tokio_util::io::StreamReader;
 use tracing::*;
 
+use crate::config::Config;
 use audiocloud_api::media::{
     DownloadFromDomain, MediaDownloadState, MediaObject, MediaServiceEvent, MediaUploadState, UploadToDomain,
 };
@@ -34,6 +35,7 @@ static MEDIA_SERVICE: OnceCell<Arc<Mutex<Service>>> = OnceCell::new();
 /// * `download`: details of the download request
 ///
 /// returns: Result<(), Error>
+#[instrument(skip(client), err)]
 pub async fn download_from_domain(client: reqwest::Client,
                                   id: AppMediaObjectId,
                                   source: String,
@@ -66,12 +68,13 @@ pub async fn download_from_domain(client: reqwest::Client,
 /// * `upload`: details of the upload request
 ///
 /// returns: Result<(), Error>
+#[instrument(skip(client), err)]
 pub async fn upload_to_domain(client: reqwest::Client,
                               id: AppMediaObjectId,
                               destination: String,
                               upload: UploadToDomain)
                               -> anyhow::Result<()> {
-    let mut file = tokio::fs::File::open(&destination).await?;
+    let mut file = tokio::fs::File::create(&destination).await?;
 
     let stream = client.get(&upload.url)
                        .send()
@@ -87,7 +90,8 @@ pub async fn upload_to_domain(client: reqwest::Client,
         client.post(&notify_url)
               .json(&json!({
                         "context": upload.context,
-                        "id": id,
+                        "app_id": id.app_id,
+                        "media_id": id.media_id
                     }))
               .send()
               .await?;
@@ -123,10 +127,10 @@ enum JobStatus {
 }
 
 impl Service {
-    pub fn new(db: Db) -> (JoinHandle<()>, Arc<Mutex<Self>>) {
+    pub fn new(db: Db, cfg: &Config) -> (JoinHandle<()>, Arc<Mutex<Self>>) {
         let (tx_status, rx_status) = flume::unbounded();
         let service = Arc::new(Mutex::new(Self { client: Default::default(),
-                                                 root_dir: Default::default(),
+                                                 root_dir: cfg.root_dir.clone(),
                                                  downloads: Default::default(),
                                                  uploads: Default::default(),
                                                  db,
@@ -277,11 +281,11 @@ impl Service {
 
     async fn send_updates(&self, id: &AppMediaObjectId) -> anyhow::Result<()> {
         for session in self.db.get_sessions_for_media(id).await? {
-            let media_status = self.db.get_media_status_multiple(session.media_objects.iter()).await?;
+            let media_status = self.db.get_media_status_multiple(&session.media_objects).await?;
             let media_status = media_status.into_iter()
                                            .map(|status| {
-                                               (status._id.clone(),
-                                                MediaObject { id:       status._id.clone(),
+                                               (status.id.clone(),
+                                                MediaObject { id:       status.id.clone(),
                                                               metadata: status.metadata,
                                                               path:     status.path,
                                                               download: status.download.state,
@@ -289,7 +293,7 @@ impl Service {
                                            })
                                            .collect();
 
-            let event = MediaServiceEvent::SessionMediaState { session_id: session._id.clone(),
+            let event = MediaServiceEvent::SessionMediaState { session_id: session.id.clone(),
                                                                media:      media_status, };
 
             emit_nats_event(event).await?;
@@ -303,7 +307,7 @@ pub fn get_media_service() -> Arc<Mutex<Service>> {
     MEDIA_SERVICE.get().expect("media service not initialized").clone()
 }
 
-pub fn init(db: Db) {
-    let (_, service) = Service::new(db);
+pub fn init(db: Db, cfg: &Config) {
+    let (_, service) = Service::new(db, cfg);
     MEDIA_SERVICE.set(service).expect("media service already initialized");
 }

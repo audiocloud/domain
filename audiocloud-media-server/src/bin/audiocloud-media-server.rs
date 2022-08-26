@@ -1,6 +1,5 @@
 use std::env;
 
-use actix_web::rt::{spawn, Runtime};
 use actix_web::{web, App, HttpServer};
 use clap::Parser;
 use tracing::*;
@@ -30,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!(" -- DB initialized");
 
-    service::init(db.clone());
+    service::init(db.clone(), &config);
 
     info!(" -- Service initialized");
 
@@ -39,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         move || {
             App::new().app_data(web_db.clone())
                       .service(web::scope("/v1").configure(rest_api::rest_api))
+                      .wrap(actix_web::middleware::Logger::default())
         }
     }).bind((config.bind.as_str(), config.port))?
       .run()

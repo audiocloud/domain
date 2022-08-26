@@ -1,11 +1,10 @@
 use std::collections::HashSet;
 
+use chrono::{NaiveDateTime, Utc};
 use clap::Args;
 use futures::TryStreamExt;
-use mongodb::bson::doc;
-use mongodb::options::FindOneAndReplaceOptions;
-use mongodb::{Client, Collection};
 use serde::{Deserialize, Serialize};
+use sqlx::{query, SqlitePool};
 use tracing::*;
 
 use audiocloud_api::media::{DownloadFromDomain, MediaDownloadState, MediaMetadata, MediaUploadState, UploadToDomain};
@@ -14,7 +13,7 @@ use audiocloud_api::time::{Timestamp, Timestamped};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PersistedMediaObject {
-    pub _id:      AppMediaObjectId,
+    pub id:       AppMediaObjectId,
     pub metadata: Option<MediaMetadata>,
     pub path:     Option<String>,
     pub download: PersistedDownload,
@@ -23,7 +22,7 @@ pub struct PersistedMediaObject {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PersistedSession {
-    pub _id:           AppSessionId,
+    pub id:            AppSessionId,
     pub media_objects: HashSet<AppMediaObjectId>,
     pub ends_at:       Timestamp,
 }
@@ -55,8 +54,8 @@ impl PersistedUpload {
 }
 
 impl PersistedMediaObject {
-    pub fn new(_id: AppMediaObjectId) -> Self {
-        Self { _id,
+    pub fn new(id: AppMediaObjectId) -> Self {
+        Self { id,
                metadata: None,
                upload: PersistedUpload::new(None),
                download: PersistedDownload::new(None),
@@ -66,74 +65,127 @@ impl PersistedMediaObject {
 
 #[derive(Clone)]
 pub struct Db {
-    mongo:    Client,
-    objects:  Collection<PersistedMediaObject>,
-    sessions: Collection<PersistedSession>,
+    pool: SqlitePool,
 }
 
 #[derive(Debug, Args)]
 pub struct DbConfig {
-    #[clap(long,
-           env,
-           default_value = "mongodb://127.0.0.1:27017/audiocloud_media?directConnection=true")]
-    pub url: String,
+    #[clap(long, env, default_value = "sqlite::memory:")]
+    pub database_url: String,
 }
 
 impl Db {
+    #[instrument(skip_all, err)]
     pub async fn new(config: &DbConfig) -> anyhow::Result<Self> {
-        let mongo = Client::with_uri_str(&config.url).await?;
-        let database = mongo.default_database().expect("default database");
-        let objects = database.collection("objects");
-        let sessions = database.collection("sessions");
+        let pool = SqlitePool::connect(&config.database_url).await?;
 
-        Ok(Self { mongo,
-                  objects,
-                  sessions })
+        Ok(Self { pool })
     }
 
     #[instrument(skip(self), err)]
     pub async fn get_media_status(&self, id: &AppMediaObjectId) -> anyhow::Result<Option<PersistedMediaObject>> {
-        Ok(self.objects.find_one(doc! {"_id": id.to_string()}, None).await?)
-    }
+        let id = id.to_string();
+        let rv = query!("SELECT * FROM media WHERE id = ?", id).fetch_optional(&self.pool)
+                                                               .await?;
 
-    #[instrument(skip(self, ids), err)]
-    pub async fn get_media_status_multiple(&self,
-                                           ids: impl Iterator<Item = &AppMediaObjectId>)
-                                           -> anyhow::Result<Vec<PersistedMediaObject>> {
-        let ids = ids.map(|id| id.to_string()).collect::<Vec<_>>();
-
-        Ok(self.objects
-               .find(doc! {"_id": {"$in": ids}}, None)
-               .await?
-               .try_collect::<Vec<_>>()
-               .await?)
+        Ok(match rv {
+            None => None,
+            Some(model) => {
+                Some(persistent_media_object(model.id, model.metadata, model.path, model.download, model.upload)?)
+            }
+        })
     }
 
     #[instrument(skip(self), err)]
     pub async fn get_session_state(&self, id: &AppSessionId) -> anyhow::Result<Option<PersistedSession>> {
-        Ok(self.sessions.find_one(doc! {"_id": id.to_string()}, None).await?)
+        let id = id.to_string();
+        let mut txn = self.pool.begin().await?;
+
+        let rv = query!("SELECT * FROM session WHERE id = ?", id).fetch_optional(&mut txn)
+                                                                 .await?;
+
+        Ok(match rv {
+            None => None,
+            Some(model) => {
+                let mut rv = persistent_session(model.id, model.ends_at)?;
+                let session_id = rv.id.to_string();
+
+                let mut media =
+                    query!("SELECT session_media.media_id FROM session_media WHERE session_media.session_id = ?",
+                           session_id).fetch(&mut txn);
+
+                while let Some(media) = media.try_next().await? {
+                    rv.media_objects.insert(media.media_id.parse()?);
+                }
+
+                drop(media);
+
+                txn.commit().await?;
+
+                Some(rv)
+            }
+        })
     }
 
     #[instrument(skip(self), err)]
     pub async fn set_session_state(&self, state: PersistedSession) -> anyhow::Result<&str> {
-        let result = self.sessions
-                         .find_one_and_replace(doc! {"_id": state._id.to_string()},
-                                               state,
-                                               FindOneAndReplaceOptions::builder().upsert(true).build())
-                         .await?;
+        let mut txn = self.pool.begin().await?;
 
-        Ok(if result.is_some() { "updated" } else { "created" })
+        let id = state.id.to_string();
+        let ends_at = state.ends_at.naive_utc().timestamp();
+
+        // upsert session
+        query!("INSERT OR REPLACE INTO session (id, ends_at) VALUES (?, ?)",
+               id,
+               ends_at).execute(&mut txn)
+                       .await?;
+
+        // delete existing media objects
+        query!("DELETE FROM session_media WHERE session_id = ?", id).execute(&mut txn)
+                                                                    .await?;
+
+        // insert new media objects
+        for media_id in state.media_objects {
+            let media_id = media_id.to_string();
+
+            query!("INSERT INTO session_media (session_id, media_id) VALUES (?, ?)",
+                   id,
+                   media_id).execute(&mut txn)
+                            .await?;
+        }
+
+        txn.commit().await?;
+
+        Ok("done")
     }
 
     #[instrument(skip(self), err)]
     pub async fn delete_session_state(&self, id: &AppSessionId) -> anyhow::Result<bool> {
-        let deleted = self.sessions.delete_one(doc! {"_id": id.to_string()}, None).await?;
-        Ok(deleted.deleted_count > 0)
+        let id = id.to_string();
+        let deleted = query!("DELETE FROM session WHERE id = ?", id).execute(&self.pool)
+                                                                    .await?
+                                                                    .rows_affected();
+        Ok(deleted > 0)
     }
 
     #[instrument(skip(self), err)]
     pub async fn set_media_status(&self, id: &AppMediaObjectId, state: PersistedMediaObject) -> anyhow::Result<()> {
-        self.objects.insert_one(state, None).await?;
+        let id = state.id.to_string();
+        let metadata = match state.metadata.as_ref() {
+            Some(metadata) => Some(serde_json::to_string(metadata)?),
+            None => None,
+        };
+        let path = state.path.clone();
+        let download = serde_json::to_string(&state.download)?;
+        let upload = serde_json::to_string(&state.upload)?;
+
+        query!("INSERT OR REPLACE INTO media (id, metadata, path, download, upload) VALUES (?, ?, ?, ?, ?)",
+               id,
+               metadata,
+               path,
+               download,
+               upload).execute(&self.pool)
+                      .await?;
         Ok(())
     }
 
@@ -142,32 +194,120 @@ impl Db {
                                      id: &AppMediaObjectId,
                                      func: impl FnOnce(&mut PersistedMediaObject) -> () + Send + Sync + 'static)
                                      -> anyhow::Result<PersistedMediaObject> {
-        let mut txn = self.mongo.start_session(None).await?;
-        txn.start_transaction(None).await?;
+        let id_str = id.to_string();
 
-        let read = self.objects
-                       .find_one_with_session(doc! {"_id": id.to_string()}, None, &mut txn)
-                       .await?;
+        let mut txn = self.pool.begin().await?;
 
-        let mut read = match read {
-            None => PersistedMediaObject::new(id.clone()),
-            Some(read) => read,
+        let read = query!("SELECT * FROM media WHERE id = ?", id_str).fetch_optional(&mut txn)
+                                                                     .await?;
+
+        let (mut read, exists) = match read {
+            Some(read) => {
+                (persistent_media_object(read.id, read.metadata, read.path, read.download, read.upload)?, true)
+            }
+            None => (PersistedMediaObject::new(id.clone()), false),
         };
 
         func(&mut read);
-        self.objects.insert_one_with_session(&read, None, &mut txn).await?;
 
-        txn.commit_transaction().await?;
+        let metadata = match read.metadata.as_ref() {
+            Some(metadata) => Some(serde_json::to_string(metadata)?),
+            None => None,
+        };
+        let download = serde_json::to_string(&read.download)?;
+        let upload = serde_json::to_string(&read.upload)?;
+        let path = read.path.clone();
+
+        if !exists {
+            query!("INSERT OR REPLACE INTO media (id, metadata, path, download, upload) VALUES (?, ?, ?, ?, ?)",
+                   id_str,
+                   metadata,
+                   path,
+                   download,
+                   upload).execute(&mut txn)
+                          .await?;
+        } else {
+            query!("UPDATE media SET metadata = ?, path = ?, download = ?, upload = ? WHERE id = ?",
+                   metadata,
+                   path,
+                   download,
+                   upload,
+                   id_str).execute(&mut txn)
+                          .await?;
+        }
+
+        txn.commit().await?;
 
         Ok(read)
     }
 
     #[instrument(skip_all, err)]
-    pub async fn get_sessions_for_media(&self, id: &AppMediaObjectId) -> anyhow::Result<Vec<PersistedSession>> {
-        Ok(self.sessions
-               .find(doc! {"media_objects": id.to_string()}, None)
-               .await?
-               .try_collect::<Vec<_>>()
-               .await?)
+    pub async fn get_media_status_multiple(&self,
+                                           ids: &HashSet<AppMediaObjectId>)
+                                           -> anyhow::Result<Vec<PersistedMediaObject>> {
+        let mut rv = Vec::new();
+        for id in ids {
+            if let Some(media) = self.get_media_status(id).await? {
+                rv.push(media);
+            }
+        }
+
+        Ok(rv)
     }
+
+    #[instrument(skip_all, err)]
+    pub async fn get_sessions_for_media(&self, id: &AppMediaObjectId) -> anyhow::Result<Vec<PersistedSession>> {
+        let mut sessions = Vec::new();
+        let id = id.to_string();
+
+        let mut txn = self.pool.begin().await?;
+
+        let mut rows = query!("SELECT session.id, session.ends_at FROM session_media
+                               INNER JOIN session ON session.id = session_media.session_id
+                               WHERE session_media.media_id = ?",
+                              id).fetch(&mut txn);
+
+        while let Some(row) = rows.try_next().await? {
+            sessions.push(persistent_session(row.id.clone(), row.ends_at)?);
+        }
+
+        drop(rows);
+
+        for session in &mut sessions {
+            let session_id = session.id.to_string();
+            let mut media =
+                query!("SELECT session_media.media_id FROM session_media WHERE session_media.session_id = ?",
+                       session_id).fetch(&mut txn);
+
+            while let Some(media) = media.try_next().await? {
+                session.media_objects.insert(media.media_id.parse()?);
+            }
+        }
+
+        txn.commit().await?;
+
+        Ok(sessions)
+    }
+}
+
+fn persistent_media_object(id: String,
+                           metadata: Option<String>,
+                           path: Option<String>,
+                           download: String,
+                           upload: String)
+                           -> anyhow::Result<PersistedMediaObject> {
+    Ok(PersistedMediaObject { id: id.parse()?,
+                              path,
+                              download: serde_json::from_str(&download)?,
+                              upload: serde_json::from_str(&upload)?,
+                              metadata: match metadata {
+                                  None => None,
+                                  Some(metadata) => serde_json::from_str(&metadata)?,
+                              } })
+}
+
+fn persistent_session(id: String, ends_at: i64) -> anyhow::Result<PersistedSession> {
+    Ok(PersistedSession { id:            id.parse()?,
+                          ends_at:       Timestamp::from_utc(NaiveDateTime::from_timestamp(ends_at, 0), Utc),
+                          media_objects: HashSet::new(), })
 }

@@ -8,10 +8,10 @@ use audiocloud_api::media::{DownloadFromDomain, ImportToDomain, MediaObject, Upd
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, AppSessionId, MediaObjectId, SessionId};
 
 use crate::db::{Db, PersistedDownload, PersistedMediaObject, PersistedSession, PersistedUpload};
+use crate::service::get_media_service;
 
 pub fn rest_api(cfg: &mut web::ServiceConfig) {
     cfg.service(get_media_state)
-       .service(get_multiple_media_state)
        .service(create_upload)
        .service(create_download)
        .service(import_in_domain)
@@ -32,19 +32,7 @@ async fn get_media_state(db: Data<Db>, path: Path<(AppId, MediaObjectId)>) -> im
     Ok::<_, Error>(web::Json(state))
 }
 
-#[post("/multiple")]
-async fn get_multiple_media_state(db: Data<Db>, Json(ids): Json<Vec<AppMediaObjectId>>) -> impl Responder {
-    let states = db.get_media_status_multiple(ids.iter())
-                   .await
-                   .map_err(ErrorInternalServerError)?
-                   .into_iter()
-                   .map(to_public_state)
-                   .collect::<Vec<_>>();
-
-    Ok::<_, Error>(web::Json(states))
-}
-
-#[post("apps/{app_id}/media/{media_object_id}/upload")]
+#[put("apps/{app_id}/media/{media_object_id}/upload")]
 async fn create_upload(db: Data<Db>,
                        path: Path<(AppId, MediaObjectId)>,
                        Json(upload): Json<UploadToDomain>)
@@ -52,17 +40,22 @@ async fn create_upload(db: Data<Db>,
     let (app_id, media_object_id) = path.into_inner();
     let id = AppMediaObjectId::new(app_id, media_object_id);
 
-    let state = db.update_media_status(&id, |media| {
-                      media.metadata = Some(upload.metadata());
-                      media.upload = PersistedUpload::new(Some(upload));
+    let state = db.update_media_status(&id, {
+                      let upload = upload.clone();
+                      move |media| {
+                          media.metadata = Some(upload.metadata());
+                          media.upload = PersistedUpload::new(Some(upload));
+                      }
                   })
                   .await
                   .map_err(ErrorInternalServerError)?;
 
+    get_media_service().lock().await.add_upload(id.clone(), upload);
+
     Ok::<_, Error>(Json(to_public_state(state)))
 }
 
-#[post("apps/{app_id}/media/{media_object_id}/download")]
+#[put("apps/{app_id}/media/{media_object_id}/download")]
 async fn create_download(db: Data<Db>,
                          path: Path<(AppId, MediaObjectId)>,
                          Json(download): Json<DownloadFromDomain>)
@@ -70,11 +63,16 @@ async fn create_download(db: Data<Db>,
     let (app_id, media_object_id) = path.into_inner();
     let id = AppMediaObjectId::new(app_id, media_object_id);
 
-    let state = db.update_media_status(&id, |media| {
-                      media.download = PersistedDownload::new(Some(download));
+    let state = db.update_media_status(&id, {
+                      let download = download.clone();
+                      move |media| {
+                          media.download = PersistedDownload::new(Some(download));
+                      }
                   })
                   .await
                   .map_err(ErrorInternalServerError)?;
+
+    get_media_service().lock().await.add_download(id.clone(), download);
 
     Ok::<_, Error>(Json(to_public_state(state)))
 }
@@ -104,7 +102,7 @@ async fn update_session(db: Data<Db>,
                         -> impl Responder {
     let (app_id, session_id) = path.into_inner();
 
-    let persisted = PersistedSession { _id:           AppSessionId::new(app_id, session_id),
+    let persisted = PersistedSession { id:            AppSessionId::new(app_id, session_id),
                                        ends_at:       data.ends_at,
                                        media_objects: data.media_objects, };
 
@@ -129,7 +127,7 @@ async fn delete_session(db: Data<Db>, path: Path<(AppId, SessionId)>) -> impl Re
 }
 
 fn to_public_state(state: PersistedMediaObject) -> MediaObject {
-    let PersistedMediaObject { _id,
+    let PersistedMediaObject { id: _id,
                                metadata,
                                path,
                                download,
