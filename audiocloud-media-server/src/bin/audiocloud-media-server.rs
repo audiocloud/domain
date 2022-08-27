@@ -34,7 +34,8 @@ async fn main() -> anyhow::Result<()> {
 
     info!(" -- Service initialized");
 
-    let mut service = get_media_service().lock().await;
+    let service = get_media_service();
+    let mut service = service.lock().await;
 
     service.clean_stale_sessions().await?;
     service.restart_pending_uploads().await?;

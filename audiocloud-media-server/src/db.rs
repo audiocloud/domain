@@ -218,20 +218,36 @@ impl Db {
         let upload = serde_json::to_string(&read.upload)?;
         let path = read.path.clone();
 
+        let upload_in_progress = if matches!(read.upload.state.value(), MediaUploadState::Uploading { .. }) {
+            1
+        } else {
+            0
+        };
+
+        let download_in_progress = if matches!(read.download.state.value(), MediaDownloadState::Downloading { .. }) {
+            1
+        } else {
+            0
+        };
+
         if !exists {
-            query!("INSERT OR REPLACE INTO media (id, metadata, path, download, upload) VALUES (?, ?, ?, ?, ?)",
+            query!("INSERT OR REPLACE INTO media (id, metadata, path, download, upload, download_in_progress, upload_in_progress) VALUES (?, ?, ?, ?, ?, ?, ?)",
                    id_str,
                    metadata,
                    path,
                    download,
-                   upload).execute(&mut txn)
+                   upload,
+                   download_in_progress,
+                   upload_in_progress).execute(&mut txn)
                           .await?;
         } else {
-            query!("UPDATE media SET metadata = ?, path = ?, download = ?, upload = ? WHERE id = ?",
+            query!("UPDATE media SET metadata = ?, path = ?, download = ?, upload = ?, download_in_progress = ?, upload_in_progress = ? WHERE id = ?",
                    metadata,
                    path,
                    download,
                    upload,
+                   download_in_progress,
+                   upload_in_progress,
                    id_str).execute(&mut txn)
                           .await?;
         }
