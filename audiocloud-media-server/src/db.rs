@@ -288,6 +288,37 @@ impl Db {
 
         Ok(sessions)
     }
+
+    #[instrument(skip_all, err)]
+    pub async fn clean_stale_sessions(&self) -> anyhow::Result<()> {
+        let now = Utc::now().naive_utc().timestamp();
+        query!("DELETE FROM session WHERE ends_at < ?", now).execute(&self.pool)
+                                                            .await?;
+
+        Ok(())
+    }
+
+    pub async fn pending_uploads(&self) -> anyhow::Result<Vec<PersistedMediaObject>> {
+        let mut rv = vec![];
+        for row in query!("SELECT * FROM media WHERE upload_in_progress <> 0").fetch_all(&self.pool)
+                                                                              .await?
+        {
+            rv.push(persistent_media_object(row.id, row.metadata, row.path, row.download, row.upload)?);
+        }
+
+        Ok(rv)
+    }
+
+    pub async fn pending_downloads(&self) -> anyhow::Result<Vec<PersistedMediaObject>> {
+        let mut rv = vec![];
+        for row in query!("SELECT * FROM media WHERE download_in_progress <> 0").fetch_all(&self.pool)
+                                                                                .await?
+        {
+            rv.push(persistent_media_object(row.id, row.metadata, row.path, row.download, row.upload)?);
+        }
+
+        Ok(rv)
+    }
 }
 
 fn persistent_media_object(id: String,

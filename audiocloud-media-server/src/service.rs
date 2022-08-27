@@ -301,6 +301,30 @@ impl Service {
 
         Ok(())
     }
+
+    pub async fn clean_stale_sessions(&mut self) -> anyhow::Result<()> {
+        Ok(self.db.clean_stale_sessions().await?)
+    }
+
+    pub async fn restart_pending_uploads(&mut self) -> anyhow::Result<()> {
+        for media in self.db.pending_uploads().await? {
+            if let Some(upload) = media.upload.spec {
+                self.add_upload(media.id.clone(), upload);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn restart_pending_downloads(&mut self) -> anyhow::Result<()> {
+        for media in self.db.pending_downloads().await? {
+            if let Some(download) = media.download.spec {
+                self.add_download(media.id.clone(), download);
+            }
+        }
+
+        Ok(())
+    }
 }
 
 pub fn get_media_service() -> Arc<Mutex<Service>> {

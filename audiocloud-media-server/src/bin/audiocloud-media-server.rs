@@ -6,6 +6,7 @@ use tracing::*;
 
 use audiocloud_media_server::config::Config;
 use audiocloud_media_server::db::Db;
+use audiocloud_media_server::service::get_media_service;
 use audiocloud_media_server::{rest_api, service};
 
 #[actix_web::main]
@@ -32,6 +33,14 @@ async fn main() -> anyhow::Result<()> {
     service::init(db.clone(), &config);
 
     info!(" -- Service initialized");
+
+    let mut service = get_media_service().lock().await;
+
+    service.clean_stale_sessions().await?;
+    service.restart_pending_uploads().await?;
+    service.restart_pending_downloads().await?;
+
+    drop(service);
 
     HttpServer::new({
         let web_db = web::Data::new(db);
