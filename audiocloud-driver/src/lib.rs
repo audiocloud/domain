@@ -11,6 +11,7 @@ pub mod http_client;
 pub mod nats;
 pub mod netio;
 pub mod supervisor;
+pub mod utils;
 
 use tracing::*;
 
