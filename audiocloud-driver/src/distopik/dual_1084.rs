@@ -44,33 +44,33 @@ struct Dual1084 {
     raw_fd:         RawFd,
     io_exp_data:    [[u16; 6]; 8],
 
-    input_gain:             [UnipotRegion; 2],//[L,D]
+    input_gain:             [UnirelRegion; 2],//[L,D]
     input_gain_param:       ModelParameter,   //  1
-    high_pass_filter:       [UnipotRegion; 4],
+    high_pass_filter:       [UnirelRegion; 4],
     high_pass_filter_param: ModelParameter,   
-    low_freq:               [UnipotRegion; 4],//[L,D,L,D]
+    low_freq:               [UnirelRegion; 4],//[L,D,L,D]
     low_freq_param:         ModelParameter,   //  1   2
     low_gain:               [UnipotRegion; 2],
     low_gain_param:         ModelParameter,
-    low_mid_freq:           [UnipotRegion; 2],
+    low_mid_freq:           [UnirelRegion; 2],
     low_mid_freq_param:     ModelParameter,
     low_mid_gain:           [UnipotRegion; 2],
     low_mid_gain_param:     ModelParameter,
-    low_mid_width:          [UnipotRegion; 2],
+    low_mid_width:          [UnirelRegion; 2],
     low_mid_width_param:    ModelParameter,
-    high_mid_freq:          [UnipotRegion; 2],
+    high_mid_freq:          [UnirelRegion; 2],
     high_mid_freq_param:    ModelParameter,
     high_mid_gain:          [UnipotRegion; 2],
     high_mid_gain_param:    ModelParameter,
-    high_mid_width:         [UnipotRegion; 2],
+    high_mid_width:         [UnirelRegion; 2],
     high_mid_width_param:   ModelParameter,
-    high_freq:              [UnipotRegion; 4],
+    high_freq:              [UnirelRegion; 4],
     high_freq_param:        ModelParameter,
     high_gain:              [UnipotRegion; 2],
     high_gain_param:        ModelParameter,
-    output_pad:             [UnipotRegion; 2],
+    output_pad:             [UnirelRegion; 2],
     output_pad_param:       ModelParameter,
-    eql_toggle:             [UnipotRegion; 2],
+    eql_toggle:             [UnirelRegion; 2],
     eql_toggle_param:       ModelParameter,
 }
 
@@ -153,36 +153,36 @@ impl Dual1084 {
                       raw_fd,
                       last_update:            Utc::now(),
                       io_exp_data:            [[0; 6]; 8],
-                      input_gain:             [UnipotRegion::new(3, 72..=79), UnipotRegion::new(1, 72..=79)],
+                      input_gain:             [UnirelRegion::new(3, 72..=79), UnirelRegion::new(1, 72..=79)],
                       input_gain_param:       dual_1084::input_gain(),
-                      high_pass_filter:       [UnipotRegion::new(3, 56..=61), UnipotRegion::new(1, 56..=61), 
-                                               UnipotRegion::new(3, [62,63,48,49,50,51].into_iter()), UnipotRegion::new(1, [62,63,48,49,50,51].into_iter())],
+                      high_pass_filter:       [UnirelRegion::new(3, 56..=61), UnirelRegion::new(1, 56..=61), 
+                                               UnirelRegion::new(3, [62,63,48,49,50,51].into_iter()), UnirelRegion::new(1, [62,63,48,49,50,51].into_iter())],
                       high_pass_filter_param: dual_1084::high_pass_filter(),
-                      low_freq:               [UnipotRegion::new(3, 16..=21), UnipotRegion::new(1, (16..=21).rev()),
-                                               UnipotRegion::new(3, [22,23,40,41,42,43].into_iter()), UnipotRegion::new(1, [22,23,40,41,42,43].into_iter())],
+                      low_freq:               [UnirelRegion::new(3, 16..=21), UnirelRegion::new(1, (16..=21).rev()),
+                                               UnirelRegion::new(3, [22,23,40,41,42,43].into_iter()), UnirelRegion::new(1, [22,23,40,41,42,43].into_iter())],
                       low_freq_param:         dual_1084::low_freq(),
                       low_gain:               [UnipotRegion::new(5, 57..=63), UnipotRegion::new(5, [28,29,30,31,23,22,21].into_iter())],
                       low_gain_param:         dual_1084::low_gain(),
-                      low_mid_freq:           [UnipotRegion::new(3, [4,5,6,7,24,25,26,27,28,29,30,31].into_iter()), UnipotRegion::new(1, [4,5,6,7,24,25,26,27,28,29,30,31].into_iter())],
+                      low_mid_freq:           [UnirelRegion::new(3, [4,5,6,7,24,25,26,27,28,29,30,31].into_iter()), UnirelRegion::new(1, [4,5,6,7,24,25,26,27,28,29,30,31].into_iter())],
                       low_mid_freq_param:     dual_1084::low_mid_freq(),
                       low_mid_gain:           [UnipotRegion::new(5, (49..=55).rev()), UnipotRegion::new(5, [20,19,18,17,16,8,9].into_iter())],
                       low_mid_gain_param:     dual_1084::low_mid_gain(),
-                      low_mid_width:          [UnipotRegion::new(3, 54..=54), UnipotRegion::new(1, 54..=54)],
+                      low_mid_width:          [UnirelRegion::new(3, 54..=54), UnirelRegion::new(1, 54..=54)],
                       low_mid_width_param:    dual_1084::low_mid_width(),
-                      high_mid_freq:          [UnipotRegion::new(3, [8,9,10,11,12,13,14,15,0,1,2,3].into_iter()), UnipotRegion::new(1, [8,9,10,11,12,13,14,15,0,1,2,3].into_iter())],
+                      high_mid_freq:          [UnirelRegion::new(3, [8,9,10,11,12,13,14,15,0,1,2,3].into_iter()), UnirelRegion::new(1, [8,9,10,11,12,13,14,15,0,1,2,3].into_iter())],
                       high_mid_freq_param:    dual_1084::high_mid_freq(),
                       high_mid_gain:          [UnipotRegion::new(5, [48,40,41,42,43,44,45].into_iter()), UnipotRegion::new(5, [10,11,12,13,14,15,7].into_iter())],
                       high_mid_gain_param:    dual_1084::high_mid_gain(),
-                      high_mid_width:         [UnipotRegion::new(3, 53..=53), UnipotRegion::new(1, 53..=53)],
+                      high_mid_width:         [UnirelRegion::new(3, 53..=53), UnirelRegion::new(1, 53..=53)],
                       high_mid_width_param:   dual_1084::high_mid_width(),
-                      high_freq:              [UnipotRegion::new(3, [44,45,46,47,32,33].into_iter()), UnipotRegion::new(1, [44,45,46,47,32,33].into_iter()),
-                                               UnipotRegion::new(3, 34..=39), UnipotRegion::new(1, 34..=39)],
+                      high_freq:              [UnirelRegion::new(3, [44,45,46,47,32,33].into_iter()), UnirelRegion::new(1, [44,45,46,47,32,33].into_iter()),
+                                               UnirelRegion::new(3, 34..=39), UnirelRegion::new(1, 34..=39)],
                       high_freq_param:        dual_1084::high_freq(),
                       high_gain:              [UnipotRegion::new(5, [46,47,39,38,37,36,35].into_iter()), UnipotRegion::new(5, (0..=6).rev())],
                       high_gain_param:        dual_1084::high_gain(),
-                      output_pad:             [UnipotRegion::new(7, 1..2), UnipotRegion::new(7, 3..4)],
+                      output_pad:             [UnirelRegion::new(7, 1..2), UnirelRegion::new(7, 3..4)],
                       output_pad_param:       dual_1084::output_pad(),
-                      eql_toggle:             [UnipotRegion::new(3, 52..=52), UnipotRegion::new(1, 52..=52)],
+                      eql_toggle:             [UnirelRegion::new(3, 52..=52), UnirelRegion::new(1, 52..=52)],
                       eql_toggle_param:       dual_1084::eql_toggle(),
                     
                     })
@@ -208,7 +208,7 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in input_gain.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.input_gain_param, ch);
-                            self.input_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
+                            self.input_gain[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
@@ -216,7 +216,8 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in high_pass_filter.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.high_pass_filter_param, ch);
-                            self.high_pass_filter[ch].write(&mut self.io_exp_data, rescaled as u16);
+                            self.high_pass_filter[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                            self.high_pass_filter[ch+2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
@@ -232,7 +233,7 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in low_freq.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.low_freq_param, ch);
-                            self.low_freq[ch].write(&mut self.io_exp_data, rescaled as u16);
+                            self.low_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
@@ -248,7 +249,7 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in low_mid_freq.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.low_mid_freq_param, ch);
-                            self.low_mid_freq[ch].write(&mut self.io_exp_data, rescaled as u16);
+                            self.low_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
@@ -256,7 +257,7 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in low_mid_width.into_iter().enumerate() {
                         if let Some(ModelValue::Bool(value)) = value{
                             //let rescaled = rescale_param(value, &self.low_mid_width_param, ch, 128.0);
-                            self.low_mid_width[ch].write(&mut self.io_exp_data, value as u16);
+                            self.low_mid_width[ch].write_switch(&mut self.io_exp_data, value as u16);
                         }
                     }
                 }
@@ -272,14 +273,14 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in high_mid_freq.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.high_mid_freq_param, ch);
-                            self.high_mid_freq[ch].write(&mut self.io_exp_data, rescaled as u16);
+                            self.high_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
                 if let Some(high_mid_width) = params.remove(&dual_1084::HIGH_MID_WIDTH) {
                     for (ch, value) in high_mid_width.into_iter().enumerate() {
                         if let Some(ModelValue::Bool(value)) = value{
-                            self.high_mid_width[ch].write(&mut self.io_exp_data, value as u16);
+                            self.high_mid_width[ch].write_switch(&mut self.io_exp_data, value as u16);
                         }
                     }
                 }
@@ -295,7 +296,7 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in high_freq.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.high_freq_param, ch);
-                            self.high_freq[ch].write(&mut self.io_exp_data, rescaled as u16);
+                            self.high_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
@@ -303,20 +304,21 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in output_pad.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.output_pad_param, ch);
-                            self.output_pad[ch].write(&mut self.io_exp_data, rescaled as u16);
+                            self.output_pad[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
                 if let Some(eql_toggle) = params.remove(&dual_1084::EQL_TOGGLE) {
                     for (ch, value) in eql_toggle.into_iter().enumerate() {
                         if let Some(ModelValue::Bool(value)) = value{
-                            self.eql_toggle[ch].write(&mut self.io_exp_data, value as u16);
+                            self.eql_toggle[ch].write_switch(&mut self.io_exp_data, value as u16);
                         }
                     }
                 }
 
                 // TODO: implement
                 // self.write_io_expanders();
+                self.io_exp_data.set_io_expanders();
 
                 Ok(())
             }
@@ -325,7 +327,7 @@ impl Handler<Command> for Dual1084 {
 }
 
 impl Dual1084 {
-    fn set_io_expanders(&self) {
+    pub fn set_io_expanders(&self) {
         let mut spi_data: [u32; 9] = [0; 9];
         const io_boards: [u16; 3] = [3, 1, 5];
         const io_output_address: [u16; 5] = [0x4000, 0x4200, 0x4400, 0x4600, 0x4800];
