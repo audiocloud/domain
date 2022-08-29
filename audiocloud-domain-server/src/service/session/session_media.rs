@@ -13,7 +13,7 @@ impl SessionMedia {
         let mut rv = HashSet::new();
 
         for (object_id, object) in &self.media {
-            if object.path.is_some() || object.upload.is_none() {
+            if object.path.is_none() {
                 rv.insert(object_id.clone());
             }
         }
