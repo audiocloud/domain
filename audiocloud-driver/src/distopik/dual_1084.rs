@@ -234,6 +234,7 @@ impl Handler<Command> for Dual1084 {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.low_freq_param, ch);
                             self.low_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                            self.low_freq[ch+2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
@@ -297,6 +298,7 @@ impl Handler<Command> for Dual1084 {
                         if let Some(ModelValue::Number(value)) = value{
                             let rescaled = repoint_param(value, &self.high_freq_param, ch);
                             self.high_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                            self.high_freq[ch+2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                         }
                     }
                 }
@@ -318,7 +320,7 @@ impl Handler<Command> for Dual1084 {
 
                 // TODO: implement
                 // self.write_io_expanders();
-                self.io_exp_data.set_io_expanders();
+                Dual1084::set_io_expanders(&self);
 
                 Ok(())
             }
