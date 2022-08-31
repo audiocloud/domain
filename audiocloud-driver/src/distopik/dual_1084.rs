@@ -334,9 +334,6 @@ impl Dual1084 {
         const io_boards: [u16; 3] = [3, 1, 5];
         const io_output_address: [u16; 5] = [0x4000, 0x4200, 0x4400, 0x4600, 0x4800];
 
-        
-        let fd = File::options().read(true).write(true).open("/dev/PIVO").unwrap();
-        let raw_fd: RawFd = fd.into_raw_fd();
 
         for j in 0..5 {
           spi_data[8] = 0;
@@ -351,8 +348,8 @@ impl Dual1084 {
           //let data: [u32;9] = [2,3,4,5,6,7,8,9,10];
           println!("{:#?}", spi_data);
           let transfer = SpiTransfer::write(&spi_data);
-          println!("{:?}", write_data(raw_fd, &transfer));
-          println!("{:?}", transfer_data(raw_fd));
+          println!("{:?}", write_data(self.raw_fd, &transfer));
+          println!("{:?}", transfer_data(self.raw_fd));
         }
 
     }
