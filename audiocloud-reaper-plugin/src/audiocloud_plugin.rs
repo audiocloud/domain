@@ -49,6 +49,8 @@ impl Plugin for AudioCloudPlugin {
     fn new(host: HostCallback) -> Self
         where Self: Sized
     {
+        eprintln!("new");
+
         SESSION_WRAPPER.get_or_init(|| {
                            eprintln!("==== first time boot ====");
                            init_env();
@@ -61,34 +63,38 @@ impl Plugin for AudioCloudPlugin {
     }
 
     fn init(&mut self) {
-        let reaper = Reaper::get();
-        let project = reaper.enum_projects(ProjectRef::Current, 0)
-                            .expect("REAPER project enum success")
-                            .project;
+        eprintln!("init");
 
-        let maybe_id = unsafe {
-            let mut notes = [0i8; 1024];
+        {
+            let reaper = Reaper::get();
+            let project = reaper.enum_projects(ProjectRef::Current, 0)
+                                .expect("REAPER project enum success")
+                                .project;
 
-            reaper.low()
-                  .GetSetProjectNotes(project.as_ptr(), false, notes.as_mut_ptr(), notes.len() as i32);
+            let maybe_id = unsafe {
+                let mut notes = [0i8; 1024];
 
-            let cstr = CStr::from_ptr(notes.as_ptr());
+                reaper.low()
+                      .GetSetProjectNotes(project.as_ptr(), false, notes.as_mut_ptr(), notes.len() as i32);
 
-            AppSessionId::from_str(cstr.to_string_lossy().as_ref())
-        };
+                let cstr = CStr::from_ptr(notes.as_ptr());
 
-        debug!(?maybe_id, "plugin init");
+                AppSessionId::from_str(cstr.to_string_lossy().as_ref())
+            };
 
-        self.activation = maybe_id.ok().map(|id| {
-                                           let (tx_plugin, rx_plugin) = flume::unbounded();
-                                           let tx_engine = PluginRegistry::register(id.clone(), tx_plugin);
+            debug!(?maybe_id, "plugin init");
 
-                                           AudioCloudPluginActivation { id,
-                                                                        rx_plugin,
-                                                                        tx_engine,
-                                                                        chain: None,
-                                                                        context: ProjectContext::CurrentProject }
-                                       });
+            self.activation = maybe_id.ok().map(|id| {
+                                               let (tx_plugin, rx_plugin) = flume::unbounded();
+                                               let tx_engine = PluginRegistry::register(id.clone(), tx_plugin);
+
+                                               AudioCloudPluginActivation { id,
+                                                                            rx_plugin,
+                                                                            tx_engine,
+                                                                            chain: None,
+                                                                            context: ProjectContext::CurrentProject }
+                                           });
+        }
     }
 
     fn set_sample_rate(&mut self, rate: f32) {

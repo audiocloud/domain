@@ -1,4 +1,6 @@
-use actix::spawn;
+use std::time::Duration;
+
+use actix::{spawn, ActorFutureExt};
 use anyhow::anyhow;
 use clap::Args;
 use futures::StreamExt;
@@ -113,14 +115,16 @@ pub async fn init(opts: CloudOpts) -> anyhow::Result<BootDomain> {
 pub async fn spawn_command_listener(event_base: i64) -> anyhow::Result<()> {
     let mut stream = get_cloud_client().consumer.stream();
 
-    while let Some(message) = stream.next().await {
+    while let Ok(Some(message)) = tokio::time::timeout(Duration::from_secs(5), stream.next()).await {
         let done = matches!(&message, Ok(msg) if msg.offset() >= (event_base - 1));
         dispatch_message(message).await;
+
         if done {
-            info!("Caught up with cloud events");
             break;
         }
     }
+
+    info!("Caught up with cloud events");
 
     spawn(async move {
         while let Some(message) = stream.next().await {

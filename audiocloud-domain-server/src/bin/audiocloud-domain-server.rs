@@ -41,15 +41,27 @@ async fn main() -> anyhow::Result<()> {
 
     let event_base = boot.event_base;
 
+    debug!(?event_base, "Event base");
+
     data::init(boot).await?;
+
+    debug!("Data initialized");
 
     service::instance::init();
 
+    debug!("Instances");
+
     service::session::init();
+
+    debug!("Sessions");
 
     service::cloud::spawn_command_listener(event_base as i64).await?;
 
+    debug!("Command listener");
+
     service::session::become_online();
+
+    debug!("Becoming online");
 
     info!(bind = opts.bind,
           port = opts.port,
