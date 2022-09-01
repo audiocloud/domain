@@ -8,6 +8,7 @@ use nats_aflowt::Connection;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
 use tokio::spawn;
+use crate::info;
 
 use audiocloud_api::codec::{Codec, Json};
 use audiocloud_api::driver::InstanceDriverCommand;
@@ -31,6 +32,7 @@ pub async fn init(opts: NatsOpts, instances: HashSet<FixedInstanceId>) -> anyhow
         let manufacturer = &instance_id.manufacturer;
         let model = &instance_id.name;
         let instance = &instance_id.instance;
+        info!("ac.insts.{manufacturer}.{model}.{instance}.cmds");
         let subscription = connection.subscribe(&format!("ac.insts.{manufacturer}.{model}.{instance}.cmds"))
                                      .await?;
 
@@ -100,6 +102,7 @@ impl Handler<Event> for NatsService {
 
     fn handle(&mut self, msg: Event, ctx: &mut Self::Context) -> Self::Result {
         let id = &msg.instance_id;
+        info!("ac.insts.{}.{}.{}.evts", id.manufacturer, id.name, id.instance);
         ctx.notify(Publish { subject: format!("ac.insts.{}.{}.{}.evts", id.manufacturer, id.name, id.instance),
                              message: msg.event,
                              codec:   Json, });

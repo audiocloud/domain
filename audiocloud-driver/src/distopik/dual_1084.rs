@@ -145,6 +145,7 @@ impl UnirelRegion {
 
 impl Dual1084 {
     pub fn new(id: FixedInstanceId, config: Config) -> anyhow::Result<Self> {
+        info!("👋 Summatra Nuclear driver");
         let raw_fd = File::options().read(true).write(true).open("/dev/PIVO")?.into_raw_fd();
         let model = dual_1084::distopik_dual_1084_model();
 
@@ -197,6 +198,7 @@ impl Handler<Command> for Dual1084 {
     type Result = Result<(), InstanceDriverError>;
 
     fn handle(&mut self, msg: Command, ctx: &mut Self::Context) -> Self::Result {
+        info!("in da loop");
         match msg.command {
             InstanceDriverCommand::CheckConnection => Ok(()),
             InstanceDriverCommand::Stop
