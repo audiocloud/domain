@@ -8,7 +8,7 @@ use tracing::*;
 use audiocloud_api::media::DownloadFromDomain;
 use audiocloud_api::newtypes::AppMediaObjectId;
 
-use crate::service::media::messages::{MediaJobState, NotifyDownloadProgress};
+use crate::service::media::messages::{MediaJobState, NotifyDownloadProgress, TerminateMediaJob};
 use crate::service::media::MediaSupervisor;
 
 #[derive(Debug)]

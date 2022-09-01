@@ -2,16 +2,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use actix::{Actor, Addr, AsyncContext, Context, Handler, Supervised, Supervisor};
+use actix::{Actor, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, Supervisor, WrapFuture};
 use anyhow::anyhow;
 use clap::Args;
 use once_cell::sync::OnceCell;
 
-use crate::service::media::messages::{MediaJobState, NotifyDownloadProgress, NotifyUploadProgress};
 use audiocloud_api::newtypes::AppMediaObjectId;
 use download::Downloader;
 use messages::{QueueDownload, QueueUpload};
 use upload::Uploader;
+
+use crate::data::get_boot_cfg;
+use crate::service::media::messages::{MediaJobState, NotifyDownloadProgress, NotifyUploadProgress};
 
 pub mod download;
 pub mod messages;
@@ -27,13 +29,17 @@ pub struct MediaSupervisor {
 }
 
 impl MediaSupervisor {
-    pub fn new(cfg: MediaOpts) -> MediaSupervisor {
+    pub fn new(cfg: MediaOpts) -> anyhow::Result<MediaSupervisor> {
         let MediaOpts { media_root } = cfg;
 
-        MediaSupervisor { uploads: HashMap::new(),
-                          downloads: HashMap::new(),
-                          client: reqwest::Client::new(),
-                          media_root }
+        if !media_root.exists() {
+            return Err(anyhow!("media root {media_root:?} does not exist"));
+        }
+
+        Ok(MediaSupervisor { uploads: HashMap::new(),
+                             downloads: HashMap::new(),
+                             client: reqwest::Client::new(),
+                             media_root })
     }
 }
 
@@ -43,9 +49,10 @@ pub struct MediaOpts {
     pub media_root: PathBuf,
 }
 
-pub fn init(cfg: MediaOpts) -> Addr<MediaSupervisor> {
-    MEDIA_SUPERVISOR.get_or_init(|| MediaSupervisor::new(cfg).start())
-                    .clone()
+pub fn init(cfg: MediaOpts) -> anyhow::Result<Addr<MediaSupervisor>> {
+    let service = MediaSupervisor::new(cfg)?;
+
+    Ok(MEDIA_SUPERVISOR.get_or_init(move || service.start()).clone())
 }
 
 impl MediaSupervisor {
@@ -105,6 +112,9 @@ impl Handler<QueueDownload> for MediaSupervisor {
 
         let downloader = Downloader::new(ctx.address(), self.client.clone(), path, media_id.clone(), download)?;
 
+        // XXX: the previous downloader will be dropped and its futures will be canceled
+        // XXX: if this does not work (i.e. it waits for all future to complete instead),
+        // XXX: we can try to use ctx.cancel inside the actor instead
         self.downloads.insert(media_id, Supervisor::start(move |_| downloader));
 
         Ok(())
@@ -134,6 +144,31 @@ impl Actor for MediaSupervisor {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         self.restarting(ctx);
+
+        let boot = get_boot_cfg();
+
+        const INITIAL_DELAY: Duration = Duration::from_millis(10);
+        const STAGGER_DELAY: Duration = Duration::from_millis(125);
+
+        let mut duration = INITIAL_DELAY;
+
+        // prevent connection storming by staggering starts
+
+        for (id, download) in &boot.incomplete_downloads {
+            ctx.notify_later(QueueDownload { media_id: id.clone(),
+                                             download: download.clone(), },
+                             duration);
+
+            duration += STAGGER_DELAY;
+        }
+
+        for (id, upload) in &boot.incomplete_uploads {
+            ctx.notify_later(QueueUpload { media_id: id.clone(),
+                                           upload:   upload.clone(), },
+                             duration);
+
+            duration += STAGGER_DELAY;
+        }
     }
 }
 

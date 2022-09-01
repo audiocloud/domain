@@ -30,14 +30,14 @@ pub struct CloudOpts {
 
 type LoggingConsumer = StreamConsumer<CustomContext>;
 
-struct CloudClient {
+pub struct CloudClient {
     client:   reqwest::Client,
     consumer: LoggingConsumer,
 }
 
 static CLOUD_CLIENT: OnceCell<CloudClient> = OnceCell::new();
 
-fn get_cloud_client() -> &'static CloudClient {
+pub fn get_cloud_client() -> &'static CloudClient {
     CLOUD_CLIENT.get().expect("Cloud client must be initialized")
 }
 
