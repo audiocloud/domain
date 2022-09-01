@@ -11,7 +11,8 @@ use tokio::spawn;
 use tracing::*;
 
 use audiocloud_api::codec::{Codec, Json};
-use audiocloud_api::driver::InstanceDriverCommand;
+use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError};
+use audiocloud_api::error::SerializableResult;
 use audiocloud_api::newtypes::FixedInstanceId;
 
 use crate::info;
@@ -66,6 +67,12 @@ async fn handle_commands(subscription: nats_aflowt::Subscription, instance_id: F
 
                 match supervisor.send(cmd).await {
                     Ok(response) => {
+                        let response = match response {
+                            Ok(ok) => SerializableResult::Ok(ok),
+                            Err(err) => SerializableResult::Err { message: err.to_string(),
+                                                                  code:    500, },
+                        };
+                        
                         debug!("Got response: {response:?}");
                         if let Ok(encoded) = Json.serialize(&response) {
                             debug!("Sending response: {encoded:?}");
