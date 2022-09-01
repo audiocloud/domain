@@ -12,6 +12,7 @@ pub mod nats;
 pub mod netio;
 pub mod supervisor;
 pub mod utils;
+pub mod rest_api;
 
 use tracing::*;
 

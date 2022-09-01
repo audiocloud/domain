@@ -1,13 +1,14 @@
-use actix::prelude::*;
 use std::path::PathBuf;
-use std::time::Duration;
 use std::{env, fs};
 
+use actix_web::{App, HttpServer};
 use clap::Parser;
+use tracing::*;
 
 use audiocloud_driver::nats::NatsOpts;
+use audiocloud_driver::rest_api;
 use audiocloud_driver::supervisor;
-use audiocloud_driver::{http_client, nats, ConfigFile, InstanceConfig};
+use audiocloud_driver::{http_client, ConfigFile};
 
 #[derive(Parser, Debug, Clone)]
 struct DriverOpts {
@@ -16,9 +17,15 @@ struct DriverOpts {
 
     // Configuration file (array of instances)
     config_file: PathBuf,
+
+    #[clap(long, env, default_value = "0.0.0.0")]
+    bind: String,
+
+    #[clap(long, env, default_value = "7400")]
+    port: u16,
 }
 
-#[actix::main]
+#[actix_web::main]
 async fn main() -> anyhow::Result<()> {
     let _ = dotenv::dotenv();
     if env::var("RUST_LOG").is_err() {
@@ -35,7 +42,13 @@ async fn main() -> anyhow::Result<()> {
 
     supervisor::init(opts.nats, instances).await?;
 
-    loop {
-        actix::clock::sleep(Duration::MAX).await;
-    }
+    info!(bind = opts.bind,
+          port = opts.port,
+          " ==== AudioCloud Driver server ==== ");
+
+    HttpServer::new(move || App::new().configure(rest_api::configure)).bind((opts.bind.as_str(), opts.port))?
+                                                                      .run()
+                                                                      .await?;
+
+    Ok(())
 }
