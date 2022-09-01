@@ -4,7 +4,6 @@ use actix_web::{App, HttpServer};
 use clap::Parser;
 use tracing::*;
 
-use audiocloud_domain_server::data::DataOpts;
 use audiocloud_domain_server::{data, rest_api, service, web_sockets};
 
 #[derive(Parser)]
@@ -16,7 +15,10 @@ struct Opts {
     bind: String,
 
     #[clap(flatten)]
-    db: DataOpts,
+    db: data::DataOpts,
+
+    #[clap(flatten)]
+    media: service::media::MediaOpts,
 
     #[clap(flatten)]
     cloud: service::cloud::CloudOpts,
@@ -45,7 +47,11 @@ async fn main() -> anyhow::Result<()> {
 
     data::init(boot).await?;
 
-    debug!("Data initialized");
+    debug!("Boot data initialized");
+
+    service::media::init(opts.media);
+
+    debug!("Media");
 
     service::instance::init();
 

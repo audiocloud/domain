@@ -24,6 +24,7 @@ askama = "0.11"
 bytes = "1"
 webrtc = "0.4"
 itertools = "0.10"
+tokio-util = "0.7"
 
 [dependencies.tokio]
 version = "1"
@@ -47,7 +48,7 @@ features = ["opentelemetry_0_17", "emit_event_on_error"]
 
 [dependencies.reqwest]
 version = "0.11"
-features = ["json"]
+features = ["stream", "brotli", "gzip", "multipart", "json"]
 
 [dependencies.rdkafka]
 version = "0.28"

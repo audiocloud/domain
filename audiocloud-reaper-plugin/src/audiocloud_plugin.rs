@@ -171,13 +171,16 @@ impl AudioCloudPluginActivation {
                             .send(ReaperEngineCommand::PlayReady(self.id.clone(), play_id));
             }
             StreamingPluginCommand::Flush { play_id } => {
-                if let Some(mut chain) = self.chain.take() {
-                    if chain.play.play_id == play_id {
+                let is_same_play_id = self.chain
+                                          .as_ref()
+                                          .map(|chain| chain.play.play_id == play_id)
+                                          .unwrap_or(false);
+
+                if is_same_play_id {
+                    if let Some(chain) = self.chain.take() {
                         let mut compressed = chain.finish()?;
                         drain(play_id, &mut compressed)?;
                     }
-
-                    self.chain = None;
                 }
             }
         }

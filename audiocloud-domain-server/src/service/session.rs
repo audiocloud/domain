@@ -28,7 +28,6 @@ use supervisor::{BecomeOnline, SessionsSupervisor};
 
 use crate::audio_engine;
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
-use crate::service::nats::get_nats_client;
 use crate::service::session::messages::{NotifyMediaServiceEvent, NotifySessionPacket};
 use crate::tracker::RequestTracker;
 
@@ -229,10 +228,6 @@ impl SessionActor {
                tracker:            Default::default(),
                audio_engine:       audio_engine_id,
                min_transmit_audio: 2, }
-    }
-
-    fn flush_packet(&mut self) {
-        let packet = mem::take(&mut self.packet);
     }
 
     fn update(&mut self, ctx: &mut Context<Self>) {
