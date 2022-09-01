@@ -2,25 +2,36 @@ use std::collections::{HashMap, HashSet};
 
 use actix::fut::LocalBoxActorFuture;
 use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Recipient, Supervised, WrapFuture};
-use anyhow::anyhow;
-use audiocloud_api::driver::InstanceDriverError;
 use once_cell::sync::OnceCell;
+use tracing::*;
 
+use audiocloud_api::driver::InstanceDriverError;
 use audiocloud_api::newtypes::FixedInstanceId;
 
 use crate::nats::NatsOpts;
 use crate::{nats, Command, ConfigFile, InstanceConfig};
 
-const SUPERVISOR_ADDR: OnceCell<Addr<DriverSupervisor>> = OnceCell::new();
+static SUPERVISOR_ADDR: OnceCell<Addr<DriverSupervisor>> = OnceCell::new();
 
-pub fn get_driver_supervisor() -> Option<Addr<DriverSupervisor>> {
-    SUPERVISOR_ADDR.get().cloned()
+pub fn get_driver_supervisor() -> Addr<DriverSupervisor> {
+    match SUPERVISOR_ADDR.get() {
+        None => {
+            panic!("Driver supervisor not initialized")
+        }
+        Some(supervisor) => supervisor.clone(),
+    }
 }
 
 pub async fn init(nats_opts: NatsOpts, config: ConfigFile) -> anyhow::Result<()> {
     let supervisor = DriverSupervisor::new(nats_opts, config).await?;
+
     SUPERVISOR_ADDR.set(supervisor.start())
-                   .map_err(|_| anyhow!("State init already called!"))?;
+                   .expect("Driver supervisor already initialized");
+
+    info!("Driver supervisor initialized");
+
+    get_driver_supervisor(); // to test
+
     Ok(())
 }
 
@@ -68,4 +79,8 @@ impl Actor for DriverSupervisor {
     type Context = Context<Self>;
 }
 
-impl Supervised for DriverSupervisor {}
+impl Supervised for DriverSupervisor {
+    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
+        warn!("Restarting driver supervisor");
+    }
+}

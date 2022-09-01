@@ -8,12 +8,13 @@ use nats_aflowt::Connection;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
 use tokio::spawn;
-use crate::info;
+use tracing::*;
 
 use audiocloud_api::codec::{Codec, Json};
 use audiocloud_api::driver::InstanceDriverCommand;
 use audiocloud_api::newtypes::FixedInstanceId;
 
+use crate::info;
 use crate::supervisor::{get_driver_supervisor, DriverSupervisor};
 use crate::{Command, Event};
 
@@ -49,21 +50,41 @@ pub fn get_nats() -> &'static Connection {
     NATS.get().expect("NATS not initialized")
 }
 
+#[instrument(skip_all, fields(%instance_id))]
 async fn handle_commands(subscription: nats_aflowt::Subscription, instance_id: FixedInstanceId) {
     while let Some(msg) = subscription.next().await {
-        if let Ok(cmd) = Json.deserialize::<InstanceDriverCommand>(&msg.data) {
-            if let Some(supervisor) = get_driver_supervisor() {
-                if let Ok(response) = supervisor.send(Command { instance_id: instance_id.clone(),
-                                                                command:     cmd, })
-                                                .await
-                {
-                    if let Ok(encoded) = Json.serialize(&response) {
-                        let _ = msg.respond(encoded).await;
+        debug!("Received bytes: {:?}", &msg.data);
+        match Json.deserialize::<InstanceDriverCommand>(&msg.data) {
+            Ok(cmd) => {
+                debug!("Received command: {cmd:?}");
+                let supervisor = get_driver_supervisor();
+
+                debug!("Got supervisor");
+
+                let cmd = Command { instance_id: instance_id.clone(),
+                                    command:     cmd, };
+
+                match supervisor.send(cmd).await {
+                    Ok(response) => {
+                        debug!("Got response: {response:?}");
+                        if let Ok(encoded) = Json.serialize(&response) {
+                            debug!("Sending response: {encoded:?}");
+                            let _ = msg.respond(encoded).await;
+                            debug!("Response sent");
+                        }
+                    }
+                    Err(err) => {
+                        error!(%err, "Error from supervisor");
                     }
                 }
             }
+            Err(err) => {
+                error!(%err, "Error deserializing command");
+            }
         }
     }
+
+    error!("Leaving command receive loop")
 }
 
 #[derive(Default)]
