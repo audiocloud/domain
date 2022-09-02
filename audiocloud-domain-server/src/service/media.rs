@@ -152,23 +152,7 @@ impl Actor for MediaSupervisor {
 
         let mut duration = INITIAL_DELAY;
 
-        // prevent connection storming by staggering starts
-
-        for (id, download) in &boot.incomplete_downloads {
-            ctx.notify_later(QueueDownload { media_id: id.clone(),
-                                             download: download.clone(), },
-                             duration);
-
-            duration += STAGGER_DELAY;
-        }
-
-        for (id, upload) in &boot.incomplete_uploads {
-            ctx.notify_later(QueueUpload { media_id: id.clone(),
-                                           upload:   upload.clone(), },
-                             duration);
-
-            duration += STAGGER_DELAY;
-        }
+        // TODO: query database for pending uploads and downloads
     }
 }
 

@@ -30,6 +30,10 @@ tokio-util = "0.7"
 version = "1"
 features = ["full"]
 
+[dependencies.sqlx]
+version = "0.6"
+features = [ "runtime-actix-native-tls" , "sqlite" ]
+
 [dependencies.chrono]
 version = "0.4"
 features = ["serde"]
@@ -41,10 +45,6 @@ features = ["rayon"]
 [dependencies.serde]
 version = "1"
 features = ["derive"]
-
-[dependencies.tracing-actix-web]
-version = "0.6"
-features = ["opentelemetry_0_17", "emit_event_on_error"]
 
 [dependencies.reqwest]
 version = "0.11"
