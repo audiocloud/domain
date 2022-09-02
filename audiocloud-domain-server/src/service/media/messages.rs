@@ -1,6 +1,6 @@
 use actix::Message;
 use audiocloud_api::media::{DownloadFromDomain, UploadToDomain};
-use audiocloud_api::newtypes::AppMediaObjectId;
+use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
 
 #[derive(Message)]
 #[rtype(result = "anyhow::Result<()>")]
@@ -12,8 +12,9 @@ pub struct QueueDownload {
 #[derive(Message)]
 #[rtype(result = "anyhow::Result<()>")]
 pub struct QueueUpload {
-    pub media_id: AppMediaObjectId,
-    pub upload:   UploadToDomain,
+    pub session_id: AppSessionId,
+    pub media_id:   AppMediaObjectId,
+    pub upload:     Option<UploadToDomain>,
 }
 
 #[derive(Message)]

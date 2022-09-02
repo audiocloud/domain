@@ -1,3 +1,4 @@
+use std::io;
 use std::path::PathBuf;
 
 use actix::{Actor, ActorContext, ActorFutureExt, Addr, Context, ContextFutureSpawner, Supervised, WrapFuture};
@@ -7,8 +8,9 @@ use tokio::fs::File;
 use tokio_util::io::StreamReader;
 use tracing::*;
 
+use crate::service::cloud::get_cloud_client;
 use audiocloud_api::media::UploadToDomain;
-use audiocloud_api::newtypes::AppMediaObjectId;
+use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
 
 use crate::service::media::messages::{MediaJobState, NotifyUploadProgress};
 use crate::service::media::MediaSupervisor;
@@ -17,7 +19,8 @@ use crate::service::media::MediaSupervisor;
 pub struct Uploader {
     supervisor:  Addr<MediaSupervisor>,
     media_id:    AppMediaObjectId,
-    upload:      UploadToDomain,
+    session_id:  AppSessionId,
+    upload:      Option<UploadToDomain>,
     destination: PathBuf,
     client:      reqwest::Client,
     retry_count: usize,
@@ -27,11 +30,13 @@ impl Uploader {
     pub fn new(supervisor: Addr<MediaSupervisor>,
                client: reqwest::Client,
                destination: PathBuf,
+               session_id: AppSessionId,
                media_id: AppMediaObjectId,
-               upload: UploadToDomain)
+               upload: Option<UploadToDomain>)
                -> anyhow::Result<Self> {
         Ok(Self { supervisor,
                   media_id,
+                  session_id,
                   upload,
                   destination,
                   client,
@@ -41,17 +46,23 @@ impl Uploader {
     fn upload(&mut self, ctx: &mut Context<Self>) {
         let destination = self.destination.clone();
         let client = self.client.clone();
+        let session_id = self.session_id.clone();
+        let media_id = self.media_id.clone();
         let upload = self.upload.clone();
-        let id = self.media_id.clone();
 
         async move {
+            let upload = match upload {
+                Some(upload) => upload,
+                None => get_cloud_client().get_upload(&session_id, &media_id).await?,
+            };
+
             let mut file = File::create(&destination).await?;
 
             let stream = client.get(&upload.url)
                                .send()
                                .await?
                                .bytes_stream()
-                               .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err));
+                               .map_err(|err| io::Error::new(io::ErrorKind::Other, err));
 
             let mut stream = StreamReader::new(stream);
 
@@ -61,7 +72,8 @@ impl Uploader {
                 client.post(&notify_url)
                       .json(&json!({
                                 "context": &upload.context,
-                                "id": &id,
+                                "session_id": &session_id,
+                                "media_id": &media_id,
                             }))
                       .send()
                       .await?;

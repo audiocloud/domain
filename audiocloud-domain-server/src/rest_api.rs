@@ -1,4 +1,3 @@
-use actix::SystemService;
 use actix_web::{get, web, Responder};
 use serde_json::json;
 

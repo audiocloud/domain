@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use actix::{spawn, ActorFutureExt};
+use actix::spawn;
 use anyhow::anyhow;
 use clap::Args;
 use futures::StreamExt;
@@ -18,6 +18,8 @@ use tracing::*;
 
 use audiocloud_api::cloud::domains::BootDomain;
 use audiocloud_api::domain::DomainSessionCommand;
+use audiocloud_api::media::UploadToDomain;
+use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
 
 #[derive(Args, Debug)]
 pub struct CloudOpts {
@@ -31,6 +33,7 @@ pub struct CloudOpts {
 type LoggingConsumer = StreamConsumer<CustomContext>;
 
 pub struct CloudClient {
+    opts:     CloudOpts,
     client:   reqwest::Client,
     consumer: LoggingConsumer,
 }
@@ -39,6 +42,18 @@ static CLOUD_CLIENT: OnceCell<CloudClient> = OnceCell::new();
 
 pub fn get_cloud_client() -> &'static CloudClient {
     CLOUD_CLIENT.get().expect("Cloud client must be initialized")
+}
+
+impl CloudClient {
+    pub async fn get_upload(&self,
+                            session_id: &AppSessionId,
+                            media: &AppMediaObjectId)
+                            -> anyhow::Result<UploadToDomain> {
+        let url = self.opts.api_url.join(&format!("v1/sessions/{}/{}/media/{}/upload",
+                                                   &session_id.app_id, &session_id.session_id, &media.media_id))?;
+
+        Ok(self.client.get(url).send().await?.json().await?)
+    }
 }
 
 struct CustomContext;
@@ -106,7 +121,7 @@ pub async fn init(opts: CloudOpts) -> anyhow::Result<BootDomain> {
 
     consumer.assign(&topics)?;
 
-    CLOUD_CLIENT.set(CloudClient { client, consumer })
+    CLOUD_CLIENT.set(CloudClient { opts, client, consumer })
                 .map_err(|_| anyhow!("Cloud client must only be called once"))?;
 
     Ok(boot)
