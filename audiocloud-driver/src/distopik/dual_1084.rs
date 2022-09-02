@@ -383,13 +383,13 @@ mod ioctl {
   const PIVO_SPI_WRITE: u8 = 2;
   const PIVO_SET_DATA: u8 = 3;
 
-  ioctl_write_ptr!(set_data_32, PIVO_SPI_MAGIC, PIVO_SET_DATA, SpiTransfer);
+  ioctl_write_ptr!(set_data_32, PIVO_SPI_MAGIC, PIVO_SET_DATA, spi_struct);
 
   ioctl_none!(write_data_32, PIVO_SPI_MAGIC, PIVO_SPI_WRITE);
 }
 
 
-pub fn write_data(fd: RawFd, transfers: SpiTransfer) -> io::Result<()> {
+pub fn write_data(fd: RawFd, transfers: spi_struct) -> io::Result<()> {
   unsafe { ioctl::set_data_32(fd, &transfers) }?;
   Ok(())
 }
