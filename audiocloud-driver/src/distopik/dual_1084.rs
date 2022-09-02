@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io;
 use std::os::unix::prelude::*;
+use nix::{ioctl_write_ptr, ioctl_none};
 use std::time::Duration;
 use tracing::*;
 
@@ -349,46 +350,51 @@ impl Dual1084 {
           }
           //let data: [u32;9] = [2,3,4,5,6,7,8,9,10];
           println!("{:#?}", spi_data);
-          let transfer = SpiTransfer::write(&spi_data);
-          println!("{:?}", write_data(self.raw_fd, &transfer));
+          //let transfer = SpiTransfer::write(&spi_data);
+          println!("{:?}", write_data(self.raw_fd, spi_struct::write(&spi_data)));
           println!("{:?}", transfer_data(self.raw_fd));
         }
 
     }
 }
 
-mod ioctl {
-    use super::SpiTransfer;
-    use nix::{ioctl_none, ioctl_write_ptr};
 
-    const PIVO_SPI_MAGIC: u8 = b'q';
-    const PIVO_SPI_WRITE: u8 = 2;
-    const PIVO_SET_DATA: u8 = 3;
-
-    ioctl_write_ptr!(set_data_32, PIVO_SPI_MAGIC, PIVO_SET_DATA, &SpiTransfer);
-
-    ioctl_none!(write_data_32, PIVO_SPI_MAGIC, PIVO_SPI_WRITE);
-}
-
-fn write_data(fd: RawFd, transfers: &SpiTransfer) -> io::Result<()> {
-    unsafe { ioctl::set_data_32(fd, &transfers) }?;
-    Ok(())
-}
-
-fn transfer_data(fd: RawFd) -> io::Result<()> {
-    unsafe { ioctl::write_data_32(fd) }?;
-    Ok(())
-}
 
 #[allow(non_camel_case_types)]
 #[derive(Debug, Default)]
 #[repr(C)]
-pub struct SpiTransfer {
-    data: [u32; 9],
+pub struct spi_struct {
+  data:[u32;9],
 }
 
-impl SpiTransfer {
-    pub fn write(buff: &[u32]) -> Self {
-        SpiTransfer { data: buff.try_into().expect("slice with incorrect length"), }
+impl spi_struct {
+  pub fn write(buff: &[u32]) -> Self {
+    spi_struct {
+      data: buff.try_into().expect("slice with incorrect length"),
     }
+  }
+}
+
+//pub type SpiTransfer = spi_struct;
+
+mod ioctl {
+  use super::*;
+  const PIVO_SPI_MAGIC: u8 = b'q';
+  const PIVO_SPI_WRITE: u8 = 2;
+  const PIVO_SET_DATA: u8 = 3;
+
+  ioctl_write_ptr!(set_data_32, PIVO_SPI_MAGIC, PIVO_SET_DATA, SpiTransfer);
+
+  ioctl_none!(write_data_32, PIVO_SPI_MAGIC, PIVO_SPI_WRITE);
+}
+
+
+pub fn write_data(fd: RawFd, transfers: SpiTransfer) -> io::Result<()> {
+  unsafe { ioctl::set_data_32(fd, &transfers) }?;
+  Ok(())
+}
+
+pub fn transfer_data(fd: RawFd) -> io::Result<()> {
+  unsafe { ioctl::write_data_32(fd) }?;
+  Ok(())
 }
