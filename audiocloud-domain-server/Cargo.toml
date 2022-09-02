@@ -3,6 +3,8 @@ name = "audiocloud-domain-server"
 version = "0.1.0"
 edition = "2021"
 
+# change this number whenever you want GH actions to cache bust: 1
+
 [dependencies]
 dotenv = "0.15"
 actix = "0.13"
@@ -32,7 +34,7 @@ features = ["full"]
 
 [dependencies.sqlx]
 version = "0.6"
-features = [ "runtime-actix-native-tls" , "sqlite" ]
+features = ["runtime-actix-native-tls", "sqlite"]
 
 [dependencies.chrono]
 version = "0.4"

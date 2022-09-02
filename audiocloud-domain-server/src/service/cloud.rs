@@ -45,12 +45,17 @@ pub fn get_cloud_client() -> &'static CloudClient {
 }
 
 impl CloudClient {
-    pub async fn get_upload(&self,
-                            session_id: &AppSessionId,
-                            media: &AppMediaObjectId)
-                            -> anyhow::Result<UploadToDomain> {
-        let url = self.opts.api_url.join(&format!("v1/sessions/{}/{}/media/{}/upload",
-                                                   &session_id.app_id, &session_id.session_id, &media.media_id))?;
+    pub async fn get_media_as_upload(&self,
+                                     session_id: &AppSessionId,
+                                     media: &AppMediaObjectId)
+                                     -> anyhow::Result<UploadToDomain> {
+        let app_id = &session_id.app_id;
+        let session_id = &session_id.session_id;
+        let media_id = &media.media_id;
+
+        let url = self.opts
+                      .api_url
+                      .join(&format!("/v1/{app_id}/by-id/{session_id}/media/by-id/{media_id}/upload"))?;
 
         Ok(self.client.get(url).send().await?.json().await?)
     }

@@ -53,7 +53,7 @@ impl Uploader {
         async move {
             let upload = match upload {
                 Some(upload) => upload,
-                None => get_cloud_client().get_upload(&session_id, &media_id).await?,
+                None => get_cloud_client().get_media_as_upload(&session_id, &media_id).await?,
             };
 
             let mut file = File::create(&destination).await?;

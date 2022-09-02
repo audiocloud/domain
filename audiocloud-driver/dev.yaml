@@ -6,3 +6,7 @@ netio/power_pdu_4c/r3_mid_l:
 netio/power_pdu_4c/r3_mid_r:
   netio:
     power_pdu_4c_mocked:
+
+distopik/dual1084/0:
+  distopik:
+    dual1084: { }
