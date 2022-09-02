@@ -276,4 +276,6 @@ Temporary Items
 
 dist
 .media
-/media.db
+/domain.db
+/domain.db-shm
+/domain.db-wal

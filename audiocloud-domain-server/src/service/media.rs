@@ -1,19 +1,27 @@
+#![allow(unused_variables)]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use actix::{Actor, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, Supervisor, WrapFuture};
+use actix::{
+    Actor, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, Supervisor,
+    WrapFuture,
+};
+use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
 use clap::Args;
 use once_cell::sync::OnceCell;
+use tracing::error;
 
 use audiocloud_api::newtypes::AppMediaObjectId;
 use download::Downloader;
 use messages::{QueueDownload, QueueUpload};
 use upload::Uploader;
 
-use crate::data::get_boot_cfg;
+use crate::data::{get_pool, MediaDatabase};
 use crate::service::media::messages::{MediaJobState, NotifyDownloadProgress, NotifyUploadProgress};
+use crate::service::session::messages::NotifySessionSpec;
 
 pub mod download;
 pub mod messages;
@@ -125,17 +133,59 @@ impl Handler<QueueUpload> for MediaSupervisor {
     type Result = anyhow::Result<()>;
 
     fn handle(&mut self, msg: QueueUpload, ctx: &mut Context<Self>) -> Self::Result {
-        let QueueUpload { media_id, upload } = msg;
+        let QueueUpload { session_id,
+                          media_id,
+                          upload, } = msg;
 
         let path = self.media_root
                        .join(media_id.app_id.to_string())
                        .join(media_id.media_id.to_string());
 
-        let uploader = Uploader::new(ctx.address(), self.client.clone(), path, media_id.clone(), upload)?;
+        let uploader = Uploader::new(ctx.address(),
+                                     self.client.clone(),
+                                     path,
+                                     session_id.clone(),
+                                     media_id.clone(),
+                                     upload)?;
 
         self.uploads.insert(media_id, Supervisor::start(move |_| uploader));
 
         Ok(())
+    }
+}
+
+impl Handler<NotifySessionSpec> for MediaSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NotifySessionSpec, ctx: &mut Self::Context) -> Self::Result {
+        async move {
+            let owned_media_ids = get_pool().get_media_files_for_session(&msg.session_id).await?;
+            let session_media_ids = msg.spec.get_media_object_ids(&msg.session_id.app_id);
+
+            // find diff
+            let to_add = session_media_ids.difference(&owned_media_ids);
+
+            let rv = to_add.map(|app_media_id| QueueUpload { media_id:   app_media_id.clone(),
+                                                             session_id: msg.session_id.clone(),
+                                                             upload:     None, })
+                           .collect::<Vec<_>>();
+
+            get_pool().set_media_files_for_session(&msg.session_id, session_media_ids)
+                      .await?;
+
+            Ok::<_, anyhow::Error>(rv)
+        }.into_actor(self)
+         .map(|result, actor, ctx| match result {
+             Ok(jobs) => {
+                 for job in jobs {
+                     let _ = actor.handle(job, ctx);
+                 }
+             }
+             Err(err) => {
+                 error!(%err, "failed to set session media");
+             }
+         })
+         .wait(ctx);
     }
 }
 
@@ -144,36 +194,12 @@ impl Actor for MediaSupervisor {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         self.restarting(ctx);
-
-        let boot = get_boot_cfg();
-
-        const INITIAL_DELAY: Duration = Duration::from_millis(10);
-        const STAGGER_DELAY: Duration = Duration::from_millis(125);
-
-        let mut duration = INITIAL_DELAY;
-
-        // prevent connection storming by staggering starts
-
-        for (id, download) in &boot.incomplete_downloads {
-            ctx.notify_later(QueueDownload { media_id: id.clone(),
-                                             download: download.clone(), },
-                             duration);
-
-            duration += STAGGER_DELAY;
-        }
-
-        for (id, upload) in &boot.incomplete_uploads {
-            ctx.notify_later(QueueUpload { media_id: id.clone(),
-                                           upload:   upload.clone(), },
-                             duration);
-
-            duration += STAGGER_DELAY;
-        }
     }
 }
 
 impl Supervised for MediaSupervisor {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         ctx.run_interval(Duration::from_millis(100), Self::update);
+        self.subscribe_system_async::<NotifySessionSpec>(ctx);
     }
 }

@@ -1,5 +1,6 @@
 use std::env;
 
+use actix_web::middleware::Logger;
 use actix_web::{App, HttpServer};
 use clap::Parser;
 use tracing::*;
@@ -45,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 
     debug!(?event_base, "Event base");
 
-    data::init(boot).await?;
+    data::init(opts.db, boot).await?;
 
     debug!("Boot data initialized");
 
@@ -75,7 +76,7 @@ async fn main() -> anyhow::Result<()> {
 
     // create actix
     HttpServer::new(|| {
-        App::new().wrap(tracing_actix_web::TracingLogger::default())
+        App::new().wrap(Logger::default())
                   .configure(rest_api::configure)
                   .configure(web_sockets::configure)
     }).bind((opts.bind.as_str(), opts.port))?
