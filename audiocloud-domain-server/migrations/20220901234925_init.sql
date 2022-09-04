@@ -4,8 +4,8 @@ CREATE TABLE IF NOT EXISTS "media"
     "media_id"             text NOT NULL,
     "metadata"             text,
     "path"                 text,
-    "download"             text NOT NULL,
-    "upload"               text NOT NULL,
+    "download"             text,
+    "upload"               text,
     "download_in_progress" int  NOT NULL DEFAULT 0,
     "upload_in_progress"   int  NOT NULL DEFAULT 0,
 

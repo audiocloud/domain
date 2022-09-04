@@ -50,7 +50,7 @@ async fn main() -> anyhow::Result<()> {
 
     debug!("Boot data initialized");
 
-    service::media::init(opts.media)?;
+    service::media::init(opts.media).await?;
 
     debug!("Media");
 

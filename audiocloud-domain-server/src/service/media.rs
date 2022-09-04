@@ -1,27 +1,32 @@
 #![allow(unused_variables)]
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
+use actix::fut::LocalBoxActorFuture;
 use actix::{
     Actor, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, Supervisor,
     WrapFuture,
 };
-use actix_broker::BrokerSubscribe;
+use actix_broker::{BrokerIssue, BrokerSubscribe};
 use anyhow::anyhow;
 use clap::Args;
 use once_cell::sync::OnceCell;
 use tracing::error;
 
-use audiocloud_api::newtypes::AppMediaObjectId;
+use audiocloud_api::media::{MediaJobState, MediaObject};
+use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
 use download::Downloader;
 use messages::{QueueDownload, QueueUpload};
 use upload::Uploader;
 
-use crate::data::{get_pool, MediaDatabase};
-use crate::service::media::messages::{MediaJobState, NotifyDownloadProgress, NotifyUploadProgress};
-use crate::service::session::messages::NotifySessionSpec;
+use crate::data::MediaDatabase;
+use crate::service::media::messages::{
+    DownloadJobId, ImportMedia, NotifyDownloadProgress, NotifyUploadProgress, RestartPendingUploadsDownloads,
+    UploadJobId,
+};
+use crate::service::session::messages::{NotifyMediaSessionState, NotifySessionSpec};
 
 pub mod download;
 pub mod messages;
@@ -29,9 +34,16 @@ pub mod upload;
 
 static MEDIA_SUPERVISOR: OnceCell<Addr<MediaSupervisor>> = OnceCell::new();
 
+struct MediaJobs {
+    download: Option<DownloadJobId>,
+    upload:   Option<UploadJobId>,
+}
+
 pub struct MediaSupervisor {
-    uploads:    HashMap<AppMediaObjectId, Addr<Uploader>>,
-    downloads:  HashMap<AppMediaObjectId, Addr<Downloader>>,
+    media:      HashMap<AppMediaObjectId, MediaJobs>,
+    uploads:    HashMap<UploadJobId, Addr<Uploader>>,
+    downloads:  HashMap<DownloadJobId, Addr<Downloader>>,
+    sessions:   HashMap<AppSessionId, HashSet<AppMediaObjectId>>,
     media_root: PathBuf,
     client:     reqwest::Client,
 }
@@ -44,10 +56,29 @@ impl MediaSupervisor {
             return Err(anyhow!("media root {media_root:?} does not exist"));
         }
 
-        Ok(MediaSupervisor { uploads: HashMap::new(),
+        Ok(MediaSupervisor { media: Default::default(),
+                             uploads: HashMap::new(),
                              downloads: HashMap::new(),
                              client: reqwest::Client::new(),
+                             sessions: Default::default(),
                              media_root })
+    }
+
+    fn update_download_state(&self,
+                             id: AppMediaObjectId,
+                             new_state: MediaJobState,
+                             ctx: &mut Context<MediaSupervisor>) {
+        async move {
+            let _ = MediaDatabase::default().update_media(&id, move |media| {
+                                                if let Some(download) = media.download.as_mut() {
+                                                    download.state = new_state.clone();
+                                                }
+
+                                                Ok(())
+                                            })
+                                            .await;
+        }.into_actor(self)
+         .wait(ctx);
     }
 }
 
@@ -57,16 +88,41 @@ pub struct MediaOpts {
     pub media_root: PathBuf,
 }
 
-pub fn init(cfg: MediaOpts) -> anyhow::Result<Addr<MediaSupervisor>> {
+pub async fn init(cfg: MediaOpts) -> anyhow::Result<Addr<MediaSupervisor>> {
     let service = MediaSupervisor::new(cfg)?;
 
-    Ok(MEDIA_SUPERVISOR.get_or_init(move || service.start()).clone())
+    let addr = MEDIA_SUPERVISOR.get_or_init(move || service.start()).clone();
+
+    addr.send(RestartPendingUploadsDownloads).await??;
+
+    Ok(addr)
 }
 
 impl MediaSupervisor {
     fn update(&mut self, ctx: &mut Context<Self>) {
         self.uploads.retain(|_, uploader| uploader.connected());
         self.downloads.retain(|_, downloader| downloader.connected());
+
+        for media in self.media.values_mut() {
+            if let Some(upload) = media.upload.as_ref() {
+                if !self.uploads.contains_key(upload) {
+                    media.upload = None;
+                }
+            }
+
+            if let Some(download) = media.download.as_ref() {
+                if !self.downloads.contains_key(download) {
+                    media.download = None;
+                }
+            }
+        }
+
+        self.media
+            .retain(|_, media| media.upload.is_some() || media.download.is_some());
+    }
+
+    fn notify_all_sessions(&mut self, media_id: AppMediaObjectId, ctx: &mut Context<Self>) {
+        todo!()
     }
 }
 
@@ -74,12 +130,25 @@ impl Handler<NotifyDownloadProgress> for MediaSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyDownloadProgress, ctx: &mut Self::Context) -> Self::Result {
-        match msg.state {
-            MediaJobState::Started => {}
-            MediaJobState::Retrying { .. } => {}
-            MediaJobState::Finished { .. } => {
-                self.downloads.remove(&msg.media_id);
-            }
+        let state = msg.state.clone();
+        let media_id = msg.media_id.clone();
+
+        async move {
+            let db = MediaDatabase::default();
+            db.update_media(&media_id, move |media| {
+                  if let Some(download) = media.download.as_mut() {
+                      download.state = state.clone();
+                  }
+
+                  Ok(())
+              })
+              .await
+        }.into_actor(self)
+         .map(move |_, actor, ctx| actor.notify_all_sessions(msg.media_id, ctx))
+         .wait(ctx);
+
+        if !msg.state.in_progress {
+            self.downloads.remove(&msg.job_id);
         }
     }
 }
@@ -88,13 +157,52 @@ impl Handler<NotifyUploadProgress> for MediaSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyUploadProgress, ctx: &mut Self::Context) -> Self::Result {
-        match msg.state {
-            MediaJobState::Started => {}
-            MediaJobState::Retrying { .. } => {}
-            MediaJobState::Finished { .. } => {
-                self.uploads.remove(&msg.media_id);
-            }
+        let state = msg.state.clone();
+        let media_id = msg.media_id.clone();
+
+        async move {
+            let db = MediaDatabase::default();
+            db.update_media(&media_id, move |media| {
+                  if let Some(upload) = media.upload.as_mut() {
+                      upload.state = state.clone();
+
+                      if state.is_finished_ok() {
+                          let mut path = PathBuf::new();
+                          path.push(media.id.app_id.as_str());
+                          path.push(media.id.media_id.as_str());
+
+                          media.metadata = Some(upload.upload.metadata());
+                          media.path = Some(path.to_string_lossy().to_string());
+                      }
+                  }
+
+                  Ok(())
+              })
+              .await
+        }.into_actor(self)
+         .map(move |_, actor, ctx| actor.notify_all_sessions(msg.media_id, ctx))
+         .wait(ctx);
+
+        if !msg.state.in_progress {
+            self.uploads.remove(&msg.job_id);
         }
+    }
+}
+
+impl Handler<ImportMedia> for MediaSupervisor {
+    type Result = LocalBoxActorFuture<Self, anyhow::Result<()>>;
+
+    fn handle(&mut self, msg: ImportMedia, ctx: &mut Self::Context) -> Self::Result {
+        async move {
+            let db = MediaDatabase::default();
+            db.save_media(MediaObject { id:       msg.media_id.clone(),
+                                        metadata: Some(msg.import.metadata()),
+                                        path:     Some(msg.import.path),
+                                        download: None,
+                                        upload:   None, })
+              .await
+        }.into_actor(self)
+         .boxed_local()
     }
 }
 
@@ -102,7 +210,9 @@ impl Handler<QueueDownload> for MediaSupervisor {
     type Result = anyhow::Result<()>;
 
     fn handle(&mut self, msg: QueueDownload, ctx: &mut Context<Self>) -> Self::Result {
-        let QueueDownload { media_id, download } = msg;
+        let QueueDownload { job_id,
+                            media_id,
+                            download, } = msg;
 
         let path = self.media_root
                        .join(media_id.app_id.to_string())
@@ -112,18 +222,9 @@ impl Handler<QueueDownload> for MediaSupervisor {
             return Err(anyhow!("Media file not found, cannot download"));
         }
 
-        if let Some(actor) = self.uploads.get(&media_id) {
-            if actor.connected() {
-                return Err(anyhow!("Upload in progress, can't queue download until completed"));
-            }
-        }
+        let downloader = Downloader::new(job_id, self.client.clone(), path, media_id.clone(), download)?;
 
-        let downloader = Downloader::new(ctx.address(), self.client.clone(), path, media_id.clone(), download)?;
-
-        // XXX: the previous downloader will be dropped and its futures will be canceled
-        // XXX: if this does not work (i.e. it waits for all future to complete instead),
-        // XXX: we can try to use ctx.cancel inside the actor instead
-        self.downloads.insert(media_id, Supervisor::start(move |_| downloader));
+        self.downloads.insert(job_id, Supervisor::start(move |_| downloader));
 
         Ok(())
     }
@@ -133,7 +234,8 @@ impl Handler<QueueUpload> for MediaSupervisor {
     type Result = anyhow::Result<()>;
 
     fn handle(&mut self, msg: QueueUpload, ctx: &mut Context<Self>) -> Self::Result {
-        let QueueUpload { session_id,
+        let QueueUpload { job_id,
+                          session_id,
                           media_id,
                           upload, } = msg;
 
@@ -141,14 +243,9 @@ impl Handler<QueueUpload> for MediaSupervisor {
                        .join(media_id.app_id.to_string())
                        .join(media_id.media_id.to_string());
 
-        let uploader = Uploader::new(ctx.address(),
-                                     self.client.clone(),
-                                     path,
-                                     session_id.clone(),
-                                     media_id.clone(),
-                                     upload)?;
+        let uploader = Uploader::new(job_id, self.client.clone(), path, session_id, media_id.clone(), upload)?;
 
-        self.uploads.insert(media_id, Supervisor::start(move |_| uploader));
+        self.uploads.insert(job_id, Supervisor::start(move |_| uploader));
 
         Ok(())
     }
@@ -158,20 +255,24 @@ impl Handler<NotifySessionSpec> for MediaSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifySessionSpec, ctx: &mut Self::Context) -> Self::Result {
+        let session_media_ids = msg.spec.get_media_object_ids(&msg.session_id.app_id);
+        self.sessions.insert(msg.session_id.clone(), session_media_ids.clone());
+
         async move {
-            let owned_media_ids = get_pool().get_media_files_for_session(&msg.session_id).await?;
-            let session_media_ids = msg.spec.get_media_object_ids(&msg.session_id.app_id);
+            let owned_media_ids = MediaDatabase::default().get_media_files_for_session(&msg.session_id)
+                                                          .await?;
 
             // find diff
             let to_add = session_media_ids.difference(&owned_media_ids);
 
-            let rv = to_add.map(|app_media_id| QueueUpload { media_id:   app_media_id.clone(),
-                                                             session_id: msg.session_id.clone(),
+            let rv = to_add.map(|app_media_id| QueueUpload { job_id:     UploadJobId::new(),
+                                                             media_id:   app_media_id.clone(),
+                                                             session_id: Some(msg.session_id.clone()),
                                                              upload:     None, })
                            .collect::<Vec<_>>();
 
-            get_pool().set_media_files_for_session(&msg.session_id, session_media_ids)
-                      .await?;
+            MediaDatabase::default().set_media_files_for_session(&msg.session_id, session_media_ids.clone())
+                                    .await?;
 
             Ok::<_, anyhow::Error>(rv)
         }.into_actor(self)
@@ -189,6 +290,41 @@ impl Handler<NotifySessionSpec> for MediaSupervisor {
     }
 }
 
+impl Handler<RestartPendingUploadsDownloads> for MediaSupervisor {
+    type Result = LocalBoxActorFuture<Self, anyhow::Result<()>>;
+
+    fn handle(&mut self, msg: RestartPendingUploadsDownloads, ctx: &mut Self::Context) -> Self::Result {
+        async move {
+            let db = MediaDatabase::default();
+            db.get_pending_downloads_uploads().await
+        }.into_actor(self)
+         .map(|res, _, ctx| match res {
+             Ok((pending_downloads, pending_uploads)) => {
+                 for (media_id, download) in pending_downloads {
+                     ctx.notify(QueueDownload { job_id: DownloadJobId::new(),
+                                                media_id,
+                                                download });
+                 }
+
+                 for (media_id, upload) in pending_uploads {
+                     ctx.notify(QueueUpload { job_id: UploadJobId::new(),
+                                              media_id,
+                                              session_id: None,
+                                              upload: Some(upload) });
+                 }
+
+                 Ok(())
+             }
+             Err(err) => {
+                 error!(%err, "failed to restart pending uploads/downloads");
+
+                 Err(err)
+             }
+         })
+         .boxed_local()
+    }
+}
+
 impl Actor for MediaSupervisor {
     type Context = Context<Self>;
 
@@ -200,6 +336,9 @@ impl Actor for MediaSupervisor {
 impl Supervised for MediaSupervisor {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         ctx.run_interval(Duration::from_millis(100), Self::update);
+
+        self.subscribe_system_async::<NotifyDownloadProgress>(ctx);
+        self.subscribe_system_async::<NotifyUploadProgress>(ctx);
         self.subscribe_system_async::<NotifySessionSpec>(ctx);
     }
 }

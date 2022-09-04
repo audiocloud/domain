@@ -9,11 +9,10 @@ use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
 use audiocloud_api::codec::{Codec, Json, MsgPack};
 use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::error::SerializableResult;
-use audiocloud_api::media::MediaServiceEvent;
-use audiocloud_api::newtypes::{AudioEngineId, FixedInstanceId, MediaServiceId, ModelId};
+use audiocloud_api::newtypes::{AudioEngineId, FixedInstanceId, ModelId};
 
 use crate::service::instance::{InstancesSupervisor, NotifyInstanceDriver};
-use crate::service::session::messages::{NotifyAudioEngineEvent, NotifyMediaServiceEvent};
+use crate::service::session::messages::NotifyAudioEngineEvent;
 use crate::service::session::supervisor::SessionsSupervisor;
 
 #[derive(Args)]
@@ -61,7 +60,6 @@ pub async fn init(opts: NatsOpts) -> anyhow::Result<()> {
     let client = nats_aflowt::connect(&opts.nats_url).await?;
     let inst_evt = client.subscribe("ac.inst.*.*.*.evt").await?;
     let aeng_evt = client.subscribe("ac.aeng.*.evt").await?;
-    let mdia_evt = client.subscribe("ac.mdia.*.evt").await?;
 
     spawn(async move {
         while let Some(msg) = inst_evt.next().await {
@@ -98,28 +96,6 @@ pub async fn init(opts: NatsOpts) -> anyhow::Result<()> {
                     match MsgPack.deserialize::<AudioEngineEvent>(&msg.data[..]) {
                         Ok(event) => {
                             SessionsSupervisor::from_registry().do_send(NotifyAudioEngineEvent { engine_id, event });
-                        }
-                        Err(err) => {
-                            error!(%err, "Failed to deserialize audio engine event");
-                        }
-                    }
-                }
-                None => {
-                    warn!(subject = %msg.subject, "Invalid subject");
-                }
-            }
-        }
-    });
-
-    spawn(async move {
-        while let Some(msg) = mdia_evt.next().await {
-            match msg.subject.split('.').nth(2) {
-                Some(media_service_id) => {
-                    let media_service_id = MediaServiceId::new(media_service_id.to_owned());
-                    match MsgPack.deserialize::<MediaServiceEvent>(&msg.data[..]) {
-                        Ok(event) => {
-                            SessionsSupervisor::from_registry().do_send(NotifyMediaServiceEvent { media_service_id,
-                                                                                                  event });
                         }
                         Err(err) => {
                             error!(%err, "Failed to deserialize audio engine event");

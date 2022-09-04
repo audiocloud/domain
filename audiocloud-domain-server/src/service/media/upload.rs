@@ -1,46 +1,49 @@
 use std::io;
 use std::path::PathBuf;
 
-use actix::{Actor, ActorContext, ActorFutureExt, Addr, Context, ContextFutureSpawner, Supervised, WrapFuture};
+use actix::{Actor, ActorContext, ActorFutureExt, Context, ContextFutureSpawner, Supervised, WrapFuture};
+use actix_broker::BrokerIssue;
 use futures::TryStreamExt;
 use serde_json::json;
 use tokio::fs::File;
 use tokio_util::io::StreamReader;
 use tracing::*;
 
-use crate::service::cloud::get_cloud_client;
-use audiocloud_api::media::UploadToDomain;
+use audiocloud_api::media::{MediaJobState, UploadToDomain};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
+use audiocloud_api::time::now;
 
-use crate::service::media::messages::{MediaJobState, NotifyUploadProgress};
-use crate::service::media::MediaSupervisor;
+use crate::service::cloud::get_cloud_client;
+use crate::service::media::messages::{NotifyUploadProgress, UploadJobId};
 
 #[derive(Debug)]
 pub struct Uploader {
-    supervisor:  Addr<MediaSupervisor>,
+    job_id:      UploadJobId,
     media_id:    AppMediaObjectId,
-    session_id:  AppSessionId,
+    session_id:  Option<AppSessionId>,
     upload:      Option<UploadToDomain>,
     destination: PathBuf,
     client:      reqwest::Client,
-    retry_count: usize,
+    state:       MediaJobState,
 }
 
 impl Uploader {
-    pub fn new(supervisor: Addr<MediaSupervisor>,
+    pub fn new(job_id: UploadJobId,
                client: reqwest::Client,
                destination: PathBuf,
-               session_id: AppSessionId,
+               session_id: Option<AppSessionId>,
                media_id: AppMediaObjectId,
                upload: Option<UploadToDomain>)
                -> anyhow::Result<Self> {
-        Ok(Self { supervisor,
+        let state = MediaJobState::default();
+
+        Ok(Self { job_id,
                   media_id,
                   session_id,
                   upload,
                   destination,
                   client,
-                  retry_count: 0 })
+                  state })
     }
 
     fn upload(&mut self, ctx: &mut Context<Self>) {
@@ -53,7 +56,10 @@ impl Uploader {
         async move {
             let upload = match upload {
                 Some(upload) => upload,
-                None => get_cloud_client().get_media_as_upload(&session_id, &media_id).await?,
+                None => {
+                    get_cloud_client().get_media_as_upload(session_id.as_ref(), &media_id)
+                                      .await?
+                }
             };
 
             let mut file = File::create(&destination).await?;
@@ -83,7 +89,10 @@ impl Uploader {
         }.into_actor(self)
          .map(|res, actor, ctx| match res {
              Ok(_) => {
-                 actor.notify_supervisor(MediaJobState::Finished { successfully: true });
+                 actor.state.error = None;
+                 actor.state.in_progress = false;
+
+                 actor.notify_supervisor();
 
                  ctx.stop();
              }
@@ -96,10 +105,11 @@ impl Uploader {
          .spawn(ctx);
     }
 
-    fn notify_supervisor(&self, state: MediaJobState) {
-        self.supervisor
-            .do_send(NotifyUploadProgress { media_id: self.media_id.clone(),
-                                            state });
+    fn notify_supervisor(&mut self) {
+        self.state.updated_at = now();
+        self.issue_system_async(NotifyUploadProgress { job_id:   self.job_id,
+                                                       media_id: self.media_id.clone(),
+                                                       state:    self.state.clone(), });
     }
 }
 
@@ -114,20 +124,16 @@ impl Actor for Uploader {
 impl Supervised for Uploader {
     #[instrument(skip(ctx))]
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        if self.retry_count > 5 {
+        if self.state.retry > 5 {
             debug!("final failure");
 
-            self.notify_supervisor(MediaJobState::Finished { successfully: false });
+            self.notify_supervisor();
 
             ctx.stop();
         } else {
-            self.notify_supervisor(if self.retry_count == 0 {
-                                       MediaJobState::Started
-                                   } else {
-                                       MediaJobState::Retrying { count: self.retry_count, }
-                                   });
+            self.state.retry += 1;
 
-            self.retry_count += 1;
+            self.notify_supervisor();
 
             self.upload(ctx);
         }

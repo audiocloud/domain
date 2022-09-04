@@ -16,7 +16,6 @@ use audiocloud_api::change::{
     DesiredSessionPlayState, PlayId, PlaySession, RenderId, RenderSession, SessionPlayState, SessionState,
 };
 use audiocloud_api::instance::DesiredInstancePlayState;
-use audiocloud_api::media::MediaServiceEvent;
 use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
 use audiocloud_api::session::Session;
 use audiocloud_api::time::Timestamped;
@@ -28,7 +27,7 @@ use supervisor::{BecomeOnline, SessionsSupervisor};
 
 use crate::audio_engine;
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
-use crate::service::session::messages::{NotifyMediaServiceEvent, NotifySessionPacket};
+use crate::service::session::messages::{NotifyMediaSessionState, NotifySessionPacket};
 use crate::tracker::RequestTracker;
 
 pub mod messages;
@@ -182,20 +181,18 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
     }
 }
 
-impl Handler<NotifyMediaServiceEvent> for SessionActor {
+impl Handler<NotifyMediaSessionState> for SessionActor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifyMediaServiceEvent, ctx: &mut Self::Context) -> Self::Result {
-        match msg.event {
-            MediaServiceEvent::SessionMediaState { session_id, media } => {
-                if self.media.update_media(media) {
-                    let media_ready = self.media.ready_for_engine();
-                    let session_id = self.id.clone();
-                    self.audio_engine_request(ctx,
-                                              AudioEngineCommand::Media { session_id,
-                                                                          media_ready });
-                }
-            }
+    fn handle(&mut self, msg: NotifyMediaSessionState, ctx: &mut Self::Context) -> Self::Result {
+        let NotifyMediaSessionState { session_id, media } = msg;
+        if self.media.update_media(media) {
+            let media_ready = self.media.ready_for_engine();
+            let session_id = self.id.clone();
+
+            self.audio_engine_request(ctx,
+                                      AudioEngineCommand::Media { session_id,
+                                                                  media_ready });
         }
     }
 }

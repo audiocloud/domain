@@ -46,11 +46,11 @@ pub fn get_cloud_client() -> &'static CloudClient {
 
 impl CloudClient {
     pub async fn get_media_as_upload(&self,
-                                     session_id: &AppSessionId,
+                                     session_id: Option<&AppSessionId>,
                                      media: &AppMediaObjectId)
                                      -> anyhow::Result<UploadToDomain> {
-        let app_id = &session_id.app_id;
-        let session_id = &session_id.session_id;
+        let session_id = session_id.map(|s| s.session_id.as_str()).unwrap_or("$none$");
+        let app_id = &media.app_id;
         let media_id = &media.media_id;
 
         let url = self.opts
