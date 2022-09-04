@@ -1,39 +1,43 @@
 use std::path::PathBuf;
 
 use actix::{Actor, ActorContext, ActorFutureExt, Addr, Context, ContextFutureSpawner, Supervised, WrapFuture};
+use actix_broker::BrokerIssue;
+use chrono::Utc;
 use serde_json::json;
 use tokio::fs::File;
 use tracing::*;
 
-use audiocloud_api::media::DownloadFromDomain;
+use audiocloud_api::media::{DownloadFromDomain, MediaJobState};
 use audiocloud_api::newtypes::AppMediaObjectId;
+use audiocloud_api::time::now;
 
-use crate::service::media::messages::{MediaJobState, NotifyDownloadProgress};
-use crate::service::media::MediaSupervisor;
+use crate::service::media::messages::{DownloadJobId, NotifyDownloadProgress};
 
 #[derive(Debug)]
 pub struct Downloader {
-    supervisor:  Addr<MediaSupervisor>,
-    media_id:    AppMediaObjectId,
-    download:    DownloadFromDomain,
-    source:      PathBuf,
-    client:      reqwest::Client,
-    retry_count: usize,
+    job_id:   DownloadJobId,
+    media_id: AppMediaObjectId,
+    download: DownloadFromDomain,
+    source:   PathBuf,
+    state:    MediaJobState,
+    client:   reqwest::Client,
 }
 
 impl Downloader {
-    pub fn new(supervisor: Addr<MediaSupervisor>,
+    pub fn new(job_id: DownloadJobId,
                client: reqwest::Client,
                source: PathBuf,
                media_id: AppMediaObjectId,
                download: DownloadFromDomain)
                -> anyhow::Result<Self> {
-        Ok(Self { media_id,
+        let state = MediaJobState::default();
+
+        Ok(Self { job_id,
+                  media_id,
                   download,
                   source,
                   client,
-                  supervisor,
-                  retry_count: 0 })
+                  state })
     }
 
     #[instrument(skip(ctx))]
@@ -65,12 +69,19 @@ impl Downloader {
         }.into_actor(self)
          .map(|res, actor, ctx| match res {
              Ok(_) => {
-                 actor.notify_supervisor(MediaJobState::Finished { successfully: true });
+                 actor.state.error = None;
+                 actor.state.in_progress = false;
+
+                 actor.notify_supervisor();
 
                  ctx.stop();
              }
              Err(err) => {
                  warn!(%err, "download failed");
+
+                 actor.state.error = Some(err.to_string());
+
+                 actor.notify_supervisor();
 
                  actor.restarting(ctx);
              }
@@ -78,10 +89,12 @@ impl Downloader {
          .spawn(ctx);
     }
 
-    fn notify_supervisor(&self, state: MediaJobState) {
-        self.supervisor
-            .do_send(NotifyDownloadProgress { media_id: self.media_id.clone(),
-                                              state });
+    fn notify_supervisor(&mut self) {
+        self.state.updated_at = now();
+
+        self.issue_system_async(NotifyDownloadProgress { job_id:   self.job_id,
+                                                         media_id: self.media_id.clone(),
+                                                         state:    self.state.clone(), });
     }
 }
 
@@ -96,20 +109,20 @@ impl Actor for Downloader {
 impl Supervised for Downloader {
     #[instrument(skip(ctx))]
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        if self.retry_count > 5 {
-            debug!("final failure");
+        self.state.progress = 0.0;
 
-            self.notify_supervisor(MediaJobState::Finished { successfully: false });
+        if self.state.retry > 5 {
+            warn!("final failure");
+
+            self.state.in_progress = false;
+
+            self.notify_supervisor();
 
             ctx.stop();
         } else {
-            self.notify_supervisor(if self.retry_count == 0 {
-                                       MediaJobState::Started
-                                   } else {
-                                       MediaJobState::Retrying { count: self.retry_count, }
-                                   });
+            self.state.retry += 1;
 
-            self.retry_count += 1;
+            self.notify_supervisor();
 
             self.download(ctx);
         }

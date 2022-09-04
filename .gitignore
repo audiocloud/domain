@@ -276,6 +276,5 @@ Temporary Items
 
 dist
 .media
-/domain.db
-/domain.db-shm
-/domain.db-wal
+*.sqlite
+*.sqlite-*

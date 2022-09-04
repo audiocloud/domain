@@ -15,7 +15,7 @@ use audiocloud_api::session::Session;
 use crate::audio_engine::AudioEngineClient;
 use crate::data::get_boot_cfg;
 use crate::service::session::messages::{
-    ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyMediaServiceEvent, NotifySessionSpec, NotifySessionState,
+    ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyMediaSessionState, NotifySessionSpec, NotifySessionState,
     SetSessionDesiredState,
 };
 use crate::service::session::SessionActor;
@@ -130,11 +130,11 @@ impl Handler<NotifyAudioEngineEvent> for SessionsSupervisor {
     }
 }
 
-impl Handler<NotifyMediaServiceEvent> for SessionsSupervisor {
+impl Handler<NotifyMediaSessionState> for SessionsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifyMediaServiceEvent, ctx: &mut Self::Context) -> Self::Result {
-        let session_id = msg.event.session_id();
+    fn handle(&mut self, msg: NotifyMediaSessionState, ctx: &mut Self::Context) -> Self::Result {
+        let session_id = &msg.session_id;
         match self.active.get(session_id) {
             Some(session) => {
                 session.do_send(msg);

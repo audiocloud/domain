@@ -27,6 +27,12 @@ bytes = "1"
 webrtc = "0.4"
 itertools = "0.10"
 tokio-util = "0.7"
+async-trait = "0.1"
+derive_more = "0.99"
+
+[dependencies.uuid]
+version = "1"
+features = ["v4"]
 
 [dependencies.tokio]
 version = "1"
