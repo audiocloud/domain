@@ -9,6 +9,7 @@ use tokio::fs::File;
 use tokio_util::io::StreamReader;
 use tracing::*;
 
+use crate::data::MediaDatabase;
 use audiocloud_api::media::{MediaJobState, UploadToDomain};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
 use audiocloud_api::time::now;
@@ -61,6 +62,22 @@ impl Uploader {
                                       .await?
                 }
             };
+
+            let db = MediaDatabase::default();
+            if let Some(media) = db.get_media(&media_id).await? {
+                match (media.path.as_ref(), media.metadata.as_ref()) {
+                    (Some(path), Some(metadata)) => {
+                        // TODO: more checks, for example media hash?
+                        // TODO: actually check the on-disk size, not DB size?
+
+                        if metadata.bytes == upload.bytes {
+                            debug!(%media_id, "Media already uploaded");
+                            return Ok(());
+                        }
+                    }
+                    _ => {}
+                }
+            }
 
             let mut file = File::create(&destination).await?;
 

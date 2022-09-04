@@ -74,20 +74,98 @@ impl Default for MediaDatabase {
 }
 
 impl MediaDatabase {
-    pub async fn get_media_files_for_session(&self,
-                                             session_id: &AppSessionId)
-                                             -> anyhow::Result<HashSet<AppMediaObjectId>> {
+    pub async fn get_media_ids_for_session(&self,
+                                           session_id: &AppSessionId)
+                                           -> anyhow::Result<HashSet<AppMediaObjectId>> {
         let app_id = session_id.app_id.as_str();
         let session_id = session_id.session_id.as_str();
 
-        let rows = query!("SELECT media_id FROM session_media WHERE app_id = ? AND session_id = ?",
+        Ok(query!("SELECT app_id, media_id FROM session_media WHERE app_id = ? AND session_id = ?",
+                  app_id,
+                  session_id).fetch_all(&self.pool)
+                             .await?
+                             .into_iter()
+                             .map(|row| MediaObjectId::new(row.media_id).for_app(AppId::new(row.app_id)))
+                             .collect())
+    }
+
+    pub async fn get_media_for_session(&self,
+                                       session_id: &AppSessionId)
+                                       -> anyhow::Result<HashMap<AppMediaObjectId, MediaObject>> {
+        let app_id = session_id.app_id.as_str();
+        let session_id = session_id.session_id.as_str();
+
+        let rows = query!("SELECT m.* FROM media m, session_media s WHERE s.app_id = ? AND s.session_id = ? AND m.media_id = s.media_id AND m.app_id = s.app_id",
                           app_id,
                           session_id).fetch_all(&self.pool)
                                      .await?;
 
-        Ok::<_, anyhow::Error>(rows.into_iter()
-                                   .map(|row| MediaObjectId::new(row.media_id).for_app(AppId::new(app_id.to_owned())))
-                                   .collect())
+        let mut rv = HashMap::new();
+
+        for media_row in rows {
+            let metadata_json = match media_row.metadata {
+                Some(metadata) => Some(serde_json::from_str(&metadata)?),
+                None => None,
+            };
+
+            let maybe_download = match media_row.download {
+                Some(download) => Some(serde_json::from_str(&download)?),
+                None => None,
+            };
+            let maybe_upload = match media_row.upload {
+                Some(upload) => Some(serde_json::from_str(&upload)?),
+                None => None,
+            };
+
+            let app_media_id = MediaObjectId::new(media_row.media_id).for_app(AppId::new(media_row.app_id));
+
+            rv.insert(app_media_id.clone(),
+                      MediaObject { id:       app_media_id,
+                                    metadata: metadata_json,
+                                    path:     media_row.path,
+                                    download: maybe_download,
+                                    upload:   maybe_upload, });
+        }
+
+        Ok(rv)
+    }
+
+    pub async fn create_default_media_if_not_exists(&self, app_media_id: &AppMediaObjectId) -> anyhow::Result<()> {
+        let mut txn = self.pool.begin().await?;
+
+        let media_exists = self.does_media_exist(app_media_id, &mut txn).await?;
+        if !media_exists {
+            self.create_default_media(app_media_id, &mut txn).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn does_media_exist<'a>(&self,
+                                  app_media_id: &AppMediaObjectId,
+                                  txn: impl Executor<'a, Database = Sqlite>)
+                                  -> anyhow::Result<bool> {
+        let app_id = app_media_id.app_id.as_str();
+        let media_id = app_media_id.media_id.as_str();
+
+        Ok(query!("SELECT 1 AS one FROM media WHERE app_id = ? AND media_id = ?",
+                  app_id,
+                  media_id).fetch_optional(txn)
+                           .await?
+                           .is_some())
+    }
+
+    async fn create_default_media<'a>(&self,
+                                      app_media_id: &AppMediaObjectId,
+                                      txn: impl Executor<'a, Database = Sqlite>)
+                                      -> anyhow::Result<()> {
+        let app_id = app_media_id.app_id.as_str();
+        let media_id = app_media_id.media_id.as_str();
+
+        query!("INSERT INTO media (app_id, media_id) VALUES (?, ?)", app_id, media_id).execute(txn)
+                                                                                      .await?;
+
+        Ok(())
     }
 
     pub async fn set_media_files_for_session(&self,
@@ -105,6 +183,12 @@ impl MediaDatabase {
                           .await?;
 
         for media_id in media {
+            let media_exists = self.does_media_exist(&media_id, &mut txn).await?;
+
+            if !media_exists {
+                self.create_default_media(&media_id, &mut txn).await?;
+            }
+
             let media_id = media_id.media_id.as_str();
 
             query!("INSERT INTO session_media (app_id, session_id, media_id) VALUES (?, ?, ?)",
@@ -190,34 +274,6 @@ impl MediaDatabase {
 
     pub async fn save_media(&self, media: MediaObject) -> anyhow::Result<()> {
         Self::save_media_txn(media, &self.pool).await
-    }
-
-    async fn create_media_txn<'a>(media: MediaObject, txn: impl Executor<'a, Database = Sqlite>) -> anyhow::Result<()> {
-        let app_id = media.id.app_id.as_str();
-        let media_id = media.id.media_id.as_str();
-
-        let metadata_json = match media.metadata {
-            Some(metadata) => Some(serde_json::to_string(&metadata)?),
-            None => None,
-        };
-
-        let download_in_progress = media.download.as_ref().map(|download| download.state.in_progress);
-        let upload_in_progress = media.upload.as_ref().map(|upload| upload.state.in_progress);
-        let media_download = serde_json::to_string(&media.download)?;
-        let media_upload = serde_json::to_string(&media.upload)?;
-
-        query!("INSERT INTO media (app_id, media_id, path, metadata, download, upload, download_in_progress, upload_in_progress) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-               app_id,
-               media_id,
-               media.path,
-               metadata_json,
-               media_download,
-               media_upload,
-               download_in_progress,
-               upload_in_progress).execute(txn)
-                            .await?;
-
-        Ok::<_, anyhow::Error>(())
     }
 
     async fn save_media_txn<'a>(media: MediaObject, txn: impl Executor<'a, Database = Sqlite>) -> anyhow::Result<()> {

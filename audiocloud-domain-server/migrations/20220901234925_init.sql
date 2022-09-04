@@ -2,10 +2,10 @@ CREATE TABLE IF NOT EXISTS "media"
 (
     "app_id"               text NOT NULL,
     "media_id"             text NOT NULL,
-    "metadata"             text,
-    "path"                 text,
-    "download"             text,
-    "upload"               text,
+    "metadata"             text NULL,
+    "path"                 text NULL,
+    "download"             text NULL,
+    "upload"               text NULL,
     "download_in_progress" int  NOT NULL DEFAULT 0,
     "upload_in_progress"   int  NOT NULL DEFAULT 0,
 

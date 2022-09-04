@@ -15,7 +15,7 @@ use clap::Args;
 use once_cell::sync::OnceCell;
 use tracing::error;
 
-use audiocloud_api::media::{MediaJobState, MediaObject};
+use audiocloud_api::media::MediaObject;
 use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
 use download::Downloader;
 use messages::{QueueDownload, QueueUpload};
@@ -63,23 +63,6 @@ impl MediaSupervisor {
                              sessions: Default::default(),
                              media_root })
     }
-
-    fn update_download_state(&self,
-                             id: AppMediaObjectId,
-                             new_state: MediaJobState,
-                             ctx: &mut Context<MediaSupervisor>) {
-        async move {
-            let _ = MediaDatabase::default().update_media(&id, move |media| {
-                                                if let Some(download) = media.download.as_mut() {
-                                                    download.state = new_state.clone();
-                                                }
-
-                                                Ok(())
-                                            })
-                                            .await;
-        }.into_actor(self)
-         .wait(ctx);
-    }
 }
 
 #[derive(Args)]
@@ -122,7 +105,27 @@ impl MediaSupervisor {
     }
 
     fn notify_all_sessions(&mut self, media_id: AppMediaObjectId, ctx: &mut Context<Self>) {
-        todo!()
+        let sessions = self.sessions
+                           .iter()
+                           .filter_map(|(id, session)| session.contains(&media_id).then(|| id.clone()))
+                           .collect::<HashSet<_>>();
+
+        for session_id in sessions {
+            {
+                let session_id = session_id.clone();
+                async move {
+                    let db = MediaDatabase::default();
+                    db.get_media_for_session(&session_id).await
+                }
+            }.into_actor(self)
+             .map(move |res, actor, ctx| match res {
+                 Ok(media) => actor.issue_system_async(NotifyMediaSessionState { session_id, media }),
+                 Err(err) => {
+                     error!(%err, %session_id, "failed to notify session media");
+                 }
+             })
+             .wait(ctx);
+        }
     }
 }
 
@@ -234,6 +237,18 @@ impl Handler<QueueUpload> for MediaSupervisor {
     type Result = anyhow::Result<()>;
 
     fn handle(&mut self, msg: QueueUpload, ctx: &mut Context<Self>) -> Self::Result {
+        let app_media_id = msg.media_id.clone();
+        async move {
+            let db = MediaDatabase::default();
+            db.create_default_media_if_not_exists(&app_media_id).await
+        }.into_actor(self)
+         .map(|res, _, _| {
+             if let Err(err) = res {
+                 error!(%err, "failed to create default media for the download");
+             }
+         })
+         .wait(ctx);
+
         let QueueUpload { job_id,
                           session_id,
                           media_id,
@@ -259,8 +274,8 @@ impl Handler<NotifySessionSpec> for MediaSupervisor {
         self.sessions.insert(msg.session_id.clone(), session_media_ids.clone());
 
         async move {
-            let owned_media_ids = MediaDatabase::default().get_media_files_for_session(&msg.session_id)
-                                                          .await?;
+            let db = MediaDatabase::default();
+            let owned_media_ids = db.get_media_ids_for_session(&msg.session_id).await?;
 
             // find diff
             let to_add = session_media_ids.difference(&owned_media_ids);
@@ -270,9 +285,9 @@ impl Handler<NotifySessionSpec> for MediaSupervisor {
                                                              session_id: Some(msg.session_id.clone()),
                                                              upload:     None, })
                            .collect::<Vec<_>>();
-
-            MediaDatabase::default().set_media_files_for_session(&msg.session_id, session_media_ids.clone())
-                                    .await?;
+            
+            db.set_media_files_for_session(&msg.session_id, session_media_ids.clone())
+              .await?;
 
             Ok::<_, anyhow::Error>(rv)
         }.into_actor(self)
