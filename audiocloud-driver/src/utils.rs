@@ -13,7 +13,7 @@ pub fn rescale(value: f64, from: Range<f64>, to: Range<f64>) -> f64 {
 }
 
 pub fn rescale_param(value: f64, range: &ModelParameter, ch: usize, to: f64) -> f64 {
-  if let ModelValueOption::Range(ModelValue::Number(from_start), ModelValue::Number(from_end)) = range.values[ch] {
+  if let ModelValueOption::Range(ModelValue::Number(from_start), ModelValue::Number(from_end)) = range.values[0] {
     let value_from = value.max(from_start) - from_start;
     let from_len = from_end - from_start;
     let to_len = to;

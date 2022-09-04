@@ -349,9 +349,9 @@ impl Dual1084 {
             }
           }
           //let data: [u32;9] = [2,3,4,5,6,7,8,9,10];
-          println!("{:#?}", spi_data);
-          //let transfer = SpiTransfer::write(&spi_data);
-          println!("{:?}", write_data(self.raw_fd, spi_struct::write(&spi_data)));
+          //println!("{:#?}", spi_data);
+          //let mut transfer = spi_struct::write(&mut spi_data);
+          println!("{:?}", write_data(self.raw_fd, &mut spi_into_driver::write(&mut spi_data)));
           println!("{:?}", transfer_data(self.raw_fd));
         }
 
@@ -361,21 +361,24 @@ impl Dual1084 {
 
 
 #[allow(non_camel_case_types)]
-#[derive(Debug, Default)]
+#[derive(Debug)]
 #[repr(C)]
-pub struct spi_struct {
-  data:[u32;9],
+pub struct spi_into_driver {
+  tx_buf: u64,
+  len: u32,
 }
 
-impl spi_struct {
-  pub fn write(buff: &[u32]) -> Self {
-    spi_struct {
-      data: buff.try_into().expect("slice with incorrect length"),
+impl spi_into_driver {
+  pub fn write(buff: &mut [u32]) -> Self {
+    spi_into_driver {
+        tx_buf: buff.as_ptr() as *const () as usize as u64,
+        len: (buff.len() * 4) as u32,
+      //data: [0;9],
     }
   }
 }
 
-//pub type SpiTransfer = spi_struct;
+pub type SpiTransfer = spi_into_driver;
 
 mod ioctl {
   use super::*;
@@ -383,14 +386,14 @@ mod ioctl {
   const PIVO_SPI_WRITE: u8 = 2;
   const PIVO_SET_DATA: u8 = 3;
 
-  ioctl_write_ptr!(set_data_32, PIVO_SPI_MAGIC, PIVO_SET_DATA, spi_struct);
+  ioctl_write_ptr!(set_data_32, PIVO_SPI_MAGIC, PIVO_SET_DATA, spi_into_driver);
 
   ioctl_none!(write_data_32, PIVO_SPI_MAGIC, PIVO_SPI_WRITE);
 }
 
 
-pub fn write_data(fd: RawFd, transfers: spi_struct) -> io::Result<()> {
-  unsafe { ioctl::set_data_32(fd, &transfers) }?;
+pub fn write_data(fd: RawFd, transfers: &mut SpiTransfer) -> io::Result<()> {
+  unsafe { ioctl::set_data_32(fd, transfers) }?;
   Ok(())
 }
 
