@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -16,13 +17,13 @@ use audiocloud_api::media::{DownloadFromDomain, MediaDownload, MediaObject, Medi
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, AppSessionId, MediaObjectId};
 
 pub mod instance;
-pub mod reaper;
 pub mod session;
 
 #[derive(Args)]
 pub struct DataOpts {
-    #[clap(long, env, default_value = "sqlite::memory:")]
-    pub database_url: String,
+    /// Sqlite database file where data for media and session cache will be stored. Use :memory: for an in-memory store
+    #[clap(long, env, default_value = ":memory:")]
+    pub database_file: PathBuf,
 }
 
 static BOOT_CFG: OnceCell<BootDomain> = OnceCell::new();
@@ -39,11 +40,12 @@ pub fn get_sqlite_pool() -> &'static SqlitePool {
 pub async fn init(cfg: DataOpts, boot: BootDomain) -> anyhow::Result<()> {
     BOOT_CFG.set(boot).map_err(|_| anyhow!("State init already called!"))?;
 
-    debug!(url = &cfg.database_url, "Initializing database");
+    let url = format!("sqlite:{}", cfg.database_file.to_string_lossy());
+    debug!(%url, "Initializing database");
 
-    let mut opts = SqliteConnectOptions::from_str(&cfg.database_url)?.create_if_missing(true)
-                                                                     .journal_mode(SqliteJournalMode::Wal)
-                                                                     .synchronous(SqliteSynchronous::Normal);
+    let mut opts = SqliteConnectOptions::from_str(&url)?.create_if_missing(true)
+                                                        .journal_mode(SqliteJournalMode::Wal)
+                                                        .synchronous(SqliteSynchronous::Normal);
 
     opts.log_statements(LevelFilter::Off)
         .log_slow_statements(LevelFilter::Debug, Duration::from_millis(125));
