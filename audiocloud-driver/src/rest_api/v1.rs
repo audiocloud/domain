@@ -34,7 +34,7 @@ async fn get_instances() -> impl Responder {
     Ok::<_, Error>(web::Json(rv))
 }
 
-#[get("/{manufacturer}/{name}/{instance}/parameters")]
+#[get("/{manufacturer}/{name}/{instance}")]
 async fn get_parameters(path: web::Path<(String, String, String)>) -> impl Responder {
     let instance_id = get_instance_id(path.into_inner());
     let command = GetValues { instance_id };
