@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Recipient, Supervised, WrapFuture};
+use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Recipient, Response, Supervised, WrapFuture};
+use actix_broker::BrokerSubscribe;
 use once_cell::sync::OnceCell;
 use tracing::*;
 
@@ -9,7 +10,7 @@ use audiocloud_api::driver::InstanceDriverError;
 use audiocloud_api::newtypes::FixedInstanceId;
 
 use crate::nats::NatsOpts;
-use crate::{nats, Command, ConfigFile, InstanceConfig};
+use crate::{nats, Command, ConfigFile, GetInstances, GetValues, InstanceConfig, NotifyInstanceValues};
 
 static SUPERVISOR_ADDR: OnceCell<Addr<DriverSupervisor>> = OnceCell::new();
 
@@ -37,6 +38,7 @@ pub async fn init(nats_opts: NatsOpts, config: ConfigFile) -> anyhow::Result<()>
 
 pub struct DriverSupervisor {
     instances: HashMap<FixedInstanceId, Recipient<Command>>,
+    values:    HashMap<FixedInstanceId, NotifyInstanceValues>,
 }
 
 impl Handler<Command> for DriverSupervisor {
@@ -59,6 +61,33 @@ impl Handler<Command> for DriverSupervisor {
     }
 }
 
+impl Handler<GetInstances> for DriverSupervisor {
+    type Result = Response<HashSet<FixedInstanceId>>;
+
+    fn handle(&mut self, msg: GetInstances, ctx: &mut Self::Context) -> Self::Result {
+        Response::reply(self.instances.keys().cloned().collect())
+    }
+}
+
+impl Handler<NotifyInstanceValues> for DriverSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: NotifyInstanceValues, ctx: &mut Self::Context) -> Self::Result {
+        self.values.insert(msg.instance_id.clone(), msg);
+    }
+}
+
+impl Handler<GetValues> for DriverSupervisor {
+    type Result = Result<NotifyInstanceValues, InstanceDriverError>;
+
+    fn handle(&mut self, msg: GetValues, ctx: &mut Self::Context) -> Self::Result {
+        match self.values.get(&msg.instance_id) {
+            None => Err(InstanceDriverError::InstanceNotFound(msg.instance_id.clone())),
+            Some(values) => Ok(values.clone()),
+        }
+    }
+}
+
 impl DriverSupervisor {
     pub async fn new(nats_opts: NatsOpts, config: ConfigFile) -> anyhow::Result<Self> {
         let mut instances = HashMap::new();
@@ -71,7 +100,8 @@ impl DriverSupervisor {
         let instance_ids = instances.keys().cloned().collect::<HashSet<_>>();
         nats::init(nats_opts, instance_ids).await?;
 
-        Ok(Self { instances })
+        Ok(Self { instances,
+                  values: Default::default() })
     }
 }
 
@@ -82,5 +112,6 @@ impl Actor for DriverSupervisor {
 impl Supervised for DriverSupervisor {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         warn!("Restarting driver supervisor");
+        self.subscribe_system_async::<NotifyInstanceValues>(ctx);
     }
 }

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use actix_web::error::ErrorInternalServerError;
-use actix_web::{post, web, Error, Responder};
+use actix_web::{get, post, web, Error, Responder};
 use maplit::hashmap;
 
 use audiocloud_api::change::{PlayId, RenderId};
@@ -10,15 +10,41 @@ use audiocloud_api::model::MultiChannelValue;
 use audiocloud_api::newtypes::{FixedInstanceId, ParameterId};
 
 use crate::supervisor::get_driver_supervisor;
-use crate::Command;
+use crate::{Command, GetInstances, GetValues};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(set_parameters)
+    cfg.service(get_parameters)
+       .service(get_instances)
+       .service(set_parameters)
        .service(set_parameter)
        .service(stop)
        .service(play)
        .service(render)
        .service(rewind);
+}
+
+#[get("/instances")]
+async fn get_instances() -> impl Responder {
+    let command = GetInstances;
+
+    let rv = get_driver_supervisor().send(command)
+                                    .await
+                                    .map_err(ErrorInternalServerError)?;
+
+    Ok::<_, Error>(web::Json(rv))
+}
+
+#[get("/{manufacturer}/{name}/{instance}/parameters")]
+async fn get_parameters(path: web::Path<(String, String, String)>) -> impl Responder {
+    let instance_id = get_instance_id(path.into_inner());
+    let command = GetValues { instance_id };
+
+    let rv = get_driver_supervisor().send(command)
+                                    .await
+                                    .map_err(ErrorInternalServerError)?
+                                    .map_err(ErrorInternalServerError)?;
+
+    Ok::<_, Error>(web::Json(rv))
 }
 
 #[post("/{manufacturer}/{name}/{instance}/parameters")]
