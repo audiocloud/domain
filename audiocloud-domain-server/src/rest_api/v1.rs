@@ -6,6 +6,7 @@ use audiocloud_api::change::ModifySessionSpec;
 use audiocloud_api::cloud::apps::CreateSession;
 use audiocloud_api::domain::DomainSessionCommand;
 use audiocloud_api::newtypes::{AppId, AppSessionId, SessionId};
+use audiocloud_api::session::SessionSecurity;
 
 use crate::service::session::messages::ExecuteSessionCommand;
 use crate::service::session::supervisor::SessionsSupervisor;
@@ -23,7 +24,8 @@ async fn create_session(path: web::Path<(AppId, SessionId)>, create: web::Json<C
 
     Ok::<_, Error>(web::Json(SessionsSupervisor::from_registry().send(ExecuteSessionCommand {
         session_id: id.clone(),
-        command: DomainSessionCommand::Create {app_session_id: id.clone(), create: create.into_inner()}
+        command: DomainSessionCommand::Create {app_session_id: id.clone(), create: create.into_inner()},
+        security: SessionSecurity::full()
     }).await.map_err(ErrorInternalServerError)?.map_err(ErrorInternalServerError)?))
 }
 
@@ -36,7 +38,8 @@ async fn modify_session(path: web::Path<(AppId, SessionId)>,
 
     Ok::<_, Error>(web::Json(SessionsSupervisor::from_registry().send(ExecuteSessionCommand {
         session_id: id.clone(),
-        command: DomainSessionCommand::Modify {app_session_id: id.clone(), modifications: modify.into_inner(), version: 0}
+        command: DomainSessionCommand::Modify {app_session_id: id.clone(), modifications: modify.into_inner(), version: 0},
+        security: SessionSecurity::full()
     }).await.map_err(ErrorInternalServerError)?.map_err(ErrorInternalServerError)?))
 }
 
@@ -47,6 +50,7 @@ async fn delete_session(path: web::Path<(AppId, SessionId)>) -> impl Responder {
 
     Ok::<_, Error>(web::Json(SessionsSupervisor::from_registry().send(ExecuteSessionCommand {
         session_id: id.clone(),
-        command: DomainSessionCommand::Delete {app_session_id: id.clone()}
+        command: DomainSessionCommand::Delete {app_session_id: id.clone()},
+        security: SessionSecurity::full()
     }).await.map_err(ErrorInternalServerError)?.map_err(ErrorInternalServerError)?))
 }

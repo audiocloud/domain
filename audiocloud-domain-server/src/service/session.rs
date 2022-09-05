@@ -4,10 +4,10 @@ use std::mem;
 use std::time::Duration;
 
 use actix::{
-    Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, SystemService, WrapFuture,
+    Actor, ActorContext, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised,
+    SystemService, WrapFuture,
 };
 use actix_broker::{BrokerIssue, BrokerSubscribe};
-use anyhow::anyhow;
 use chrono::Utc;
 
 use audiocloud_api::app::{SessionPacket, SessionPacketError};
@@ -20,14 +20,14 @@ use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
 use audiocloud_api::session::Session;
 use audiocloud_api::time::Timestamped;
 use messages::{
-    ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyRenderComplete, NotifySessionSpec, NotifySessionState,
-    SetSessionDesiredState,
+    BecomeOnline, ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyRenderComplete, NotifySessionSpec,
+    NotifySessionState, SetSessionDesiredState,
 };
-use supervisor::{BecomeOnline, SessionsSupervisor};
+use supervisor::SessionsSupervisor;
 
 use crate::audio_engine;
 use crate::service::instance::{NotifyInstanceError, NotifyInstanceReports, NotifyInstanceState};
-use crate::service::session::messages::{NotifyMediaSessionState, NotifySessionPacket};
+use crate::service::session::messages::{NotifyMediaSessionState, NotifySessionPacket, NotifySessionSecurity};
 use crate::tracker::RequestTracker;
 
 pub mod messages;
@@ -64,6 +64,7 @@ impl Supervised for SessionActor {
         ctx.run_interval(Duration::from_millis(250), Self::update);
 
         self.emit_spec();
+        self.emit_security();
     }
 }
 
@@ -210,7 +211,7 @@ impl Handler<ExecuteSessionCommand> for SessionActor {
     type Result = anyhow::Result<()>;
 
     fn handle(&mut self, msg: ExecuteSessionCommand, ctx: &mut Self::Context) -> Self::Result {
-        Err(anyhow!("Not implemented"))
+        todo!()
     }
 }
 
@@ -352,6 +353,11 @@ impl SessionActor {
     fn emit_spec(&self) {
         self.issue_system_async(NotifySessionSpec { session_id: self.id.clone(),
                                                     spec:       self.session.spec.clone(), });
+    }
+
+    fn emit_security(&self) {
+        self.issue_system_async(NotifySessionSecurity { session_id: self.id.clone(),
+                                                        security:   self.session.security.clone(), });
     }
 
     fn emit_state(&self) {

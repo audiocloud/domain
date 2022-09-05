@@ -23,6 +23,7 @@ pub struct SetSessionDesiredState {
 pub struct ExecuteSessionCommand {
     pub session_id: AppSessionId,
     pub command:    DomainSessionCommand,
+    pub security:   SessionSecurity,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -93,3 +94,7 @@ pub struct NotifyRenderFailed {
     pub error:      String,
     pub cancelled:  bool,
 }
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct BecomeOnline;
