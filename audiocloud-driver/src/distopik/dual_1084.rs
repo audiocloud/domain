@@ -132,12 +132,14 @@ impl UnirelRegion {
         // negated rot switch has negated first bit/switch
         for (i, bit) in self.bits.iter().copied().enumerate() {
             let mut temp: bool = false;
-            if value != 0 && i == 0 {
-                temp = true
+            if value as usize == i {
+                temp = true;
             }
-            if value == 2 && i == 1 {
-                temp = true
+            if i == 0 {
+                if temp == false {temp = true;}
+                else {temp = false;}
             }
+
             write_bit_16(&mut memory[self.pot_id][(bit / 16) + 1], (bit % 16) as u16, temp as u16);
         }
         memory[self.pot_id][0] = 1;
@@ -197,7 +199,7 @@ impl Dual1084 {
                       high_gain: [UnipotRegion::new(5, [46, 47, 39, 38, 37, 36, 35].into_iter()),
                                   UnipotRegion::new(5, (0..=6).rev())],
                       high_gain_param: dual_1084::high_gain(),
-                      output_pad: [UnirelRegion::new(7, 1..2), UnirelRegion::new(7, 3..4)],
+                      output_pad: [UnirelRegion::new(7, 0..=2), UnirelRegion::new(7, 3..=5)],
                       output_pad_param: dual_1084::output_pad(),
                       eql_toggle: [UnirelRegion::new(3, 52..=52), UnirelRegion::new(1, 52..=52)],
                       eql_toggle_param: dual_1084::eql_toggle() })
@@ -224,10 +226,8 @@ impl Handler<Command> for Dual1084 {
 
                 if let Some(input_gain) = params.remove(&dual_1084::INPUT_GAIN) {
                     for (ch, value) in input_gain.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = repoint_param(value, &self.input_gain_param, ch);
-                            self.input_gain[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = repoint_param(value, &self.input_gain_param, ch);
+                        self.input_gain[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(high_pass_filter) = params.remove(&dual_1084::HIGH_PASS_FILTER) {
@@ -275,7 +275,7 @@ impl Handler<Command> for Dual1084 {
                 if let Some(low_mid_width) = params.remove(&dual_1084::LOW_MID_WIDTH) {
                     for (ch, value) in low_mid_width.into_iter().enumerate() {
                         if let Some(ModelValue::Bool(value)) = value {
-                            //let rescaled = rescale_param(value, &self.low_mid_width_param, ch, 128.0);
+                            //let rescaled = rescale_param(value, &self.low_mid_width_param,  , 128.0);
                             self.low_mid_width[ch].write_switch(&mut self.io_exp_data, value as u16);
                         }
                     }
@@ -324,7 +324,11 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in output_pad.into_iter().enumerate() {
                         if let Some(ModelValue::Number(value)) = value {
                             let rescaled = repoint_param(value, &self.output_pad_param, ch);
+                            info!("repiont: {rescaled}");
                             self.output_pad[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                        }
+                        if let Some(ModelValue::Bool(value)) = value {
+                            self.output_pad[ch].write_nrot_switch(&mut self.io_exp_data, value as u16);
                         }
                     }
                 }
@@ -351,24 +355,26 @@ impl Handler<Command> for Dual1084 {
 impl Dual1084 {
     pub fn set_io_expanders(&self) {
         let mut spi_data: [u32; 9] = [0; 9];
-        const io_boards: [u16; 3] = [3, 1, 5];
+        const io_boards: [u16; 4] = [3, 1, 5, 7];
         const io_output_address: [u16; 5] = [0x4000, 0x4200, 0x4400, 0x4600, 0x4800];
 
         for j in 0..5 {
-            spi_data[8] = 0;
-            for i in 0..3 {
+            //spi_data = [0; 9];
+            for i in 0..4 {
                 if self.io_exp_data[io_boards[i] as usize][0] == 1 {
-                    if j < 5 {
-                        spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x12) << 16)
-                                                          | swap_u16(self.io_exp_data[io_boards[i] as usize][j + 1])
-                                                            as u32;
+                    if (j < 5 && (io_boards[i] != 7)) {
+                        spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x12) << 16) | swap_u16(self.io_exp_data[io_boards[i] as usize][j + 1]) as u32;
                         spi_data[8] |= 1 << io_boards[i];
+                    }
+                    if (j == 0 && (io_boards[i] == 7)){
+                        
+                        spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x9) << 16) | self.io_exp_data[io_boards[i] as usize][j + 1] as u32;
+                        spi_data[8] |= 1 << io_boards[i];
+                        //info!("uint8_t: {:#?}", );
                     }
                 }
             }
-            //let data: [u32;9] = [2,3,4,5,6,7,8,9,10];
-            //println!("{:#?}", spi_data);
-            //let mut transfer = spi_struct::write(&mut spi_data);
+            println!("data: {:#?}", spi_data);
             println!("{:?}",
                      write_data(self.raw_fd, &mut spi_into_driver::write(&mut spi_data)));
             println!("{:?}", transfer_data(self.raw_fd));
