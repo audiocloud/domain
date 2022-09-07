@@ -23,9 +23,11 @@ use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
 
 #[derive(Args, Debug)]
 pub struct CloudOpts {
+    /// AudioCloud API key for this domain
     #[clap(short = 'k', long, env)]
     api_key: String,
 
+    /// AudioCloud API base URL
     #[clap(long, env, default_value = "https://api.audiocloud.io")]
     api_url: Url,
 }
