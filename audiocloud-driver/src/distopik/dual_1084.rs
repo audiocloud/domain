@@ -232,68 +232,56 @@ impl Handler<Command> for Dual1084 {
                 }
                 if let Some(high_pass_filter) = params.remove(&dual_1084::HIGH_PASS_FILTER) {
                     for (ch, value) in high_pass_filter.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = repoint_param(value, &self.high_pass_filter_param, ch);
-                            self.high_pass_filter[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                            self.high_pass_filter[ch + 2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = repoint_param(value, &self.high_pass_filter_param, ch);
+                        self.high_pass_filter[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                        self.high_pass_filter[ch + 2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(low_gain) = params.remove(&dual_1084::LOW_GAIN) {
                     for (ch, value) in low_gain.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = rescale_param(value, &self.low_gain_param, ch, 128.0);
-                            self.low_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = rescale_param(value, &self.low_gain_param, ch, 128.0);
+                        self.low_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(low_freq) = params.remove(&dual_1084::LOW_FREQ) {
                     for (ch, value) in low_freq.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = repoint_param(value, &self.low_freq_param, ch);
-                            self.low_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                            self.low_freq[ch + 2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = repoint_param(value, &self.low_freq_param, ch);
+                        self.low_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                        self.low_freq[ch + 2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(low_mid_gain) = params.remove(&dual_1084::LOW_MID_GAIN) {
                     for (ch, value) in low_mid_gain.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = rescale_param(value, &self.low_mid_gain_param, ch, 128.0);
-                            self.low_mid_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = rescale_param(value, &self.low_mid_gain_param, ch, 128.0);
+                        self.low_mid_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
+
                     }
                 }
                 if let Some(low_mid_freq) = params.remove(&dual_1084::LOW_MID_FREQ) {
                     for (ch, value) in low_mid_freq.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = repoint_param(value, &self.low_mid_freq_param, ch);
-                            self.low_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = repoint_param(value, &self.low_mid_freq_param, ch);
+                        self.low_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(low_mid_width) = params.remove(&dual_1084::LOW_MID_WIDTH) {
                     for (ch, value) in low_mid_width.into_iter().enumerate() {
-                        if let Some(ModelValue::Bool(value)) = value {
                             //let rescaled = rescale_param(value, &self.low_mid_width_param,  , 128.0);
+                        if let Some(ModelValue::Bool(value)) = value {
                             self.low_mid_width[ch].write_switch(&mut self.io_exp_data, value as u16);
                         }
                     }
                 }
                 if let Some(high_mid_gain) = params.remove(&dual_1084::HIGH_MID_GAIN) {
                     for (ch, value) in high_mid_gain.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = rescale_param(value, &self.high_mid_gain_param, ch, 128.0);
-                            self.high_mid_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = rescale_param(value, &self.high_mid_gain_param, ch, 128.0);
+                        self.high_mid_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(high_mid_freq) = params.remove(&dual_1084::HIGH_MID_FREQ) {
                     for (ch, value) in high_mid_freq.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = repoint_param(value, &self.high_mid_freq_param, ch);
-                            self.high_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = repoint_param(value, &self.high_mid_freq_param, ch);
+                        self.high_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                        
                     }
                 }
                 if let Some(high_mid_width) = params.remove(&dual_1084::HIGH_MID_WIDTH) {
@@ -305,31 +293,22 @@ impl Handler<Command> for Dual1084 {
                 }
                 if let Some(high_gain) = params.remove(&dual_1084::HIGH_GAIN) {
                     for (ch, value) in high_gain.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = rescale_param(value, &self.high_gain_param, ch, 128.0);
-                            self.high_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = rescale_param(value, &self.high_gain_param, ch, 128.0);
+                        self.high_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(high_freq) = params.remove(&dual_1084::HIGH_FREQ) {
                     for (ch, value) in high_freq.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = repoint_param(value, &self.high_freq_param, ch);
-                            self.high_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                            self.high_freq[ch + 2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        }
+                        let rescaled = repoint_param(value, &self.high_freq_param, ch);
+                        self.high_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+                        self.high_freq[ch + 2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(output_pad) = params.remove(&dual_1084::OUTPUT_PAD) {
                     for (ch, value) in output_pad.into_iter().enumerate() {
-                        if let Some(ModelValue::Number(value)) = value {
-                            let rescaled = repoint_param(value, &self.output_pad_param, ch);
-                            info!("repiont: {rescaled}");
-                            self.output_pad[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        }
-                        if let Some(ModelValue::Bool(value)) = value {
-                            self.output_pad[ch].write_nrot_switch(&mut self.io_exp_data, value as u16);
-                        }
+                        let rescaled = repoint_param(value, &self.output_pad_param, ch);
+                        info!("repiont: {rescaled}");
+                        self.output_pad[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
                     }
                 }
                 if let Some(eql_toggle) = params.remove(&dual_1084::EQL_TOGGLE) {
