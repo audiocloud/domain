@@ -7,9 +7,9 @@ use serde_json::json;
 use tokio::fs::File;
 use tracing::*;
 
-use audiocloud_api::media::{DownloadFromDomain, MediaJobState};
+use audiocloud_api::common::media::{DownloadFromDomain, MediaJobState};
 use audiocloud_api::newtypes::AppMediaObjectId;
-use audiocloud_api::time::now;
+use audiocloud_api::common::time::now;
 
 use crate::service::media::messages::{DownloadJobId, NotifyDownloadProgress};
 

@@ -9,10 +9,10 @@ use nix::{ioctl_none, ioctl_write_ptr};
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError};
-use audiocloud_api::model::{Model, ModelParameter, ModelValue};
+use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError};
+use audiocloud_api::common::model::{Model, ModelParameter, ModelValue};
 use audiocloud_api::newtypes::FixedInstanceId;
-use audiocloud_api::time::{now, Timestamp};
+use audiocloud_api::common::time::{now, Timestamp};
 use audiocloud_models::distopik::dual_1084::{self};
 
 use crate::utils::*;
@@ -146,7 +146,7 @@ impl UnirelRegion {
 
 impl Dual1084 {
     pub fn new(id: FixedInstanceId, config: Config) -> anyhow::Result<Self> {
-        info!("👋 Summatra Nuclear driver");
+        info!("👋 Summatra Nuclear instance_driver");
         let raw_fd = File::options().read(true).write(true).open("/dev/PIVO")?.into_raw_fd();
         let model = dual_1084::distopik_dual_1084_model();
         let values = NotifyInstanceValues::new(id.clone());

@@ -7,36 +7,35 @@ use tracing::*;
 use uuid::Uuid;
 
 use audiocloud_api::cloud::domains::InstanceRouting;
-use audiocloud_api::model::MultiChannelValue;
-use audiocloud_api::newtypes::{FixedId, FixedInstanceId};
-use audiocloud_api::session::{SessionFixedInstance, SessionFlowId};
-
-use crate::audio_engine::project::{get_track_peak_meters, AudioEngineProject, AudioEngineProjectTemplateSnapshot};
-use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk, ConnectionTemplate};
+use audiocloud_api::common::model::MultiChannelValue;
+use audiocloud_api::common::task::{FixedInstanceNode, NodePadId};
+use audiocloud_api::newtypes::{FixedInstanceId, FixedInstanceNodeId};
+use crate::audio_engine::project::{AudioEngineProject, AudioEngineProjectTemplateSnapshot, get_track_peak_meters};
+use crate::audio_engine::{append_track, beautify_chunk, ConnectionTemplate, delete_track, set_track_chunk};
 
 #[derive(Debug)]
 pub struct AudioEngineFixedInstance {
-    fixed_id:       FixedId,
-    send_flow_id:   SessionFlowId,
-    return_flow_id: SessionFlowId,
+    fixed_id: FixedInstanceNodeId,
+    send_flow_id: NodePadId,
+    return_flow_id: NodePadId,
     send_id:        Uuid,
     return_id:      Uuid,
     reainsert_id:   Uuid,
     send_track:     MediaTrack,
     return_track:   MediaTrack,
-    spec:           SessionFixedInstance,
+    spec: FixedInstanceNode,
     routing:        Option<InstanceRouting>,
 }
 
 impl AudioEngineFixedInstance {
     #[instrument(skip_all, err)]
     pub fn new(project: &AudioEngineProject,
-               fixed_id: FixedId,
-               spec: SessionFixedInstance,
+               fixed_id: FixedInstanceNodeId,
+               spec: FixedInstanceNode,
                routing: Option<InstanceRouting>)
                -> anyhow::Result<Self> {
-        let send_flow_id = SessionFlowId::FixedInstanceInput(fixed_id.clone());
-        let return_flow_id = SessionFlowId::FixedInstanceOutput(fixed_id.clone());
+        let send_flow_id = NodePadId::FixedInstanceInput(fixed_id.clone());
+        let return_flow_id = NodePadId::FixedInstanceOutput(fixed_id.clone());
         let reainsert_id = Uuid::new_v4();
 
         project.focus()?;
@@ -71,11 +70,11 @@ impl AudioEngineFixedInstance {
         }
     }
 
-    pub fn get_input_flow_id(&self) -> &SessionFlowId {
+    pub fn get_input_flow_id(&self) -> &NodePadId {
         &self.send_flow_id
     }
 
-    pub fn get_output_flow_id(&self) -> &SessionFlowId {
+    pub fn get_output_flow_id(&self) -> &NodePadId {
         &self.return_flow_id
     }
 
@@ -135,7 +134,7 @@ impl AudioEngineFixedInstance {
         Ok(())
     }
 
-    pub fn fill_peak_meters(&self, peaks: &mut HashMap<SessionFlowId, MultiChannelValue>) {
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, MultiChannelValue>) {
         if let Some(routing) = self.routing {
             peaks.insert(self.send_flow_id.clone(),
                          get_track_peak_meters(self.send_track, routing.send_count));

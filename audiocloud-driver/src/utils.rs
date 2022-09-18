@@ -1,5 +1,5 @@
 use std::ops::Range;
-use audiocloud_api::model::{ModelParameter, ModelValueOption, ModelValue};
+use audiocloud_api::common::model::{ModelParameter, ModelValueOption, ModelValue};
 
 pub fn db_to_gain_factor(x: f64) -> f64{
     10_f64.powf(x / 20_f64)

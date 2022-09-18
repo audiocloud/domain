@@ -10,9 +10,9 @@ use tokio_util::io::StreamReader;
 use tracing::*;
 
 use crate::data::MediaDatabase;
-use audiocloud_api::media::{MediaJobState, UploadToDomain};
-use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
-use audiocloud_api::time::now;
+use audiocloud_api::common::media::{MediaJobState, UploadToDomain};
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
+use audiocloud_api::common::time::now;
 
 use crate::service::cloud::get_cloud_client;
 use crate::service::media::messages::{NotifyUploadProgress, UploadJobId};
@@ -21,7 +21,7 @@ use crate::service::media::messages::{NotifyUploadProgress, UploadJobId};
 pub struct Uploader {
     job_id:      UploadJobId,
     media_id:    AppMediaObjectId,
-    session_id:  Option<AppSessionId>,
+    session_id:  Option<AppTaskId>,
     upload:      Option<UploadToDomain>,
     destination: PathBuf,
     client:      reqwest::Client,
@@ -32,7 +32,7 @@ impl Uploader {
     pub fn new(job_id: UploadJobId,
                client: reqwest::Client,
                destination: PathBuf,
-               session_id: Option<AppSessionId>,
+               session_id: Option<AppTaskId>,
                media_id: AppMediaObjectId,
                upload: Option<UploadToDomain>)
                -> anyhow::Result<Self> {

@@ -5,11 +5,12 @@ use nats_aflowt::Connection;
 use once_cell::sync::OnceCell;
 use tracing::*;
 
-use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
-use audiocloud_api::codec::{Codec, Json, MsgPack};
-use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
-use audiocloud_api::error::SerializableResult;
-use audiocloud_api::newtypes::{AudioEngineId, FixedInstanceId, ModelId};
+use audiocloud_api::audio_engine::event::AudioEngineEvent;
+use audiocloud_api::api::codec::{Codec, Json, MsgPack};
+use audiocloud_api::audio_engine::command::AudioEngineCommand;
+use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
+use audiocloud_api::common::error::SerializableResult;
+use audiocloud_api::newtypes::{EngineId, FixedInstanceId, ModelId};
 
 use crate::service::instance::{InstancesSupervisor, NotifyInstanceDriver};
 use crate::service::session::messages::NotifyAudioEngineEvent;
@@ -33,7 +34,7 @@ pub struct NatsClient {
 
 impl NatsClient {
     pub async fn request_audio_engine(&self,
-                                      engine_id: &AudioEngineId,
+                                      engine_id: &EngineId,
                                       request: AudioEngineCommand)
                                       -> anyhow::Result<()> {
         let encoded = MsgPack.serialize(&request)?;
@@ -77,7 +78,7 @@ pub async fn init(opts: NatsOpts) -> anyhow::Result<()> {
                             InstancesSupervisor::from_registry().do_send(NotifyInstanceDriver { instance_id, event });
                         }
                         Err(err) => {
-                            error!(%err, "Failed to deserialize instance driver event");
+                            error!(%err, "Failed to deserialize instance instance_driver event");
                         }
                     }
                 }
@@ -92,7 +93,7 @@ pub async fn init(opts: NatsOpts) -> anyhow::Result<()> {
         while let Some(msg) = aeng_evt.next().await {
             match msg.subject.split('.').nth(2) {
                 Some(engine_id) => {
-                    let engine_id = AudioEngineId::new(engine_id.to_owned());
+                    let engine_id = EngineId::new(engine_id.to_owned());
                     match MsgPack.deserialize::<AudioEngineEvent>(&msg.data[..]) {
                         Ok(event) => {
                             SessionsSupervisor::from_registry().do_send(NotifyAudioEngineEvent { engine_id, event });

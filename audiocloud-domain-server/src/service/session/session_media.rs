@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use audiocloud_api::media::MediaObject;
+use audiocloud_api::common::media::MediaObject;
 use audiocloud_api::newtypes::AppMediaObjectId;
 
 #[derive(Default)]

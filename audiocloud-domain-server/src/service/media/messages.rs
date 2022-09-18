@@ -2,8 +2,8 @@ use actix::Message;
 use derive_more::{Display, From, FromStr};
 use uuid::Uuid;
 
-use audiocloud_api::media::{DownloadFromDomain, ImportToDomain, MediaJobState, UploadToDomain};
-use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
+use audiocloud_api::common::media::{DownloadFromDomain, ImportToDomain, MediaJobState, UploadToDomain};
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Display, Hash, From, FromStr)]
 #[repr(transparent)]
@@ -41,7 +41,7 @@ pub struct QueueDownload {
 #[rtype(result = "anyhow::Result<()>")]
 pub struct QueueUpload {
     pub job_id:     UploadJobId,
-    pub session_id: Option<AppSessionId>,
+    pub session_id: Option<AppTaskId>,
     pub media_id:   AppMediaObjectId,
     pub upload:     Option<UploadToDomain>,
 }

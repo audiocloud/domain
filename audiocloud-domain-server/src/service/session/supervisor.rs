@@ -6,9 +6,9 @@ use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
 use tracing::warn;
 
-use audiocloud_api::change::SessionState;
-use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
-use audiocloud_api::session::Session;
+use audiocloud_api::common::change::SessionState;
+use audiocloud_api::newtypes::{AppTaskId, EngineId};
+use audiocloud_api::common::task::Task;
 
 use crate::audio_engine::AudioEngineClient;
 use crate::data::get_boot_cfg;
@@ -19,15 +19,15 @@ use crate::service::session::messages::{
 use crate::service::session::SessionActor;
 
 pub struct SessionsSupervisor {
-    active:   HashMap<AppSessionId, Addr<SessionActor>>,
-    sessions: HashMap<AppSessionId, Session>,
-    state:    HashMap<AppSessionId, SessionState>,
-    engines:  HashMap<AudioEngineId, AudioEngineClient>,
+    active:   HashMap<AppTaskId, Addr<SessionActor>>,
+    sessions: HashMap<AppTaskId, Task>,
+    state:    HashMap<AppTaskId, SessionState>,
+    engines:  HashMap<EngineId, AudioEngineClient>,
     online:   bool,
 }
 
 impl SessionsSupervisor {
-    fn allocate_engine(&self) -> Option<AudioEngineId> {
+    fn allocate_engine(&self) -> Option<EngineId> {
         self.engines
             .iter()
             .min_by(|(_, engine_a), (_, engine_b)| engine_a.num_sessions().cmp(&engine_b.num_sessions()))
@@ -52,7 +52,7 @@ impl Supervised for SessionsSupervisor {
 
 impl Default for SessionsSupervisor {
     fn default() -> Self {
-        let sessions = get_boot_cfg().sessions.clone();
+        let sessions = get_boot_cfg().tasks.clone();
 
         Self { sessions,
                online: false,
@@ -116,7 +116,7 @@ impl Handler<NotifyAudioEngineEvent> for SessionsSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyAudioEngineEvent, ctx: &mut Self::Context) -> Self::Result {
-        let session_id = msg.event.session_id();
+        let session_id = msg.event.task_id();
         match self.active.get(session_id) {
             Some(session) => {
                 session.do_send(msg);

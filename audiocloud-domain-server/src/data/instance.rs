@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-use audiocloud_api::change::PlayId;
+use audiocloud_api::common::media::PlayId;
 use audiocloud_api::cloud::domains::{DomainMediaInstanceSettings, DomainPowerInstanceSettings};
-use audiocloud_api::instance::{
+use audiocloud_api::common::instance::{
     DesiredInstancePlayState, DesiredInstancePowerState, InstancePlayState, InstancePowerState,
 };
-use audiocloud_api::time::Timestamped;
+use audiocloud_api::common::time::Timestamped;
 
 use crate::tracker::RequestTracker;
 

@@ -1,33 +1,30 @@
 use std::collections::HashMap;
 use std::ffi::CStr;
-use std::path::PathBuf;
-
 use askama::Template;
 use reaper_medium::{MediaTrack, ProjectContext, Reaper, TrackAttributeKey};
 use tracing::*;
 use uuid::Uuid;
 
-use audiocloud_api::change::RenderSession;
-use audiocloud_api::model::MultiChannelValue;
-use audiocloud_api::newtypes::MixerId;
-use audiocloud_api::session::{SessionFlowId, SessionMixer};
-
+use audiocloud_api::common::media::RequestRender;
+use audiocloud_api::common::model::MultiChannelValue;
+use audiocloud_api::common::task::{MixerNode, NodePadId};
+use audiocloud_api::newtypes::MixerNodeId;
 use crate::audio_engine::project::{
-    get_track_peak_meters, set_track_master_send, AudioEngineProject, AudioEngineProjectTemplateSnapshot,
+    AudioEngineProject, AudioEngineProjectTemplateSnapshot, get_track_peak_meters, set_track_master_send,
 };
 use crate::audio_engine::ConnectionTemplate;
 use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk};
 
 #[derive(Debug)]
 pub struct AudioEngineMixer {
-    mixer_id:       MixerId,
-    input_flow_id:  SessionFlowId,
-    output_flow_id: SessionFlowId,
+    mixer_id: MixerNodeId,
+    input_flow_id: NodePadId,
+    output_flow_id: NodePadId,
     input_id:       Uuid,
     output_id:      Uuid,
     input_track:    MediaTrack,
     output_track:   MediaTrack,
-    spec:           SessionMixer,
+    spec: MixerNode,
 }
 
 impl AudioEngineMixer {
@@ -39,9 +36,9 @@ impl AudioEngineMixer {
 
 impl AudioEngineMixer {
     #[instrument(skip_all, err)]
-    pub fn new(project: &AudioEngineProject, mixer_id: MixerId, spec: SessionMixer) -> anyhow::Result<Self> {
-        let input_flow_id = SessionFlowId::MixerInput(mixer_id.clone());
-        let output_flow_id = SessionFlowId::MixerOutput(mixer_id.clone());
+    pub fn new(project: &AudioEngineProject, mixer_id: MixerNodeId, spec: MixerNode) -> anyhow::Result<Self> {
+        let input_flow_id = NodePadId::MixerInput(mixer_id.clone());
+        let output_flow_id = NodePadId::MixerOutput(mixer_id.clone());
 
         project.focus()?;
 
@@ -83,7 +80,7 @@ impl AudioEngineMixer {
         Ok(())
     }
 
-    pub fn fill_peak_meters(&self, peaks: &mut HashMap<SessionFlowId, MultiChannelValue>) {
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, MultiChannelValue>) {
         peaks.insert(self.input_flow_id.clone(),
                      get_track_peak_meters(self.input_track, self.spec.input_channels));
 
@@ -95,7 +92,7 @@ impl AudioEngineMixer {
         set_track_master_send(self.output_track, master_send);
     }
 
-    pub fn prepare_render(&mut self, render: &RenderSession) {
+    pub fn prepare_render(&mut self, render: &RequestRender) {
         let reaper = Reaper::get();
         use TrackAttributeKey::*;
 

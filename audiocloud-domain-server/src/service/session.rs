@@ -10,15 +10,16 @@ use actix::{
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use chrono::Utc;
 
-use audiocloud_api::app::{SessionPacket, SessionPacketError};
-use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent};
-use audiocloud_api::change::{
-    DesiredSessionPlayState, PlayId, PlaySession, RenderId, RenderSession, SessionPlayState, SessionState,
+use audiocloud_api::domain::streaming::{TaskStreamingPacket, SessionPacketError};
+use audiocloud_api::audio_engine::command::AudioEngineCommand;
+use audiocloud_api::common::change::{
+    DesiredTaskPlayState, SessionState, TaskPlayState,
 };
-use audiocloud_api::instance::DesiredInstancePlayState;
-use audiocloud_api::newtypes::{AppSessionId, AudioEngineId};
-use audiocloud_api::session::Session;
-use audiocloud_api::time::Timestamped;
+use audiocloud_api::common::instance::DesiredInstancePlayState;
+use audiocloud_api::common::media::{PlayId, RenderId, RequestPlay, RequestRender};
+use audiocloud_api::newtypes::{AppTaskId, EngineId};
+use audiocloud_api::common::task::Task;
+use audiocloud_api::common::time::Timestamped;
 use messages::{
     BecomeOnline, ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyRenderComplete, NotifySessionSpec,
     NotifySessionState, SetSessionDesiredState,
@@ -36,12 +37,12 @@ pub mod session_media;
 pub mod supervisor;
 
 pub struct SessionActor {
-    id:                 AppSessionId,
-    session:            Session,
-    packet:             SessionPacket,
+    id: AppTaskId,
+    session: Task,
+    packet: TaskStreamingPacket,
     media:              session_media::SessionMedia,
     instances:          session_instances::SessionInstances,
-    audio_engine:       AudioEngineId,
+    audio_engine: EngineId,
     state:              SessionState,
     tracker:            RequestTracker,
     min_transmit_audio: usize,
@@ -106,45 +107,48 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyAudioEngineEvent, ctx: &mut Self::Context) -> Self::Result {
-        use AudioEngineEvent::*;
+        use audiocloud_api::audio_engine::event::AudioEngineEvent::*;
 
         match msg.event {
-            Stopped { session_id } => {
+            Stopped { task_id: session_id } => {
                 if !self.state.play_state.value().is_stopped() {
-                    self.state.play_state = SessionPlayState::Stopped.into();
+                    self.state.play_state = TaskPlayState::Stopped.into();
                     self.emit_state();
                 }
             }
-            Playing { session_id,
+            Playing {
+                task_id: session_id,
                       play_id,
                       audio,
                       peak_meters,
                       dynamic_reports, } => {
-                if let DesiredSessionPlayState::Play(play) = self.state.desired_play_state.value() {
+                if let DesiredTaskPlayState::Play(play) = self.state.desired_play_state.value() {
                     if play.play_id == play_id && !self.state.play_state.value().is_playing(play_id) {
-                        self.state.play_state = SessionPlayState::Playing(play.clone()).into();
+                        self.state.play_state = TaskPlayState::Playing(play.clone()).into();
                         self.emit_state();
                     }
                 }
 
-                self.packet.push_peak_meters(peak_meters);
+                self.packet.push_source_peak_meters(peak_meters);
                 self.packet.push_audio_packets(audio);
                 self.maybe_emit_packet();
             }
-            Rendering { session_id,
+            Rendering {
+                task_id: session_id,
                         render_id,
                         completion, } => {
-                if let DesiredSessionPlayState::Render(render) = self.state.desired_play_state.value() {
+                if let DesiredTaskPlayState::Render(render) = self.state.desired_play_state.value() {
                     if render.render_id == render_id && !self.state.play_state.value().is_rendering(render_id) {
-                        self.state.play_state = SessionPlayState::Rendering(render.clone()).into();
+                        self.state.play_state = TaskPlayState::Rendering(render.clone()).into();
                         self.emit_state();
                     }
                 }
             }
-            RenderingFinished { session_id,
+            RenderingFinished {
+                task_id: session_id,
                                 render_id,
                                 path, } => {
-                if let SessionPlayState::Rendering(render) = self.state.play_state.value() {
+                if let TaskPlayState::Rendering(render) = self.state.play_state.value() {
                     if render.render_id == render_id {
                         self.issue_system_async(NotifyRenderComplete { render_id,
                                                                        path,
@@ -154,25 +158,27 @@ impl Handler<NotifyAudioEngineEvent> for SessionActor {
                                                                        notify_url: render.notify_url.clone(),
                                                                        context: render.context.to_string() });
 
-                        self.state.play_state = SessionPlayState::Stopped.into();
+                        self.state.play_state = TaskPlayState::Stopped.into();
                         self.emit_state();
                     }
                 }
 
                 self.set_stopped_state();
             }
-            Error { session_id, error } => {
+            Error { task_id: session_id, error } => {
                 self.packet
                     .errors
                     .push(Timestamped::new(SessionPacketError::General(error.to_string())));
             }
-            PlayingFailed { session_id,
+            PlayingFailed {
+                task_id: session_id,
                             play_id,
                             error, } => {
                 self.packet.add_play_error(play_id, error);
                 self.set_stopped_state();
             }
-            RenderingFailed { session_id,
+            RenderingFailed {
+                task_id: session_id,
                               render_id,
                               reason, } => {
                 self.packet.add_render_error(render_id, reason);
@@ -216,7 +222,7 @@ impl Handler<ExecuteSessionCommand> for SessionActor {
 }
 
 impl SessionActor {
-    pub fn new(id: &AppSessionId, session: &Session, audio_engine_id: AudioEngineId) -> Self {
+    pub fn new(id: &AppTaskId, session: &Task, audio_engine_id: EngineId) -> Self {
         Self { id:                 id.clone(),
                session:            session.clone(),
                state:              Default::default(),
@@ -229,19 +235,19 @@ impl SessionActor {
     }
 
     fn update(&mut self, ctx: &mut Context<Self>) {
-        use DesiredSessionPlayState::*;
-        use SessionPlayState::*;
+        use DesiredTaskPlayState::*;
+        use TaskPlayState::*;
 
         let mut modified = false;
 
         match (self.state.play_state.value(), self.state.desired_play_state.value()) {
-            (SessionPlayState::Stopped, Play(play)) => {
+            (TaskPlayState::Stopped, Play(play)) => {
                 modified = true;
 
                 self.tracker.reset();
                 self.prepare_to_play(play.clone());
             }
-            (SessionPlayState::Stopped, Render(render)) => {
+            (TaskPlayState::Stopped, Render(render)) => {
                 modified = true;
 
                 self.tracker.reset();
@@ -303,43 +309,43 @@ impl SessionActor {
         self.tracker.retried();
     }
 
-    fn send_play(&mut self, ctx: &mut Context<SessionActor>, play: PlaySession) {
+    fn send_play(&mut self, ctx: &mut Context<SessionActor>, play: RequestPlay) {
         self.audio_engine_request(ctx,
                                   AudioEngineCommand::Play { session_id: self.id.clone(),
                                                              play });
         self.tracker.retried();
     }
 
-    fn send_render(&mut self, ctx: &mut Context<SessionActor>, render: RenderSession) {
+    fn send_render(&mut self, ctx: &mut Context<SessionActor>, render: RequestRender) {
         self.audio_engine_request(ctx,
                                   AudioEngineCommand::Render { session_id: self.id.clone(),
                                                                render });
         self.tracker.retried();
     }
 
-    fn prepare_to_play(&mut self, play: PlaySession) {
+    fn prepare_to_play(&mut self, play: RequestPlay) {
         self.instances
             .set_desired_state(DesiredInstancePlayState::Playing { play_id: play.play_id.clone(), });
 
-        self.state.play_state = SessionPlayState::PreparingToPlay(play).into();
+        self.state.play_state = TaskPlayState::PreparingToPlay(play).into();
     }
 
-    fn prepare_to_render(&mut self, render: RenderSession) {
+    fn prepare_to_render(&mut self, render: RequestRender) {
         self.instances
             .set_desired_state(DesiredInstancePlayState::Rendering { render_id: render.render_id.clone(),
                                                                      length:    render.segment.length, });
 
-        self.state.play_state = SessionPlayState::PreparingToRender(render).into();
+        self.state.play_state = TaskPlayState::PreparingToRender(render).into();
     }
 
     fn prepare_play_stop(&mut self, play_id: PlayId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-        self.state.play_state = SessionPlayState::StoppingPlay(play_id).into();
+        self.state.play_state = TaskPlayState::StoppingPlay(play_id).into();
     }
 
     fn prepare_render_stop(&mut self, render_id: RenderId) {
         self.instances.set_desired_state(DesiredInstancePlayState::Stopped);
-        self.state.play_state = SessionPlayState::StoppingRender(render_id).into();
+        self.state.play_state = TaskPlayState::StoppingRender(render_id).into();
     }
 
     fn handle_audio_engine_error(result: anyhow::Result<()>, actor: &mut Self, ctx: &mut Context<Self>) {
@@ -382,7 +388,7 @@ impl SessionActor {
     }
 
     fn set_stopped_state(&mut self) {
-        self.state.play_state = SessionPlayState::Stopped.into();
+        self.state.play_state = TaskPlayState::Stopped.into();
         self.emit_state();
         self.maybe_emit_packet();
     }

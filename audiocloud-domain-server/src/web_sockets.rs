@@ -15,11 +15,11 @@ use maplit::hashmap;
 use serde::Deserialize;
 use tracing::*;
 
-use audiocloud_api::codec::{Codec, MsgPack};
+use audiocloud_api::api::codec::{Codec, MsgPack};
 use audiocloud_api::domain::{DomainSessionCommand, WebSocketCommand, WebSocketCommandEnvelope, WebSocketEvent};
-use audiocloud_api::error::SerializableResult;
-use audiocloud_api::newtypes::{AppSessionId, SecureKey};
-use audiocloud_api::session::SessionSecurity;
+use audiocloud_api::common::error::SerializableResult;
+use audiocloud_api::newtypes::{AppTaskId, SecureKey};
+use audiocloud_api::common::task::TaskPermissions;
 use messages::{LoginWebSocket, LogoutWebSocket, RegisterWebSocket, WebSocketSend};
 use supervisor::SocketsSupervisor;
 
@@ -52,8 +52,8 @@ async fn ws_handler(req: HttpRequest, stream: web::Payload) -> impl Responder {
 #[derive(Debug)]
 pub struct WebSocketActor {
     id:                  WebSocketId,
-    security:            HashMap<AppSessionId, SessionSecurity>,
-    secure_key:          HashMap<AppSessionId, SecureKey>,
+    security:            HashMap<AppTaskId, TaskPermissions>,
+    secure_key:          HashMap<AppTaskId, SecureKey>,
     security_updated_at: Instant,
 }
 
@@ -74,7 +74,7 @@ impl WebSocketActor {
 
     fn login(&mut self,
              request_id: String,
-             session_id: AppSessionId,
+             session_id: AppTaskId,
              secure_key: SecureKey,
              ctx: &mut <Self as Actor>::Context) {
         let login = LoginWebSocket { id:         self.id,
@@ -109,7 +109,7 @@ impl WebSocketActor {
                   .wait(ctx);
     }
 
-    fn logout(&mut self, request_id: String, session_id: AppSessionId, ctx: &mut <Self as Actor>::Context) {
+    fn logout(&mut self, request_id: String, session_id: AppTaskId, ctx: &mut <Self as Actor>::Context) {
         let logout = LogoutWebSocket { id:         self.id,
                                        session_id: session_id.clone(), };
 

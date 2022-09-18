@@ -13,17 +13,17 @@ use chrono::Utc;
 use maplit::hashmap;
 use tracing::*;
 
-use audiocloud_api::cloud::domains::{BootDomain, DomainFixedInstance};
-use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverEvent};
-use audiocloud_api::instance::{
-    power, DesiredInstancePlayState, InstancePlayState, InstancePowerState, ReportInstancePlayState,
+use audiocloud_api::cloud::domains::{BootDomainResponse, DomainFixedInstance};
+use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverEvent};
+use audiocloud_api::common::instance::{
+    DesiredInstancePlayState, InstancePlayState, InstancePowerState, power, ReportInstancePlayState,
     ReportInstancePowerState,
 };
-use audiocloud_api::model::ModelCapability::PowerDistributor;
-use audiocloud_api::model::{multi_channel_value, Model};
-use audiocloud_api::newtypes::{AppSessionId, FixedInstanceId, ParameterId};
-use audiocloud_api::session::{InstanceParameters, InstanceReports};
-use audiocloud_api::time::{Timestamp, Timestamped};
+use audiocloud_api::common::model::ModelCapability::PowerDistributor;
+use audiocloud_api::common::model::{Model, multi_channel_value};
+use audiocloud_api::common::task::{InstanceParameters, InstanceReports};
+use audiocloud_api::newtypes::{AppTaskId, FixedInstanceId, ParameterId};
+use audiocloud_api::common::time::{Timestamp, Timestamped};
 
 use crate::data::get_boot_cfg;
 use crate::data::instance::{InstancePlay, InstancePower};
@@ -42,7 +42,7 @@ pub struct InstanceActor {
     parameters:       InstanceParameters,
     reports:          InstanceReports,
     parameters_dirty: HashSet<ParameterId>,
-    owner:            Option<AppSessionId>,
+    owner:            Option<AppTaskId>,
     connected:        Timestamped<bool>,
     last_state_emit:  Option<Timestamp>,
 }
@@ -103,7 +103,7 @@ impl InstanceActor {
     fn handle_instance_driver_error(result: anyhow::Result<()>, actor: &mut Self, ctx: &mut Context<Self>) {
         if let Err(e) = result {
             // TODO: anything more meaningful? retries?
-            warn!(%e, "Error on instance driver request");
+            warn!(%e, "Error on instance instance_driver request");
         }
     }
 
@@ -184,7 +184,7 @@ impl InstanceActor {
 
             if !channel_power_state.satisfies(*power.desired.value()) {
                 if power.tracker.should_retry() {
-                    use audiocloud_api::instance::power::params::POWER;
+                    use audiocloud_api::common::instance::power::params::POWER;
                     InstancesSupervisor::from_registry().do_send(
                         SetInstanceParameters {
                             instance_id: power.spec.instance.clone(),
@@ -442,7 +442,7 @@ pub struct InstancesSupervisor {
 }
 
 impl InstancesSupervisor {
-    pub fn new(boot: &BootDomain) -> anyhow::Result<Self> {
+    pub fn new(boot: &BootDomainResponse) -> anyhow::Result<Self> {
         let mut instances = HashMap::new();
         for (id, instance) in &boot.fixed_instances {
             let actor = InstanceActor::new(id.clone(),

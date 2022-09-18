@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::path::PathBuf;
 
@@ -7,23 +7,22 @@ use cstr::cstr;
 use reaper_medium::{MediaItem, MediaItemTake, MediaTrack, Reaper};
 use tracing::*;
 use uuid::Uuid;
+use audiocloud_api::common::task::{TrackMedia, UpdateTaskTrackMedia};
 
-use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaId};
-use audiocloud_api::session::{SessionTrackMedia, UpdateSessionTrackMedia};
-
+use audiocloud_api::newtypes::{AppId, AppMediaObjectId, TrackMediaId};
 use crate::audio_engine::media_track::AudioEngineMediaTrack;
 use crate::audio_engine::project::AudioEngineProjectTemplateSnapshot;
 
 #[derive(Debug)]
 pub struct AudioEngineMediaItem {
-    media_id:  MediaId,
+    media_id: TrackMediaId,
     object_id: AppMediaObjectId,
     item_id:   Uuid,
     take_id:   Uuid,
     track:     MediaTrack,
     item:      MediaItem,
     take:      MediaItemTake,
-    spec:      SessionTrackMedia,
+    spec: TrackMedia,
     path:      Option<String>,
 }
 
@@ -32,8 +31,8 @@ impl AudioEngineMediaItem {
     pub fn new(track: MediaTrack,
                media_root: &PathBuf,
                app_id: &AppId,
-               media_id: MediaId,
-               spec: SessionTrackMedia,
+               media_id: TrackMediaId,
+               spec: TrackMedia,
                media: &HashMap<AppMediaObjectId, String>)
                -> anyhow::Result<Self> {
         let object_id = spec.object_id.clone().for_app(app_id.clone());
@@ -102,7 +101,7 @@ impl AudioEngineMediaItem {
         false
     }
 
-    pub fn update(&mut self, update: UpdateSessionTrackMedia) {
+    pub fn update(&mut self, update: UpdateTaskTrackMedia) {
         self.spec.update(update.clone());
     }
 }

@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use actix::SystemService;
 
-use audiocloud_api::cloud::apps::SessionSpec;
-use audiocloud_api::instance::DesiredInstancePlayState;
+use audiocloud_api::common::task::TaskSpec;
+use audiocloud_api::common::instance::DesiredInstancePlayState;
 use audiocloud_api::newtypes::FixedInstanceId;
 
 use crate::service::instance::{InstancesSupervisor, NotifyInstanceState, SetInstanceDesiredState};
@@ -91,7 +91,7 @@ impl SessionInstances {
         }
     }
 
-    pub fn update(&mut self, session: &SessionSpec) -> bool {
+    pub fn update(&mut self, session: &TaskSpec) -> bool {
         let mut rv = true;
         for instance_id in session.get_fixed_instance_ids() {
             if let Some(instance) = self.instances.get_mut(&instance_id) {

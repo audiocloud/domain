@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use askama::Template;
@@ -6,24 +6,23 @@ use reaper_medium::{MediaTrack, ProjectContext};
 use tracing::*;
 use uuid::Uuid;
 
-use audiocloud_api::model::MultiChannelValue;
-use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaId, TrackId};
-use audiocloud_api::session::{SessionFlowId, SessionTrack, SessionTrackMedia, UpdateSessionTrackMedia};
-
+use audiocloud_api::common::model::MultiChannelValue;
+use audiocloud_api::common::task::{NodePadId, TrackMedia, TrackNode, UpdateTaskTrackMedia};
+use audiocloud_api::newtypes::{AppId, AppMediaObjectId, TrackMediaId, TrackNodeId};
 use crate::audio_engine;
 use crate::audio_engine::media_item::{AudioEngineMediaItem, AudioEngineMediaItemTemplate};
-use crate::audio_engine::project::{get_track_peak_meters, AudioEngineProject, AudioEngineProjectTemplateSnapshot};
+use crate::audio_engine::project::{AudioEngineProject, AudioEngineProjectTemplateSnapshot, get_track_peak_meters};
 use crate::audio_engine::{append_track, delete_track, set_track_chunk};
 
 #[derive(Debug)]
 pub struct AudioEngineMediaTrack {
-    id:       TrackId,
+    id: TrackNodeId,
     track_id: Uuid,
     app_id:   AppId,
-    flow_id:  SessionFlowId,
+    flow_id: NodePadId,
     track:    MediaTrack,
-    media:    HashMap<MediaId, AudioEngineMediaItem>,
-    spec:     SessionTrack,
+    media:    HashMap<TrackMediaId, AudioEngineMediaItem>,
+    spec: TrackNode,
     root_dir: PathBuf,
 }
 
@@ -31,15 +30,15 @@ impl AudioEngineMediaTrack {
     #[instrument(skip_all, err)]
     pub fn new(project: &AudioEngineProject,
                app_id: AppId,
-               track_id: TrackId,
-               spec: SessionTrack,
+               track_id: TrackNodeId,
+               spec: TrackNode,
                existing_media: &HashMap<AppMediaObjectId, String>)
                -> anyhow::Result<Self> {
         project.focus()?;
 
         let root_dir = project.shared_media_root_dir();
 
-        let flow_id = SessionFlowId::TrackOutput(track_id.clone());
+        let flow_id = NodePadId::TrackOutput(track_id.clone());
 
         let (track, id) = append_track(&flow_id, project.context())?;
 
@@ -67,7 +66,7 @@ impl AudioEngineMediaTrack {
         delete_track(context, self.track);
     }
 
-    pub fn get_flow_id(&self) -> &SessionFlowId {
+    pub fn get_flow_id(&self) -> &NodePadId {
         &self.flow_id
     }
 
@@ -88,8 +87,8 @@ impl AudioEngineMediaTrack {
 
     #[instrument(skip_all, err)]
     pub fn set_media_values(&mut self,
-                            media_id: MediaId,
-                            update: UpdateSessionTrackMedia,
+                            media_id: TrackMediaId,
+                            update: UpdateTaskTrackMedia,
                             media: &HashMap<AppMediaObjectId, String>)
                             -> anyhow::Result<bool> {
         if let Some(media) = self.spec.media.get_mut(&media_id) {
@@ -106,8 +105,8 @@ impl AudioEngineMediaTrack {
 
     #[instrument(skip_all, err)]
     pub fn add_media(&mut self,
-                     media_id: MediaId,
-                     spec: SessionTrackMedia,
+                     media_id: TrackMediaId,
+                     spec: TrackMedia,
                      media: &HashMap<AppMediaObjectId, String>)
                      -> anyhow::Result<bool> {
         self.delete_media(&media_id)?;
@@ -119,7 +118,7 @@ impl AudioEngineMediaTrack {
     }
 
     #[instrument(skip_all, err)]
-    pub fn delete_media(&mut self, media_id: &MediaId) -> anyhow::Result<bool> {
+    pub fn delete_media(&mut self, media_id: &TrackMediaId) -> anyhow::Result<bool> {
         if let Some(media) = self.media.remove(media_id) {
             media.delete()?;
             Ok(true)
@@ -135,7 +134,7 @@ impl AudioEngineMediaTrack {
         Ok(())
     }
 
-    pub fn fill_peak_meters(&self, peaks: &mut HashMap<SessionFlowId, MultiChannelValue>) {
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, MultiChannelValue>) {
         peaks.insert(self.flow_id.clone(),
                      get_track_peak_meters(self.track, self.spec.channels.num_channels()));
     }

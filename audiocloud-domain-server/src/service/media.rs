@@ -15,8 +15,8 @@ use clap::Args;
 use once_cell::sync::OnceCell;
 use tracing::error;
 
-use audiocloud_api::media::MediaObject;
-use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
+use audiocloud_api::common::media::MediaObject;
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
 use download::Downloader;
 use messages::{QueueDownload, QueueUpload};
 use upload::Uploader;
@@ -43,7 +43,7 @@ pub struct MediaSupervisor {
     media:      HashMap<AppMediaObjectId, MediaJobs>,
     uploads:    HashMap<UploadJobId, Addr<Uploader>>,
     downloads:  HashMap<DownloadJobId, Addr<Downloader>>,
-    sessions:   HashMap<AppSessionId, HashSet<AppMediaObjectId>>,
+    sessions:   HashMap<AppTaskId, HashSet<AppMediaObjectId>>,
     media_root: PathBuf,
     client:     reqwest::Client,
 }

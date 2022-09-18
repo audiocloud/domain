@@ -41,7 +41,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
       - uses: actions-rs/cargo@v1
         with:
-          args: --release --all-features --target armv7-unknown-linux-gnueabihf -p audiocloud-driver --manifest-path=domain/Cargo.toml --target-dir target
+          args: --release --all-features --target armv7-unknown-linux-gnueabihf -p audiocloud-instance_driver --manifest-path=domain/Cargo.toml --target-dir target
           command: build
           use-cross: true
         name: Build drivers for Raspberry Pi
@@ -51,6 +51,6 @@ jobs:
       - uses: actions/upload-artifact@v3
         name: Upload binary artifact
         with:
-          name: audiocloud-driver
-          path: target/armv7-unknown-linux-gnueabihf/release/audiocloud-driver
+          name: audiocloud-instance_driver
+          path: target/armv7-unknown-linux-gnueabihf/release/audiocloud-instance_driver
 

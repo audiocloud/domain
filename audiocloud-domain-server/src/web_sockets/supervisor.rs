@@ -6,10 +6,10 @@ use anyhow::anyhow;
 use bytes::Bytes;
 use tracing::*;
 
-use audiocloud_api::codec::{Codec, MsgPack};
+use audiocloud_api::api::codec::{Codec, MsgPack};
 use audiocloud_api::domain::WebSocketEvent;
-use audiocloud_api::newtypes::{AppSessionId, SecureKey};
-use audiocloud_api::session::SessionSecurity;
+use audiocloud_api::newtypes::{AppTaskId, SecureKey};
+use audiocloud_api::common::task::TaskPermissions;
 
 use crate::service::session::messages::{NotifySessionDeleted, NotifySessionPacket, NotifySessionSecurity};
 use crate::web_sockets::messages::{LoginWebSocket, LogoutWebSocket, RegisterWebSocket, WebSocketSend};
@@ -18,8 +18,8 @@ use crate::web_sockets::{WebSocketActor, WebSocketId, WebSocketMembership};
 #[derive(Default)]
 pub struct SocketsSupervisor {
     web_sockets: HashMap<WebSocketId, Addr<WebSocketActor>>,
-    membership:  HashMap<AppSessionId, HashSet<WebSocketMembership>>,
-    security:    HashMap<AppSessionId, HashMap<SecureKey, SessionSecurity>>,
+    membership:  HashMap<AppTaskId, HashSet<WebSocketMembership>>,
+    security:    HashMap<AppTaskId, HashMap<SecureKey, TaskPermissions>>,
 }
 
 impl Actor for SocketsSupervisor {
@@ -55,7 +55,7 @@ impl Handler<RegisterWebSocket> for SocketsSupervisor {
 }
 
 impl Handler<LoginWebSocket> for SocketsSupervisor {
-    type Result = anyhow::Result<SessionSecurity>;
+    type Result = anyhow::Result<TaskPermissions>;
 
     fn handle(&mut self, msg: LoginWebSocket, ctx: &mut Self::Context) -> Self::Result {
         self.membership

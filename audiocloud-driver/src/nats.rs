@@ -10,9 +10,9 @@ use serde::Serialize;
 use tokio::spawn;
 use tracing::*;
 
-use audiocloud_api::codec::{Codec, Json};
-use audiocloud_api::driver::InstanceDriverCommand;
-use audiocloud_api::error::SerializableResult;
+use audiocloud_api::api::codec::{Codec, Json};
+use audiocloud_api::instance_driver::InstanceDriverCommand;
+use audiocloud_api::common::error::SerializableResult;
 use audiocloud_api::newtypes::FixedInstanceId;
 
 use crate::info;

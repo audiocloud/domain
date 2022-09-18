@@ -16,10 +16,10 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use reqwest::Url;
 use tracing::*;
 
-use audiocloud_api::cloud::domains::BootDomain;
+use audiocloud_api::cloud::domains::BootDomainResponse;
 use audiocloud_api::domain::DomainSessionCommand;
-use audiocloud_api::media::UploadToDomain;
-use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId};
+use audiocloud_api::common::media::UploadToDomain;
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
 
 #[derive(Args, Debug)]
 pub struct CloudOpts {
@@ -48,10 +48,10 @@ pub fn get_cloud_client() -> &'static CloudClient {
 
 impl CloudClient {
     pub async fn get_media_as_upload(&self,
-                                     session_id: Option<&AppSessionId>,
+                                     session_id: Option<&AppTaskId>,
                                      media: &AppMediaObjectId)
                                      -> anyhow::Result<UploadToDomain> {
-        let session_id = session_id.map(|s| s.session_id.as_str()).unwrap_or("$none$");
+        let session_id = session_id.map(|s| s.task_id.as_str()).unwrap_or("$none$");
         let app_id = &media.app_id;
         let media_id = &media.media_id;
 
@@ -82,7 +82,7 @@ impl ConsumerContext for CustomContext {
 }
 
 #[instrument(skip(opts), err)]
-pub async fn init(opts: CloudOpts) -> anyhow::Result<BootDomain> {
+pub async fn init(opts: CloudOpts) -> anyhow::Result<BootDomainResponse> {
     let mut headers = HeaderMap::new();
     headers.insert("X-Api-Key", HeaderValue::from_str(&opts.api_key)?);
 
@@ -93,7 +93,7 @@ pub async fn init(opts: CloudOpts) -> anyhow::Result<BootDomain> {
     let boot = client.get(opts.api_url.join("/v1/domains/boot")?)
                      .send()
                      .await?
-                     .json::<BootDomain>()
+                     .json::<BootDomainResponse>()
                      .await?;
 
     let domain_id = &boot.domain_id;

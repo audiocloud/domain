@@ -12,9 +12,9 @@ use sqlx::{query, ConnectOptions, Executor, Sqlite, SqlitePool};
 use tracing::debug;
 use tracing::log::LevelFilter;
 
-use audiocloud_api::cloud::domains::BootDomain;
-use audiocloud_api::media::{DownloadFromDomain, MediaDownload, MediaObject, MediaUpload, UploadToDomain};
-use audiocloud_api::newtypes::{AppId, AppMediaObjectId, AppSessionId, MediaObjectId};
+use audiocloud_api::cloud::domains::BootDomainResponse;
+use audiocloud_api::common::media::{DownloadFromDomain, MediaDownload, MediaObject, MediaUpload, UploadToDomain};
+use audiocloud_api::newtypes::{AppId, AppMediaObjectId, AppTaskId, MediaObjectId};
 
 pub mod instance;
 pub mod session;
@@ -26,10 +26,10 @@ pub struct DataOpts {
     pub database_file: PathBuf,
 }
 
-static BOOT_CFG: OnceCell<BootDomain> = OnceCell::new();
+static BOOT_CFG: OnceCell<BootDomainResponse> = OnceCell::new();
 static SQLITE_POOL: OnceCell<SqlitePool> = OnceCell::new();
 
-pub fn get_boot_cfg() -> &'static BootDomain {
+pub fn get_boot_cfg() -> &'static BootDomainResponse {
     BOOT_CFG.get().expect("Boot state not initialized")
 }
 
@@ -37,7 +37,7 @@ pub fn get_sqlite_pool() -> &'static SqlitePool {
     SQLITE_POOL.get().expect("Database pool not initialized")
 }
 
-pub async fn init(cfg: DataOpts, boot: BootDomain) -> anyhow::Result<()> {
+pub async fn init(cfg: DataOpts, boot: BootDomainResponse) -> anyhow::Result<()> {
     BOOT_CFG.set(boot).map_err(|_| anyhow!("State init already called!"))?;
 
     let url = format!("sqlite:{}", cfg.database_file.to_string_lossy());
@@ -77,10 +77,10 @@ impl Default for MediaDatabase {
 
 impl MediaDatabase {
     pub async fn get_media_ids_for_session(&self,
-                                           session_id: &AppSessionId)
+                                           session_id: &AppTaskId)
                                            -> anyhow::Result<HashSet<AppMediaObjectId>> {
         let app_id = session_id.app_id.as_str();
-        let session_id = session_id.session_id.as_str();
+        let session_id = session_id.task_id.as_str();
 
         Ok(query!("SELECT app_id, media_id FROM session_media WHERE app_id = ? AND session_id = ?",
                   app_id,
@@ -92,10 +92,10 @@ impl MediaDatabase {
     }
 
     pub async fn get_media_for_session(&self,
-                                       session_id: &AppSessionId)
+                                       session_id: &AppTaskId)
                                        -> anyhow::Result<HashMap<AppMediaObjectId, MediaObject>> {
         let app_id = session_id.app_id.as_str();
-        let session_id = session_id.session_id.as_str();
+        let session_id = session_id.task_id.as_str();
 
         let rows = query!("SELECT m.* FROM media m, session_media s WHERE s.app_id = ? AND s.session_id = ? AND m.media_id = s.media_id AND m.app_id = s.app_id",
                           app_id,
@@ -171,13 +171,13 @@ impl MediaDatabase {
     }
 
     pub async fn set_media_files_for_session(&self,
-                                             session_id: &AppSessionId,
+                                             session_id: &AppTaskId,
                                              media: HashSet<AppMediaObjectId>)
                                              -> anyhow::Result<()> {
         let mut txn = self.pool.begin().await?;
 
         let app_id = session_id.app_id.as_str();
-        let session_id = session_id.session_id.as_str();
+        let session_id = session_id.task_id.as_str();
 
         query!("DELETE FROM session_media WHERE app_id = ? AND session_id = ?",
                app_id,

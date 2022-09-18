@@ -4,17 +4,17 @@ use std::ptr::slice_from_raw_parts;
 
 use anyhow::anyhow;
 use libflac_sys::{
-    FLAC__StreamEncoder, FLAC__StreamEncoderWriteStatus, FLAC__byte, FLAC__stream_encoder_delete,
-    FLAC__stream_encoder_finish, FLAC__stream_encoder_init_stream, FLAC__stream_encoder_new,
-    FLAC__stream_encoder_process, FLAC__stream_encoder_set_bits_per_sample, FLAC__stream_encoder_set_channels,
-    FLAC__stream_encoder_set_sample_rate, FLAC__stream_encoder_set_streamable_subset,
+    FLAC__byte, FLAC__stream_encoder_delete, FLAC__stream_encoder_finish, FLAC__stream_encoder_init_stream,
+    FLAC__stream_encoder_new, FLAC__stream_encoder_process, FLAC__stream_encoder_set_bits_per_sample,
+    FLAC__stream_encoder_set_channels, FLAC__stream_encoder_set_sample_rate, FLAC__stream_encoder_set_streamable_subset,
+    FLAC__StreamEncoder, FLAC__StreamEncoderWriteStatus,
 };
 use r8brain_rs::PrecisionProfile;
 use tracing::*;
 use vst::buffer::AudioBuffer;
 
 use audiocloud_api::audio_engine::CompressedAudio;
-use audiocloud_api::change::{PlayId, PlaySession};
+use audiocloud_api::common::media::{PlayId, RequestPlay};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct StreamingConfig {
@@ -260,14 +260,14 @@ pub struct EncoderChain {
     encoder:        FlacEncoder,
     queue:          VecDeque<AudioBuf>,
     stream:         u64,
-    pub play:       PlaySession,
+    pub play: RequestPlay,
     pub compressed: VecDeque<CompressedAudio>,
 }
 
 unsafe impl Send for EncoderChain {}
 
 impl EncoderChain {
-    pub fn new(play: PlaySession, native_channels: usize, native_sample_rate: usize) -> anyhow::Result<Self> {
+    pub fn new(play: RequestPlay, native_channels: usize, native_sample_rate: usize) -> anyhow::Result<Self> {
         let play_sample_rate: usize = play.sample_rate.into();
         let resampler = if native_sample_rate == play_sample_rate {
             None

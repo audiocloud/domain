@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::iter::repeat;
 
-use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
-use audiocloud_api::model::{Model, MultiChannelValue};
+use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
+use audiocloud_api::common::model::{Model, MultiChannelValue};
 use audiocloud_api::newtypes::{FixedInstanceId, ParameterId, ReportId};
 
 pub mod distopik;
