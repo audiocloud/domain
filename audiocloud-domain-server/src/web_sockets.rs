@@ -6,25 +6,28 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::time::{Duration, Instant};
 
 use actix::{
-    fut, Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, StreamHandler,
+    fut, Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, MailboxError, StreamHandler,
     SystemService, WrapFuture,
 };
 use actix_web::{get, web, HttpRequest, Responder};
 use actix_web_actors::ws;
+use actix_web_actors::ws::WebsocketContext;
 use maplit::hashmap;
 use serde::Deserialize;
 use tracing::*;
 
-use audiocloud_api::api::codec::{Codec, MsgPack};
-use audiocloud_api::domain::{DomainSessionCommand, WebSocketCommand, WebSocketCommandEnvelope, WebSocketEvent};
-use audiocloud_api::common::error::SerializableResult;
-use audiocloud_api::newtypes::{AppTaskId, SecureKey};
 use audiocloud_api::common::task::TaskPermissions;
-use messages::{LoginWebSocket, LogoutWebSocket, RegisterWebSocket, WebSocketSend};
+use audiocloud_api::domain::streaming::{DomainClientMessage, DomainServerMessage};
+use audiocloud_api::domain::tasks::TaskUpdated;
+use audiocloud_api::domain::DomainError;
+use audiocloud_api::newtypes::{AppTaskId, SecureKey};
+use audiocloud_api::{Codec, Json, MsgPack, RequestId, SerializableResult};
+use messages::{RegisterWebSocket, WebSocketSend};
 use supervisor::SocketsSupervisor;
 
-use crate::service::session::messages::{ExecuteSessionCommand, NotifySessionSecurity};
-use crate::service::session::supervisor::SessionsSupervisor;
+use crate::task::messages::{NotifyTaskSecurity, SetTaskDesiredState};
+use crate::task::supervisor::SessionsSupervisor;
+use crate::{DomainResult, ResponseMedia};
 
 mod messages;
 mod supervisor;
@@ -64,121 +67,72 @@ impl WebSocketActor {
         }
     }
 
-    fn respond(ctx: &mut <Self as Actor>::Context, request_id: String, result: SerializableResult) {
-        let response = WebSocketEvent::Response(request_id, result);
-        match MsgPack.serialize(&response) {
-            Ok(bytes) => ctx.binary(bytes),
-            Err(err) => error!(%err, ?response, "Failed to serialize response"),
-        };
-    }
+    fn submit(&mut self, msg: DomainClientMessage, media: ResponseMedia, ctx: &mut <Self as Actor>::Context) {
+        match msg {
+            DomainClientMessage::RequestSetDesiredPlayState { request_id,
+                                                              task_id,
+                                                              desired,
+                                                              version, } => {
+                let msg = SetTaskDesiredState { task_id,
+                                                   desired,
+                                                   version };
 
-    fn login(&mut self,
-             request_id: String,
-             session_id: AppTaskId,
-             secure_key: SecureKey,
-             ctx: &mut <Self as Actor>::Context) {
-        let login = LoginWebSocket { id:         self.id,
-                                     secure_key: secure_key.clone(),
-                                     session_id: session_id.clone(), };
-
-        self.secure_key.insert(session_id.clone(), secure_key.clone());
-
-        let supervisor = SocketsSupervisor::from_registry();
-        supervisor.send(login)
-                  .into_actor(self)
-                  .map(move |res, act, ctx| match res {
-                      Ok(Ok(security)) => {
-                          act.security.insert(session_id.clone(), security);
-                          act.security_updated_at = Instant::now();
-
-                          Self::respond(ctx, request_id, SerializableResult::Ok(()));
-                      }
-                      Ok(Err(err)) => {
-                          Self::respond(ctx,
-                                        request_id,
-                                        SerializableResult::Err { code:    400,
-                                                                  message: err.to_string(), });
-                      }
-                      Err(err) => {
-                          Self::respond(ctx,
-                                        request_id,
-                                        SerializableResult::Err { code:    500,
-                                                                  message: err.to_string(), });
-                      }
-                  })
-                  .wait(ctx);
-    }
-
-    fn logout(&mut self, request_id: String, session_id: AppTaskId, ctx: &mut <Self as Actor>::Context) {
-        let logout = LogoutWebSocket { id:         self.id,
-                                       session_id: session_id.clone(), };
-
-        self.secure_key.remove(&session_id);
-
-        let supervisor = SocketsSupervisor::from_registry();
-        supervisor.send(logout)
-                  .into_actor(self)
-                  .map(move |res, act, ctx| match res {
-                      Ok(_) => {
-                          act.security.remove(&session_id);
-                          act.security_updated_at = Instant::now();
-
-                          Self::respond(ctx, request_id, SerializableResult::Ok(()));
-                      }
-                      Err(err) => {
-                          Self::respond(ctx,
-                                        request_id,
-                                        SerializableResult::Err { code:    500,
-                                                                  message: err.to_string(), });
-                      }
-                  })
-                  .wait(ctx);
-    }
-
-    fn execute_session_command(&mut self,
-                               request_id: String,
-                               command: DomainSessionCommand,
-                               ctx: &mut <Self as Actor>::Context) {
-        let session_id = command.get_session_id().clone();
-        match self.security.get(&session_id).cloned() {
-            None => {
-                Self::respond(ctx,
-                              request_id,
-                              SerializableResult::Err { code:    404,
-                                                        message: "Session not logged in or not found".to_string(), });
+                ctx.spawn(SessionsSupervisor::from_registry().send(msg)
+                                                             .into_actor(self)
+                                                             .map(move |res, _, ctx| {
+                                                                 Self::respond_set_desired_state(res, media,
+                                                                                                 request_id, ctx)
+                                                             }));
             }
-            Some(security) => {
-                let supervisor = SessionsSupervisor::from_registry();
-                let exec_cmd = ExecuteSessionCommand { session_id,
-                                                       security,
-                                                       command };
-                supervisor.send(exec_cmd)
-                          .into_actor(self)
-                          .map(move |res, _, ctx| match res {
-                              Ok(result) => match result {
-                                  Ok(ok) => Self::respond(ctx, request_id, SerializableResult::Ok(ok)),
-                                  Err(err) => {
-                                      Self::respond(ctx,
-                                                    request_id,
-                                                    SerializableResult::Err { code:    400,
-                                                                              message: err.to_string(), });
-                                  }
-                              },
-                              Err(err) => {
-                                  Self::respond(ctx,
-                                                request_id,
-                                                SerializableResult::Err { code:    500,
-                                                                          message: err.to_string(), });
-                              }
-                          })
-                          .spawn(ctx);
-            }
+            DomainClientMessage::RequestPeerConnection { .. } => {}
+            DomainClientMessage::SubmitPeerConnectionCandidate { .. } => {}
+            DomainClientMessage::RequestAttachToTask { .. } => {}
+            DomainClientMessage::RequestDetachFromTask { .. } => {}
+            DomainClientMessage::RequestModifyTaskSpec { .. } => {}
         }
+    }
+
+    fn respond_set_desired_state(result: Result<DomainResult<TaskUpdated>, MailboxError>,
+                                 media: ResponseMedia,
+                                 request_id: RequestId,
+                                 ctx: &mut WebsocketContext<WebSocketActor>) {
+        let result = match result {
+            Ok(res) => match res {
+                Ok(ok) => SerializableResult::Ok(ok),
+                Err(err) => SerializableResult::Error(err),
+            },
+            Err(err) => SerializableResult::Error(DomainError::BadGateway { error: err.to_string() }),
+        };
+
+        Self::respond(media,
+                      DomainServerMessage::SetDesiredPlayStateResponse { request_id, result },
+                      ctx);
+    }
+
+    fn respond(media: ResponseMedia, message: DomainServerMessage, ctx: &mut <Self as Actor>::Context) {
+        let payload = match media {
+            ResponseMedia::MsgPack => MsgPack.serialize(&message)
+                                             .map_err(|err| DomainError::Serialization { error: err.to_string() }),
+            ResponseMedia::Json => Json.serialize(&message)
+                                       .map_err(|err| DomainError::Serialization { error: err.to_string() }),
+        };
+
+        match payload {
+            Ok(payload) => match media {
+                ResponseMedia::MsgPack => ctx.binary(payload),
+                ResponseMedia::Json => {
+                    if let Ok(txt) = String::from_utf8(payload) {
+                        ctx.text(txt)
+                    }
+                }
+            },
+            Err(err) => {}
+        };
     }
 }
 
 impl Actor for WebSocketActor {
-    type Context = ws::WebsocketContext<Self>;
+    type Context = WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
         ctx.run_interval(Duration::from_secs(1), Self::update);
@@ -202,23 +156,22 @@ impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WebSocketActor {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         match msg {
             Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
-            Ok(ws::Message::Binary(bin)) => match MsgPack.deserialize::<WebSocketCommandEnvelope>(&bin[..]) {
-                Ok(envelope) => {
-                    let WebSocketCommandEnvelope { request_id, command } = envelope;
-                    match command {
-                        WebSocketCommand::Login(session_id, secure_key) => {
-                            self.login(request_id, session_id, secure_key, ctx);
-                        }
-                        WebSocketCommand::Logout(session_id) => {
-                            self.logout(request_id, session_id, ctx);
-                        }
-                        WebSocketCommand::Session(cmd) => {
-                            self.execute_session_command(request_id, cmd, ctx);
-                        }
-                    }
+            Ok(ws::Message::Text(txt)) => match Json.deserialize::<DomainClientMessage>(txt.as_ref()) {
+                Ok(request) => {
+                    self.submit(request, ResponseMedia::Json, ctx);
                 }
                 Err(err) => {
                     warn!(%err, "Could not deserialize WebSocketCommand from web socket");
+                    ctx.stop();
+                }
+            },
+            Ok(ws::Message::Binary(bin)) => match MsgPack.deserialize::<DomainClientMessage>(&bin[..]) {
+                Ok(request) => {
+                    self.submit(request, ResponseMedia::MsgPack, ctx);
+                }
+                Err(err) => {
+                    warn!(%err, "Could not deserialize WebSocketCommand from web socket");
+                    ctx.stop();
                 }
             },
             Err(err) => {
@@ -238,10 +191,10 @@ impl Handler<WebSocketSend> for WebSocketActor {
     }
 }
 
-impl Handler<NotifySessionSecurity> for WebSocketActor {
+impl Handler<NotifyTaskSecurity> for WebSocketActor {
     type Result = ();
 
-    fn handle(&mut self, mut msg: NotifySessionSecurity, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, mut msg: NotifyTaskSecurity, ctx: &mut Self::Context) -> Self::Result {
         if let Some(secure_key) = self.secure_key.get(&msg.session_id) {
             match msg.security.remove(secure_key) {
                 Some(security) => {

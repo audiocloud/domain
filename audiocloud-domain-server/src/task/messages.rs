@@ -2,60 +2,63 @@ use std::collections::HashMap;
 
 use actix::Message;
 
-use audiocloud_api::domain::streaming::TaskStreamingPacket;
+use crate::DomainResult;
 use audiocloud_api::audio_engine::event::AudioEngineEvent;
 use audiocloud_api::common::change::{DesiredTaskPlayState, SessionState};
-use audiocloud_api::common::task::TaskSpec;
-use audiocloud_api::domain::DomainSessionCommand;
 use audiocloud_api::common::media::{MediaObject, RenderId};
-use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
 use audiocloud_api::common::task::TaskPermissions;
+use audiocloud_api::common::task::TaskSpec;
+use audiocloud_api::domain::tasks::TaskUpdated;
+use audiocloud_api::domain::DomainCommand;
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
+use audiocloud_api::StreamingPacket;
 
 #[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct SetSessionDesiredState {
-    pub session_id: AppTaskId,
+#[rtype(result = "DomainResult<TaskUpdated>")]
+pub struct SetTaskDesiredState {
+    pub task_id: AppTaskId,
     pub desired: DesiredTaskPlayState,
+    pub version: u64,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "anyhow::Result<()>")]
-pub struct ExecuteSessionCommand {
+pub struct ExecuteTaskCommand {
     pub session_id: AppTaskId,
-    pub command:    DomainSessionCommand,
-    pub security: TaskPermissions,
+    pub command:    DomainCommand,
+    pub security:   TaskPermissions,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifySessionPacket {
+pub struct NotifyStreamingPacket {
     pub session_id: AppTaskId,
-    pub packet: TaskStreamingPacket,
+    pub packet:     StreamingPacket,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifySessionDeleted {
+pub struct NotifyTaskDeleted {
     pub session_id: AppTaskId,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifySessionSecurity {
+pub struct NotifyTaskSecurity {
     pub session_id: AppTaskId,
     pub security:   HashMap<SecureKey, TaskPermissions>,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifySessionSpec {
-    pub session_id: AppTaskId,
-    pub spec: TaskSpec,
+pub struct NotifyTaskSpec {
+    pub task_id: AppTaskId,
+    pub spec:       TaskSpec,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifySessionState {
+pub struct NotifyTaskState {
     pub session_id: AppTaskId,
     pub state:      SessionState,
 }
@@ -69,15 +72,15 @@ pub struct NotifyAudioEngineEvent {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifyMediaSessionState {
-    pub session_id: AppTaskId,
-    pub media:      HashMap<AppMediaObjectId, MediaObject>,
+pub struct NotifyMediaTaskState {
+    pub task_id: AppTaskId,
+    pub media:   HashMap<AppMediaObjectId, MediaObject>,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyRenderComplete {
-    pub session_id: AppTaskId,
+    pub task_id:    AppTaskId,
     pub render_id:  RenderId,
     pub path:       String,
     pub object_id:  AppMediaObjectId,
@@ -89,10 +92,10 @@ pub struct NotifyRenderComplete {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyRenderFailed {
-    pub session_id: AppTaskId,
-    pub render_id:  RenderId,
-    pub error:      String,
-    pub cancelled:  bool,
+    pub task_id:   AppTaskId,
+    pub render_id: RenderId,
+    pub error:     String,
+    pub cancelled: bool,
 }
 
 #[derive(Message, Clone, Debug)]

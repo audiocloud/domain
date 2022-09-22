@@ -11,7 +11,7 @@ use audiocloud_api::domain::WebSocketEvent;
 use audiocloud_api::newtypes::{AppTaskId, SecureKey};
 use audiocloud_api::common::task::TaskPermissions;
 
-use crate::service::session::messages::{NotifySessionDeleted, NotifySessionPacket, NotifySessionSecurity};
+use crate::task::messages::{NotifyTaskDeleted, NotifyStreamingPacket, NotifyTaskSecurity};
 use crate::web_sockets::messages::{LoginWebSocket, LogoutWebSocket, RegisterWebSocket, WebSocketSend};
 use crate::web_sockets::{WebSocketActor, WebSocketId, WebSocketMembership};
 
@@ -82,10 +82,10 @@ impl Handler<LogoutWebSocket> for SocketsSupervisor {
     }
 }
 
-impl Handler<NotifySessionDeleted> for SocketsSupervisor {
+impl Handler<NotifyTaskDeleted> for SocketsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifySessionDeleted, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyTaskDeleted, ctx: &mut Self::Context) -> Self::Result {
         if let Some(accesses) = self.membership.remove(&msg.session_id) {
             for access in accesses {
                 self.web_sockets.remove(&access.web_socket_id);
@@ -95,10 +95,10 @@ impl Handler<NotifySessionDeleted> for SocketsSupervisor {
     }
 }
 
-impl Handler<NotifySessionSecurity> for SocketsSupervisor {
+impl Handler<NotifyTaskSecurity> for SocketsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifySessionSecurity, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyTaskSecurity, ctx: &mut Self::Context) -> Self::Result {
         let old_security = self.security.insert(msg.session_id.clone(), msg.security.clone());
         if let Some(memberships) = self.membership.get(&msg.session_id) {
             for membership in memberships {
@@ -110,10 +110,10 @@ impl Handler<NotifySessionSecurity> for SocketsSupervisor {
     }
 }
 
-impl Handler<NotifySessionPacket> for SocketsSupervisor {
+impl Handler<NotifyStreamingPacket> for SocketsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifySessionPacket, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
         if let (Some(session_sockets), Some(session_security)) =
             (self.membership.get(&msg.session_id), self.security.get(&msg.session_id))
         {

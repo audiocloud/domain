@@ -11,12 +11,12 @@ use audiocloud_api::newtypes::{AppTaskId, EngineId};
 use audiocloud_api::common::task::Task;
 
 use crate::audio_engine::AudioEngineClient;
-use crate::data::get_boot_cfg;
-use crate::service::session::messages::{
-    BecomeOnline, ExecuteSessionCommand, NotifyAudioEngineEvent, NotifyMediaSessionState, NotifySessionSpec,
-    NotifySessionState, SetSessionDesiredState,
+use crate::db::get_boot_cfg;
+use crate::task::messages::{
+    BecomeOnline, ExecuteTaskCommand, NotifyAudioEngineEvent, NotifyMediaTaskState, NotifyTaskSpec,
+    NotifyTaskState, SetTaskDesiredState,
 };
-use crate::service::session::SessionActor;
+use crate::task::SessionActor;
 
 pub struct SessionsSupervisor {
     active:   HashMap<AppTaskId, Addr<SessionActor>>,
@@ -45,8 +45,8 @@ impl Actor for SessionsSupervisor {
 
 impl Supervised for SessionsSupervisor {
     fn restarting(&mut self, ctx: &mut Self::Context) {
-        self.subscribe_system_async::<NotifySessionSpec>(ctx);
-        self.subscribe_system_async::<NotifySessionState>(ctx);
+        self.subscribe_system_async::<NotifyTaskSpec>(ctx);
+        self.subscribe_system_async::<NotifyTaskState>(ctx);
     }
 }
 
@@ -64,21 +64,21 @@ impl Default for SessionsSupervisor {
 
 impl SystemService for SessionsSupervisor {}
 
-impl Handler<NotifySessionSpec> for SessionsSupervisor {
+impl Handler<NotifyTaskSpec> for SessionsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifySessionSpec, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(session) = self.sessions.get_mut(&msg.session_id) {
+    fn handle(&mut self, msg: NotifyTaskSpec, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(session) = self.sessions.get_mut(&msg.task_id) {
             session.spec = msg.spec;
         }
     }
 }
 
-impl Handler<SetSessionDesiredState> for SessionsSupervisor {
+impl Handler<SetTaskDesiredState> for SessionsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: SetSessionDesiredState, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(session) = self.active.get_mut(&msg.session_id) {
+    fn handle(&mut self, msg: SetTaskDesiredState, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(session) = self.active.get_mut(&msg.task_id) {
             session.do_send(msg);
         }
     }
@@ -91,7 +91,7 @@ impl Handler<BecomeOnline> for SessionsSupervisor {
         if !self.online {
             self.online = true;
             for (id, session) in self.sessions.iter() {
-                if session.time.contains_now() {
+                if session.reservations.contains_now() {
                     if let Some(engine_id) = self.allocate_engine() {
                         let actor = SessionActor::new(id, session, engine_id.clone());
                         self.active.insert(id.clone(), Supervisor::start(move |_| actor));
@@ -104,10 +104,10 @@ impl Handler<BecomeOnline> for SessionsSupervisor {
     }
 }
 
-impl Handler<NotifySessionState> for SessionsSupervisor {
+impl Handler<NotifyTaskState> for SessionsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifySessionState, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyTaskState, ctx: &mut Self::Context) -> Self::Result {
         self.state.insert(msg.session_id, msg.state);
     }
 }
@@ -128,11 +128,11 @@ impl Handler<NotifyAudioEngineEvent> for SessionsSupervisor {
     }
 }
 
-impl Handler<NotifyMediaSessionState> for SessionsSupervisor {
+impl Handler<NotifyMediaTaskState> for SessionsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifyMediaSessionState, ctx: &mut Self::Context) -> Self::Result {
-        let session_id = &msg.session_id;
+    fn handle(&mut self, msg: NotifyMediaTaskState, ctx: &mut Self::Context) -> Self::Result {
+        let session_id = &msg.task_id;
         match self.active.get(session_id) {
             Some(session) => {
                 session.do_send(msg);
@@ -144,10 +144,10 @@ impl Handler<NotifyMediaSessionState> for SessionsSupervisor {
     }
 }
 
-impl Handler<ExecuteSessionCommand> for SessionsSupervisor {
+impl Handler<ExecuteTaskCommand> for SessionsSupervisor {
     type Result = LocalBoxActorFuture<Self, anyhow::Result<()>>;
 
-    fn handle(&mut self, msg: ExecuteSessionCommand, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: ExecuteTaskCommand, ctx: &mut Self::Context) -> Self::Result {
         if let Some(session) = self.active.get(&msg.session_id) {
             session.send(msg)
                    .into_actor(self)

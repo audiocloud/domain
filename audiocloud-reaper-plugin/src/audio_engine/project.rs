@@ -255,7 +255,7 @@ impl AudioEngineProject {
                 self.events
                     .push_back(AudioEngineEvent::RenderingFailed { task_id: self.id.clone(),
                                                                    render_id,
-                                                                   reason: format!("Rendered file not found") });
+                                                                   error: format!("Rendered file not found") });
             }
         }
 
@@ -490,7 +490,7 @@ impl AudioEngineProject {
                 self.events.push_back(AudioEngineEvent::RenderingFailed {
                     task_id: self.id.clone(),
                     render_id: render.render_id,
-                    reason: format!("Rendering stopped prematurely")
+                    error: format!("Rendering stopped prematurely")
                 });
             }
             _ => {

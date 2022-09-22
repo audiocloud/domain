@@ -182,7 +182,8 @@ impl ReaperAudioEngine {
         debug!(?cmd, "entered");
 
         match cmd {
-            SetSpec { session_id,
+            SetSpec {
+                task_id: session_id,
                       spec,
                       instances,
                       media_ready, } => {
@@ -192,13 +193,15 @@ impl ReaperAudioEngine {
                     self.create_session(session_id, spec, instances, media_ready)?;
                 }
             }
-            Media { session_id,
+            Media {
+                task_id: session_id,
                     media_ready: ready, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.on_media_updated(&ready)?;
                 }
             }
-            ModifySpec { session_id,
+            ModifySpec {
+                task_id: session_id,
                          transaction,
                          instances,
                          media_ready, } => {
@@ -208,54 +211,54 @@ impl ReaperAudioEngine {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            SetDynamicParameters { session_id, .. } => {
+            SetDynamicParameterValues { task_id: session_id, .. } => {
                 if let Some(_) = self.sessions.get_mut(&session_id) {
                     // TODO: implement dynamic parameters
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            Render { session_id, render } => {
+            Render { task_id: session_id, render } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.render(render)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            Play { session_id, play } => {
+            Play { task_id: session_id, play } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.play(play)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            UpdatePlay { session_id, update } => {
+            UpdatePlay { task_id: session_id, update } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.update_play(update)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            StopRender { session_id, render_id } => {
+            StopRender { task_id: session_id, render_id } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.stop_render(render_id)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            StopPlay { session_id, play_id } => {
+            StopPlay { task_id: session_id, play_id } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.stop_play(play_id)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            Instances { session_id, instances } => {
+            Instances { task_id: session_id, instances } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.on_instances_updated(&instances)?;
                 }
             }
-            Close { session_id } => {
+            Close { task_id: session_id } => {
                 if let Some(session) = self.sessions.remove(&session_id) {
                     drop(session);
                 } else {

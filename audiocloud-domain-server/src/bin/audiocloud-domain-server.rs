@@ -2,27 +2,37 @@ use std::env;
 
 use actix_web::middleware::Logger;
 use actix_web::{App, HttpServer};
-use clap::Parser;
+use clap::{Args, Parser};
 use tracing::*;
 
-use audiocloud_domain_server::{data, rest_api, service, web_sockets};
+use audiocloud_domain_server::{config, db, events, rest_api, service, web_sockets};
 
 #[derive(Parser)]
 struct Opts {
+    /// REST and WebSocket API port
     #[clap(short, long, env, default_value = "7200")]
     port: u16,
 
+    /// REST and WebSocket API host
     #[clap(short, long, env, default_value = "0.0.0.0")]
     bind: String,
 
-    #[clap(flatten)]
-    db: data::DataOpts,
+    /// Beginning of UDP port range to use for WebRTC (inclusive)
+    #[clap(long, env, default_value = "30000")]
+    web_rtc_port_min: u16,
+
+    /// End of UDP port range to use for WebRTC (inclusivec)
+    #[clap(long, env, default_value = "40000")]
+    web_rtc_port_max: u16,
 
     #[clap(flatten)]
-    media: service::media::MediaOpts,
+    db: db::DataOpts,
 
     #[clap(flatten)]
-    cloud: service::cloud::CloudOpts,
+    media: audiocloud_domain_server::media::MediaOpts,
+
+    #[clap(flatten)]
+    config: config::ConfigOpts,
 }
 
 #[actix_web::main]
@@ -40,35 +50,35 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = Opts::parse();
 
-    let boot = service::cloud::init(opts.cloud).await?;
+    debug!("Loading config");
 
-    let event_base = boot.event_base;
+    let config = config::init(opts.config).await?;
 
-    debug!(?event_base, "Event base");
+    debug!("Initializing database");
 
-    data::init(opts.db, boot).await?;
+    let db = db::init(opts.db).await?;
 
     debug!("Boot data initialized");
 
-    service::media::init(opts.media).await?;
+    audiocloud_domain_server::media::init(opts.media, db.clone()).await?;
 
-    debug!("Media");
+    debug!(" ✔ Media");
 
-    service::instance::init();
+    service::instance::init(config.clone()).await?;
 
-    debug!("Instances");
+    debug!(" ✔ Instances");
 
-    service::session::init();
+    audiocloud_domain_server::task::init(db.clone());
 
-    debug!("Sessions");
+    debug!(" ✔ Tasks");
 
-    service::cloud::spawn_command_listener(event_base as i64).await?;
+    debug!("Initializing distributed commands / events");
 
-    debug!("Command listener");
+    events::init(config.command_source.clone(), config.event_sink.clone()).await?;
 
-    service::session::become_online();
+    debug!("Going online");
 
-    debug!("Becoming online");
+    audiocloud_domain_server::task::become_online();
 
     info!(bind = opts.bind,
           port = opts.port,

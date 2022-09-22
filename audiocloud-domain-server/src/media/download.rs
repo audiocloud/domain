@@ -11,7 +11,7 @@ use audiocloud_api::common::media::{DownloadFromDomain, MediaJobState};
 use audiocloud_api::newtypes::AppMediaObjectId;
 use audiocloud_api::common::time::now;
 
-use crate::service::media::messages::{DownloadJobId, NotifyDownloadProgress};
+use crate::media::messages::{DownloadJobId, NotifyDownloadProgress};
 
 #[derive(Debug)]
 pub struct Downloader {

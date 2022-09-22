@@ -9,13 +9,13 @@ use tokio::fs::File;
 use tokio_util::io::StreamReader;
 use tracing::*;
 
-use crate::data::MediaDatabase;
+use crate::db::MediaDatabase;
 use audiocloud_api::common::media::{MediaJobState, UploadToDomain};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
 use audiocloud_api::common::time::now;
 
 use crate::service::cloud::get_cloud_client;
-use crate::service::media::messages::{NotifyUploadProgress, UploadJobId};
+use crate::media::messages::{NotifyUploadProgress, UploadJobId};
 
 #[derive(Debug)]
 pub struct Uploader {

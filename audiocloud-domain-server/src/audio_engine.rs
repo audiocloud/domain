@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use audiocloud_api::audio_engine::command::AudioEngineCommand;
 use audiocloud_api::newtypes::{AppTaskId, EngineId};
 
-use crate::service::nats::get_nats_client;
+use crate::nats::get_nats_client;
 
 #[derive(Clone)]
 pub struct AudioEngineClient {

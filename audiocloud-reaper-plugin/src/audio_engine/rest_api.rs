@@ -57,24 +57,24 @@ impl AudioEngineClient {
     }
 
     pub async fn render(&self, session_id: AppTaskId, render: RequestRender) -> anyhow::Result<()> {
-        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::Render { session_id, render }, tx)))
+        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::Render { task_id: session_id, render }, tx)))
             .await
     }
 
     pub async fn play(&self, session_id: AppTaskId, play: RequestPlay) -> anyhow::Result<()> {
-        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::Play { session_id, play }, tx)))
+        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::Play { task_id: session_id, play }, tx)))
             .await
     }
 
     pub async fn stop_render(&self, session_id: AppTaskId, render_id: RenderId) -> anyhow::Result<()> {
         self.request(move |tx| {
-                ReaperEngineCommand::Request((AudioEngineCommand::StopRender { session_id, render_id }, tx))
+                ReaperEngineCommand::Request((AudioEngineCommand::StopRender { task_id: session_id, render_id }, tx))
             })
             .await
     }
 
     pub async fn stop_play(&self, session_id: AppTaskId, play_id: PlayId) -> anyhow::Result<()> {
-        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::StopPlay { session_id, play_id }, tx)))
+        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::StopPlay { task_id: session_id, play_id }, tx)))
             .await
     }
 
@@ -85,7 +85,8 @@ impl AudioEngineClient {
                                   media_ready: HashMap<AppMediaObjectId, String>)
                                   -> anyhow::Result<()> {
         self.request(move |tx| {
-                ReaperEngineCommand::Request((AudioEngineCommand::SetSpec { session_id,
+                ReaperEngineCommand::Request((AudioEngineCommand::SetSpec {
+                    task_id: session_id,
                                                                             spec,
                                                                             instances,
                                                                             media_ready },
