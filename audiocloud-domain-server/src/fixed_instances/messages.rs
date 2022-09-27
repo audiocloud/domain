@@ -15,7 +15,7 @@ pub struct SetInstanceParameters {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct SetInstanceDesiredState {
+pub struct SetInstanceDesiredPlayState {
     pub instance_id: FixedInstanceId,
     pub desired:     DesiredInstancePlayState,
 }
@@ -29,14 +29,7 @@ pub struct NotifyInstanceReports {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifyInstanceDriver {
-    pub instance_id: FixedInstanceId,
-    pub event:       InstanceDriverEvent,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct NotifyInstancePower {
+pub struct NotifyInstancePowerChannelsChanged {
     pub instance_id: FixedInstanceId,
     pub power:       Vec<bool>,
 }

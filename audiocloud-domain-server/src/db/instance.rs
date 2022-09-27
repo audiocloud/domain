@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use audiocloud_api::common::media::PlayId;
-use audiocloud_api::cloud::domains::{DomainMediaInstanceSettings, DomainPowerInstanceSettings};
+use audiocloud_api::cloud::domains::{DomainMediaInstanceConfig, DomainPowerInstanceConfig};
 use audiocloud_api::common::instance::{
     DesiredInstancePlayState, DesiredInstancePowerState, InstancePlayState, InstancePowerState,
 };
@@ -11,15 +11,15 @@ use crate::tracker::RequestTracker;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstancePower {
-    pub spec:          DomainPowerInstanceSettings,
+    pub spec: DomainPowerInstanceConfig,
     pub state:         Timestamped<InstancePowerState>,
     pub channel_state: Timestamped<bool>,
     pub desired:       Timestamped<DesiredInstancePowerState>,
     pub tracker:       RequestTracker,
 }
 
-impl From<DomainPowerInstanceSettings> for InstancePower {
-    fn from(spec: DomainPowerInstanceSettings) -> Self {
+impl From<DomainPowerInstanceConfig> for InstancePower {
+    fn from(spec: DomainPowerInstanceConfig) -> Self {
         Self { spec,
                state: Timestamped::new(InstancePowerState::PoweredUp),
                desired: Timestamped::new(DesiredInstancePowerState::ShutDown),
@@ -30,15 +30,15 @@ impl From<DomainPowerInstanceSettings> for InstancePower {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstancePlay {
-    pub spec:    DomainMediaInstanceSettings,
+    pub spec: DomainMediaInstanceConfig,
     pub state:   Timestamped<InstancePlayState>,
     pub media:   Option<Timestamped<f64>>,
     pub desired: Timestamped<DesiredInstancePlayState>,
     pub tracker: RequestTracker,
 }
 
-impl From<DomainMediaInstanceSettings> for InstancePlay {
-    fn from(spec: DomainMediaInstanceSettings) -> Self {
+impl From<DomainMediaInstanceConfig> for InstancePlay {
+    fn from(spec: DomainMediaInstanceConfig) -> Self {
         Self { spec,
                media: None,
                state: Timestamped::new(InstancePlayState::Playing { play_id: PlayId::new(u64::MAX), }),

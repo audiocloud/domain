@@ -7,25 +7,25 @@ use reqwest::Url;
 #[derive(Args)]
 pub struct ConfigOpts {
     /// Source of the config
-    #[clap(short, long, env, default_value = "file")]
-    config_source: ConfigSource,
+    #[clap(short, long, env, default_value = "file", value_enum)]
+    pub config_source: ConfigSource,
 
     /// Path to the config file
-    #[clap(long, env, default_value_t = "config.toml", required_if_eq("config_source", "file"))]
-    config_path: Option<PathBuf>,
+    #[clap(long, env, default_value = "config.toml", required_if_eq("config_source", "file"))]
+    pub config_file: PathBuf,
 
     /// The base cloud URL to use for config retrieval
     #[clap(long,
            env,
-           default_value_t = "https://api.audiocloud.io",
+           default_value = "https://api.audiocloud.io",
            required_if_eq("config_source", "cloud"))]
-    cloud_url: Option<Url>,
+    pub cloud_url: Url,
 
     #[clap(long, env, required_if_eq("config_source", "cloud"))]
-    api_key: Option<String>,
+    pub api_key: Option<String>,
 }
 
-#[derive(ValueEnum)]
+#[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum ConfigSource {
     /// Load the config from an cloud or orchestrator
     Cloud,
@@ -36,15 +36,10 @@ pub enum ConfigSource {
 pub async fn init(cfg: ConfigOpts) -> anyhow::Result<DomainConfig> {
     match cfg.config_source {
         ConfigSource::Cloud => {
-            let url = cfg.cloud_url.unwrap();
-            let api_key = cfg.api_key.unwrap();
-
-            Ok(cloud::get_config(url, api_key).await?)
+            Ok(cloud::get_config(cfg.cloud_url,
+                                 cfg.api_key.expect("API key must be configured for cloud configuration")).await?)
         }
-        ConfigSource::File => {
-            let path = cfg.config_path.unwrap();
-            Ok(file::get_config(path).await?)
-        }
+        ConfigSource::File => Ok(file::get_config(cfg.config_file).await?),
     }
 }
 

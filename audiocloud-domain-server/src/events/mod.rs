@@ -1,10 +1,11 @@
 use audiocloud_api::cloud::domains::{DomainCommandSource, DomainEventSink};
+pub use messages::*;
 
 mod log_events;
 mod noop_events;
 
-pub mod events;
 mod kafka;
+mod messages;
 
 pub async fn init(commands: DomainCommandSource, events: DomainEventSink) -> anyhow::Result<()> {
     match commands {
@@ -16,7 +17,7 @@ pub async fn init(commands: DomainCommandSource, events: DomainEventSink) -> any
                                      username,
                                      password,
                                      offset, } => {
-            kafka::kafka_commands::init(topic, brokers, username, password, offset).await?;
+            kafka::commands::init(topic, brokers, username, password, offset).await?;
         }
     }
 
@@ -31,7 +32,7 @@ pub async fn init(commands: DomainCommandSource, events: DomainEventSink) -> any
                                  brokers,
                                  username,
                                  password, } => {
-            kafka::kafka_events::init(topic, brokers, username, password).await?;
+            kafka::events::init(topic, brokers, username, password).await?;
         }
     }
 

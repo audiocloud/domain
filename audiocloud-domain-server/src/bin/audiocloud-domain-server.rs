@@ -5,7 +5,7 @@ use actix_web::{App, HttpServer};
 use clap::{Args, Parser};
 use tracing::*;
 
-use audiocloud_domain_server::{config, db, events, rest_api, service, web_sockets};
+use audiocloud_domain_server::{config, db, events, fixed_instances, media, rest_api, sockets, task};
 
 #[derive(Parser)]
 struct Opts {
@@ -17,22 +17,17 @@ struct Opts {
     #[clap(short, long, env, default_value = "0.0.0.0")]
     bind: String,
 
-    /// Beginning of UDP port range to use for WebRTC (inclusive)
-    #[clap(long, env, default_value = "30000")]
-    web_rtc_port_min: u16,
-
-    /// End of UDP port range to use for WebRTC (inclusivec)
-    #[clap(long, env, default_value = "40000")]
-    web_rtc_port_max: u16,
-
     #[clap(flatten)]
     db: db::DataOpts,
 
     #[clap(flatten)]
-    media: audiocloud_domain_server::media::MediaOpts,
+    media: media::MediaOpts,
 
     #[clap(flatten)]
     config: config::ConfigOpts,
+
+    #[clap(flatten)]
+    sockets: sockets::SocketsOpts,
 }
 
 #[actix_web::main]
@@ -50,35 +45,35 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = Opts::parse();
 
-    debug!("Loading config");
+    debug!(source = ?opts.config.config_source, "Loading config");
 
-    let config = config::init(opts.config).await?;
+    let cfg = config::init(opts.config).await?;
 
     debug!("Initializing database");
 
     let db = db::init(opts.db).await?;
 
-    debug!("Boot data initialized");
-
-    audiocloud_domain_server::media::init(opts.media, db.clone()).await?;
+    media::init(opts.media, db.clone()).await?;
 
     debug!(" ✔ Media");
 
-    service::instance::init(config.clone()).await?;
+    fixed_instances::init(cfg.clone()).await?;
 
     debug!(" ✔ Instances");
 
-    audiocloud_domain_server::task::init(db.clone());
+    task::init(db.clone());
 
     debug!(" ✔ Tasks");
 
     debug!("Initializing distributed commands / events");
 
-    events::init(config.command_source.clone(), config.event_sink.clone()).await?;
+    events::init(cfg.command_source.clone(), cfg.event_sink.clone()).await?;
 
     debug!("Going online");
 
-    audiocloud_domain_server::task::become_online();
+    task::become_online();
+
+    sockets::init().await?;
 
     info!(bind = opts.bind,
           port = opts.port,

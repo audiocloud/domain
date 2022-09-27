@@ -28,16 +28,17 @@ nats-aflowt = "0.16"
 regex = "1"
 askama = "0.11"
 bytes = "1"
-webrtc = "0.4"
+webrtc = "0.5"
 itertools = "0.10"
 tokio-util = "0.7"
 async-trait = "0.1"
 derive_more = "0.99"
 mime = "0.3"
+nanoid = "0.4"
 
 [dependencies.kv]
 version = "0.24"
-features = ["msgpack-value"]
+features = ["msgpack-value", "json-value"]
 
 [dependencies.uuid]
 version = "1"

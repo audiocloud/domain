@@ -8,7 +8,7 @@ use tracing::*;
 
 use audiocloud_api::{Codec, Json};
 
-use crate::events::events::NotifyDomainEvent;
+use crate::events::messages::NotifyDomainEvent;
 
 static KAFKA_DOMAIN_EVENTS_SINK: OnceCell<Addr<KafkaDomainEventsSink>> = OnceCell::new();
 

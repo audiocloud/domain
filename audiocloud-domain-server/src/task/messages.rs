@@ -4,14 +4,14 @@ use actix::Message;
 
 use crate::DomainResult;
 use audiocloud_api::audio_engine::event::AudioEngineEvent;
-use audiocloud_api::common::change::{DesiredTaskPlayState, SessionState};
+use audiocloud_api::common::change::{DesiredTaskPlayState, TaskState};
 use audiocloud_api::common::media::{MediaObject, RenderId};
 use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::domain::tasks::TaskUpdated;
 use audiocloud_api::domain::DomainCommand;
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
-use audiocloud_api::StreamingPacket;
+use audiocloud_api::{StreamingPacket, TaskReservation};
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "DomainResult<TaskUpdated>")]
@@ -39,7 +39,7 @@ pub struct NotifyStreamingPacket {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyTaskDeleted {
-    pub session_id: AppTaskId,
+    pub task_id: AppTaskId,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -53,14 +53,21 @@ pub struct NotifyTaskSecurity {
 #[rtype(result = "()")]
 pub struct NotifyTaskSpec {
     pub task_id: AppTaskId,
-    pub spec:       TaskSpec,
+    pub spec:    TaskSpec,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct NotifyTaskReservation {
+    pub task_id: AppTaskId,
+    pub reservation:    TaskReservation,
 }
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyTaskState {
     pub session_id: AppTaskId,
-    pub state:      SessionState,
+    pub state:      TaskState,
 }
 
 #[derive(Message, Clone, Debug)]

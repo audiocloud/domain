@@ -1,8 +1,8 @@
 use rdkafka::config::RDKafkaLogLevel;
 use rdkafka::ClientConfig;
 
-pub mod kafka_commands;
-pub mod kafka_events;
+pub mod commands;
+pub mod events;
 
 pub fn create_config(bootstrap_servers: &str, username: &str, password: &str) -> ClientConfig {
     let mut config = ClientConfig::default();

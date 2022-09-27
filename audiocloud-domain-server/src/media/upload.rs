@@ -9,12 +9,10 @@ use tokio::fs::File;
 use tokio_util::io::StreamReader;
 use tracing::*;
 
-use crate::db::MediaDatabase;
 use audiocloud_api::common::media::{MediaJobState, UploadToDomain};
-use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
 use audiocloud_api::common::time::now;
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
 
-use crate::service::cloud::get_cloud_client;
 use crate::media::messages::{NotifyUploadProgress, UploadJobId};
 
 #[derive(Debug)]
@@ -63,7 +61,6 @@ impl Uploader {
                 }
             };
 
-            let db = MediaDatabase::default();
             if let Some(media) = db.get_media(&media_id).await? {
                 match (media.path.as_ref(), media.metadata.as_ref()) {
                     (Some(path), Some(metadata)) => {

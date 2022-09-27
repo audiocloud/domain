@@ -1,14 +1,14 @@
+use std::io;
 use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::{stream, Stream, StreamExt};
-use nats_aflowt::{connect, Connection};
+use nats_aflowt::{connect, Connection, Message, Subscription};
 use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tracing::warn;
 
-use audiocloud_api::{Codec, Json, MsgPack};
+use audiocloud_api::{Codec, Json, MsgPack, Request};
 
 static NATS_CONNECTION: OnceCell<Connection> = OnceCell::new();
 
@@ -21,44 +21,21 @@ pub async fn init(nats_url: &str) -> anyhow::Result<()> {
 }
 
 pub fn subscribe<M: DeserializeOwned, C: Codec>(subject: String, codec: C) -> impl Stream<Item = M> {
-    let subscribe = {
-        let subject = subject.clone();
+    let conn = NATS_CONNECTION.get().expect("NATS_CONNECTION not initialized");
 
-        move |connection| connection.subscribe(&subject)
-    };
-
-    let gen_message_stream = {
-        let subject = subject.clone();
-
-        move |subscription| match subscription {
-            Ok(subscription) => subscription.stream().boxed(),
-            Err(error) => {
-                warn!(%error, %subject, "Failed to subscribe");
-                stream::empty().throttle(Duration::from_millis(100)).boxed()
-            }
-        }
-    };
-
-    let parse_messages = {
-        let subject = subject.clone();
-
-        move |message| match codec.decode(&message.payload) {
-            Ok(message) => Some(message),
-            Err(error) => {
-                warn!(%error, %subject, "Failed to decode message");
-                None
-            }
-        }
-    };
-
-    let connection = NATS_CONNECTION.get().expect("NATS_CONNECTION initialized");
-
-    stream::unfold(connection, subscribe).flat_map(gen_message_stream)
-                                         .filter_map(parse_messages)
+    stream::repeat(()).throttle(Duration::from_secs(1))
+                      .then(move |_| conn.subscribe(&subject))
+                      .filter_map(move |res: io::Result<Subscription>| async move { res.ok() })
+                      .flat_map(move |sub: Subscription| sub.stream())
+                      .filter_map(move |msg: Message| async move { codec.deserialize(msg.payload).ok() })
 }
 
 pub fn subscribe_msgpack<M: DeserializeOwned>(subject: String) -> impl Stream<Item = M> {
     subscribe(subject, MsgPack)
+}
+
+pub fn subscribe_json<M: DeserializeOwned>(subject: String) -> impl Stream<Item = M> {
+    subscribe(subject, Json)
 }
 
 pub async fn publish<M: Serialize, C: Codec>(subject: &str, codec: C, message: M) -> anyhow::Result<()> {
@@ -71,17 +48,18 @@ pub async fn publish<M: Serialize, C: Codec>(subject: &str, codec: C, message: M
     Ok(())
 }
 
-pub async fn request<R: DeserializeOwned, M: Serialize, C: Codec>(subject: &str,
-                                                                  codec: C,
-                                                                  message: M)
-                                                                  -> anyhow::Result<R> {
+pub async fn request<R: Request, C: Codec>(subject: &str,
+                                           codec: C,
+                                           req: R)
+                                           -> anyhow::Result<<R as Request>::Response> {
     let connection = NATS_CONNECTION.get()
                                     .ok_or_else(|| anyhow!("NATS_CONNECTION initialized"))?;
-    let message = codec.serialize(&message)?;
-    let reply = connection.request(&subject, &message).await?;
-    Ok(codec.deserialize(&reply.payload)?)
+
+    let req = codec.serialize(&req)?;
+    let reply = connection.request(&subject, &req).await?;
+    Ok(codec.deserialize(&reply.data)?)
 }
 
-pub async fn request_json<R: DeserializeOwned, M: Serialize>(subject: &str, message: M) -> anyhow::Result<R> {
-    request(subject, Json, message).await
+pub async fn request_json<R: Request>(subject: &str, req: R) -> anyhow::Result<<R as Request>::Response> {
+    request(subject, Json, req).await
 }

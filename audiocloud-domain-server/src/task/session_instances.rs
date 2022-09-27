@@ -1,23 +1,26 @@
 use std::collections::{HashMap, HashSet};
 
-use actix::SystemService;
+use actix::Addr;
 
-use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::common::instance::DesiredInstancePlayState;
+use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::newtypes::FixedInstanceId;
 
-use crate::service::instance::{InstancesSupervisor, NotifyInstanceState, SetInstanceDesiredState};
+use crate::fixed_instances::messages::{NotifyInstanceState, SetInstanceDesiredPlayState};
+use crate::fixed_instances::supervisor::FixedInstancesSupervisor;
 use crate::tracker::RequestTracker;
 
 pub struct SessionInstance {
-    state:   NotifyInstanceState,
-    tracker: RequestTracker,
+    state:     NotifyInstanceState,
+    tracker:   RequestTracker,
+    instances: Addr<FixedInstancesSupervisor>,
 }
 
 impl SessionInstance {
-    pub fn new(state_spec: NotifyInstanceState) -> Self {
-        Self { state:   state_spec,
-               tracker: RequestTracker::new(), }
+    pub fn new(state_spec: NotifyInstanceState, instances: &Addr<FixedInstancesSupervisor>) -> Self {
+        Self { state:     state_spec,
+               tracker:   RequestTracker::new(),
+               instances: instances.clone(), }
     }
 
     pub fn reset_request_tracker(&mut self) {
@@ -45,10 +48,9 @@ impl SessionInstance {
         if let Some(media) = &self.state.play {
             if media.desired.value() != play {
                 if self.tracker.should_retry() {
-                    InstancesSupervisor::from_registry().do_send(SetInstanceDesiredState {
-                        instance_id: instance_id.clone(),
-                        desired: play.clone(),
-                    });
+                    self.instances
+                        .do_send(SetInstanceDesiredPlayState { instance_id: instance_id.clone(),
+                                                           desired:     play.clone(), });
 
                     self.tracker.retried();
                 }
@@ -76,10 +78,10 @@ impl Default for SessionInstances {
 }
 
 impl SessionInstances {
-    pub fn accept_instance_state(&mut self, notify: NotifyInstanceState) {
+    pub fn notify_instance_state_changed(&mut self, notify: NotifyInstanceState, supervisor: &Addr<FixedInstancesSupervisor>) {
         let entry = self.instances
                         .entry(notify.instance_id.clone())
-                        .or_insert_with(|| SessionInstance::new(notify.clone()));
+                        .or_insert_with(|| SessionInstance::new(notify.clone(), supervisor));
 
         entry.set_instance_state(notify);
     }

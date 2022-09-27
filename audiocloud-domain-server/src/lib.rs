@@ -1,21 +1,21 @@
 extern crate core;
 
+use derive_more::IsVariant;
+
 use audiocloud_api::domain::DomainError;
 
-pub mod audio_engine;
 pub mod config;
 pub mod db;
 pub mod events;
-pub mod instance;
+pub mod fixed_instances;
 pub mod media;
+pub mod nats;
 pub mod rest_api;
-pub mod service;
+pub mod sockets;
 pub mod task;
 pub mod tracker;
-pub mod web_sockets;
-pub mod nats;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, IsVariant)]
 pub enum ResponseMedia {
     MsgPack,
     Json,

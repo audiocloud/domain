@@ -12,7 +12,7 @@ use tracing::*;
 
 use audiocloud_api::{Codec, Json};
 
-use crate::events::events::NotifyDomainSessionCommand;
+use crate::events::messages::NotifyDomainSessionCommand;
 
 static KAFKA_DOMAIN_COMMANDS_LISTENER: OnceCell<Addr<KafkaDomainCommandsListener>> = OnceCell::new();
 

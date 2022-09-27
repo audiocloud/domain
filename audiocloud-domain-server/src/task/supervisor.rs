@@ -1,27 +1,32 @@
 use std::collections::HashMap;
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Supervised, Supervisor, SystemService, WrapFuture};
+use actix::{
+    fut, Actor, ActorFutureExt, Addr, Context, ContextFutureSpawner, Handler, Supervised, Supervisor, SystemService,
+    WrapFuture,
+};
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
 use tracing::warn;
 
-use audiocloud_api::common::change::SessionState;
-use audiocloud_api::newtypes::{AppTaskId, EngineId};
+use audiocloud_api::common::change::TaskState;
 use audiocloud_api::common::task::Task;
+use audiocloud_api::domain::tasks::TaskUpdated;
+use audiocloud_api::domain::DomainError;
+use audiocloud_api::newtypes::{AppTaskId, EngineId};
 
-use crate::audio_engine::AudioEngineClient;
 use crate::db::get_boot_cfg;
 use crate::task::messages::{
-    BecomeOnline, ExecuteTaskCommand, NotifyAudioEngineEvent, NotifyMediaTaskState, NotifyTaskSpec,
-    NotifyTaskState, SetTaskDesiredState,
+    BecomeOnline, ExecuteTaskCommand, NotifyAudioEngineEvent, NotifyMediaTaskState, NotifyTaskSpec, NotifyTaskState,
+    SetTaskDesiredState,
 };
-use crate::task::SessionActor;
+use crate::task::TaskActor;
+use crate::DomainResult;
 
 pub struct SessionsSupervisor {
-    active:   HashMap<AppTaskId, Addr<SessionActor>>,
+    active:   HashMap<AppTaskId, Addr<TaskActor>>,
     sessions: HashMap<AppTaskId, Task>,
-    state:    HashMap<AppTaskId, SessionState>,
+    state:    HashMap<AppTaskId, TaskState>,
     engines:  HashMap<EngineId, AudioEngineClient>,
     online:   bool,
 }
@@ -75,11 +80,14 @@ impl Handler<NotifyTaskSpec> for SessionsSupervisor {
 }
 
 impl Handler<SetTaskDesiredState> for SessionsSupervisor {
-    type Result = ();
+    type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;
 
     fn handle(&mut self, msg: SetTaskDesiredState, ctx: &mut Self::Context) -> Self::Result {
         if let Some(session) = self.active.get_mut(&msg.task_id) {
-            session.do_send(msg);
+            session.send(msg).into_actor(self).boxed_local()
+        } else {
+            fut::err(DomainError::TaskNotFound { task_id: msg.task_id.clone(), }).into_actor(self)
+                                                                                 .boxed_local()
         }
     }
 }
@@ -93,7 +101,7 @@ impl Handler<BecomeOnline> for SessionsSupervisor {
             for (id, session) in self.sessions.iter() {
                 if session.reservations.contains_now() {
                     if let Some(engine_id) = self.allocate_engine() {
-                        let actor = SessionActor::new(id, session, engine_id.clone());
+                        let actor = TaskActor::new(id, session, engine_id.clone());
                         self.active.insert(id.clone(), Supervisor::start(move |_| actor));
                     } else {
                         warn!(%id, "No available audio engines to start session");
