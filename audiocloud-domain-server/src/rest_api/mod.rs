@@ -1,3 +1,4 @@
+use actix::fut;
 use std::convert::Infallible;
 use std::future::Future;
 
@@ -43,41 +44,47 @@ impl ApiResponder {
 
 impl FromRequest for ApiResponder {
     type Error = Infallible;
-    type Future = Ready<Self>;
+    type Future = Ready<Result<Self, Infallible>>;
 
     fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let rv = Self(req.headers()
                          .get("Accept")
                          .and_then(|v| {
-                             if v == mime::APPLICATION_MSGPACK {
-                                 Some(ResponseMedia::MsgPack)
-                             } else if v == mime::APPLICATION_JSON {
-                                 Some(ResponseMedia::Json)
+                             if let Ok(v) = v.to_str() {
+                                 if v == mime::APPLICATION_MSGPACK.essence_str() {
+                                     Some(ResponseMedia::MsgPack)
+                                 } else if v == mime::APPLICATION_JSON.essence_str() {
+                                     Some(ResponseMedia::Json)
+                                 } else {
+                                     None
+                                 }
                              } else {
                                  None
                              }
                          })
                          .unwrap_or(ResponseMedia::Json));
 
-        Ok(rv).into()
+        fut::ready(Ok(rv))
     }
 }
 
 pub struct ApiResponse<T>(ResponseMedia, Result<T, DomainError>);
 
-impl<T> Responder for ApiResponse<T> {
+impl<T> Responder for ApiResponse<T> where T: Serialize
+{
     type Body = EitherBody<BoxBody>;
 
     fn respond_to(self, _req: &HttpRequest) -> HttpResponse<Self::Body> {
-        let err_resp = |err| {
+        let err_resp = |err: DomainError| {
             let (content, content_type) = match self.0 {
                 ResponseMedia::Json => (Json.serialize(&err).unwrap(), mime::APPLICATION_JSON.as_ref()),
                 ResponseMedia::MsgPack => (MsgPack.serialize(&err).unwrap(), mime::APPLICATION_MSGPACK.as_ref()),
             };
 
-            HttpResponseBuilder::new(err.get_status()).content_type(content_type)
-                                                      .body(content)
-                                                      .map_into_right_body()
+            let status = StatusCode::from_u16(err.get_status()).unwrap();
+            HttpResponseBuilder::new(status).content_type(content_type)
+                                            .body(content)
+                                            .map_into_right_body()
         };
 
         match self.1 {

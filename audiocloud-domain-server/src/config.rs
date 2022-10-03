@@ -1,8 +1,15 @@
 use std::path::PathBuf;
 
-use audiocloud_api::cloud::domains::DomainConfig;
 use clap::{Args, ValueEnum};
 use reqwest::Url;
+
+use audiocloud_api::cloud::domains::DomainConfig;
+
+mod cloud;
+mod file;
+mod messages;
+
+pub use messages::*;
 
 #[derive(Args)]
 pub struct ConfigOpts {
@@ -11,7 +18,7 @@ pub struct ConfigOpts {
     pub config_source: ConfigSource,
 
     /// Path to the config file
-    #[clap(long, env, default_value = "config.toml", required_if_eq("config_source", "file"))]
+    #[clap(long, env, default_value = "config.yaml", required_if_eq("config_source", "file"))]
     pub config_file: PathBuf,
 
     /// The base cloud URL to use for config retrieval
@@ -40,33 +47,5 @@ pub async fn init(cfg: ConfigOpts) -> anyhow::Result<DomainConfig> {
                                  cfg.api_key.expect("API key must be configured for cloud configuration")).await?)
         }
         ConfigSource::File => Ok(file::get_config(cfg.config_file).await?),
-    }
-}
-
-mod cloud {
-    use reqwest::Url;
-
-    use audiocloud_api::cloud::domains::DomainConfig;
-
-    pub async fn get_config(url: Url, api_key: String) -> anyhow::Result<DomainConfig> {
-        let client = reqwest::Client::new();
-        let url = url.join("/v1/domains/config")?;
-
-        Ok(client.get(url)
-                 .bearer_auth(api_key)
-                 .send()
-                 .await?
-                 .json::<DomainConfig>()
-                 .await?)
-    }
-}
-
-mod file {
-    use std::path::PathBuf;
-
-    use audiocloud_api::cloud::domains::DomainConfig;
-
-    pub async fn get_config(path: PathBuf) -> anyhow::Result<DomainConfig> {
-        Ok(toml::from_slice(std::fs::read(path)?.as_slice())?)
     }
 }

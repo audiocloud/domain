@@ -1,27 +1,34 @@
-use crate::db::Db;
 use audiocloud_api::{Model, ModelId};
-use kv::Msgpack;
+
+use crate::db::Db;
 
 impl Db {
-    pub fn delete_all_models(&self) -> anyhow::Result<()> {
-        self.models.clear()?;
+    pub async fn delete_all_models(&self) -> anyhow::Result<()> {
+        sqlx::query!(r#"DELETE FROM model WHERE true"#).execute(&self.pool)
+                                                       .await?;
 
         Ok(())
     }
 
-    pub fn set_model(&self, model_id: ModelId, model: Model) -> anyhow::Result<()> {
+    pub async fn set_model(&self, model_id: ModelId, model: Model) -> anyhow::Result<()> {
+        let spec = serde_json::to_string(&model)?;
         let model_id = model_id.to_string();
-        let model = Msgpack(model);
 
-        self.models.set(&model_id, model)?;
+        sqlx::query!(r#"INSERT OR REPLACE INTO model (id, spec) VALUES (?, ?)"#,
+                     model_id,
+                     spec).execute(&self.pool)
+                          .await?;
 
         Ok(())
     }
 
-    pub fn get_model(&self, model_id: &ModelId) -> anyhow::Result<Option<Model>> {
+    pub async fn get_model(&self, model_id: &ModelId) -> anyhow::Result<Option<Model>> {
         let model_id = model_id.to_string();
-        let model = self.models.get(&model_id)?;
-
-        Ok(model.map(|model| model.0))
+        let result = sqlx::query!(r#"SELECT spec FROM model WHERE id=?"#, model_id).fetch_optional(&self.pool)
+                                                                                   .await?;
+        Ok(match result {
+            None => None,
+            Some(model) => Some(serde_json::from_str(&model.spec)?),
+        })
     }
 }

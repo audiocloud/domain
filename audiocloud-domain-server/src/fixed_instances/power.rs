@@ -1,11 +1,11 @@
 use chrono::Duration;
 
 use audiocloud_api::cloud::domains::DomainPowerInstanceConfig;
-use audiocloud_api::{DesiredInstancePowerState, InstancePowerState, Timestamped};
+use audiocloud_api::{DesiredInstancePowerState, InstancePowerState, ReportInstancePowerState, Timestamped};
 use InstancePowerState::*;
 
-use crate::fixed_instances::{NotifyInstancePowerChannelsChanged, SetInstanceParameters};
-use crate::task::NotifyTaskSpec;
+use crate::fixed_instances::{NotifyInstancePowerChannelsChanged, SetDesiredPowerChannel};
+use crate::tasks::NotifyTaskSpec;
 use crate::tracker::RequestTracker;
 
 pub struct Power {
@@ -23,9 +23,12 @@ impl Power {
                config:  { config }, }
     }
 
-    pub fn update(&mut self,
-                  spec: &Timestamped<Option<NotifyTaskSpec>>,
-                  update_instance: impl FnOnce(SetInstanceParameters)) {
+    pub fn get_power_state(&self) -> ReportInstancePowerState {
+        ReportInstancePowerState { actual:  self.state.clone(),
+                                   desired: self.desired.clone(), }
+    }
+
+    pub fn update(&mut self, spec: &Timestamped<Option<NotifyTaskSpec>>) -> Option<SetDesiredPowerChannel> {
         let idle_off_delay_time = Duration::milliseconds(self.config.idle_off_delay_ms as i64);
 
         if spec.value().is_some() {
@@ -36,11 +39,13 @@ impl Power {
 
         if !self.state.value().satisfies(*self.desired.value()) {
             if self.tracker.should_retry() {
-                update_instance(SetInstanceParameters { instance_id: self.config.instance.clone(),
-                                                        parameters:  Default::default(), });
                 self.tracker.retried();
+                let power_up = matches!(self.desired.value(), DesiredInstancePowerState::PoweredUp);
+
+                return Some(SetDesiredPowerChannel { instance_id: { self.config.instance.clone() },
+                                                     channel:     { self.config.channel },
+                                                     power:       { power_up }, });
             }
-            return;
         }
 
         let warm_up_time = Duration::milliseconds(self.config.warm_up_ms as i64);
@@ -51,6 +56,8 @@ impl Power {
             ShuttingDown if self.state.elapsed() > cool_down_time => self.state = ShutDown.into(),
             _ => {}
         };
+
+        None
     }
 
     pub fn set_desired_state(&mut self, desired: DesiredInstancePowerState) {
@@ -59,7 +66,7 @@ impl Power {
         }
     }
 
-    pub fn on_instance_power_changed(&mut self, msg: NotifyInstancePowerChannelsChanged) {
+    pub fn on_instance_power_channels_changed(&mut self, msg: NotifyInstancePowerChannelsChanged) {
         // check if message is about our power controller
         if &self.config.instance == &msg.instance_id {
             // if so, does it have information about our power channel

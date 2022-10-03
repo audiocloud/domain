@@ -1,29 +1,10 @@
 use actix::Message;
-use derive_more::{Display, From, FromStr};
-use uuid::Uuid;
 
-use audiocloud_api::common::media::{DownloadFromDomain, ImportToDomain, MediaJobState, UploadToDomain};
+use audiocloud_api::common::media::{DownloadFromDomain, ImportToDomain, UploadToDomain};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
+use audiocloud_api::{MediaDownload, MediaUpload};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Display, Hash, From, FromStr)]
-#[repr(transparent)]
-pub struct UploadJobId(Uuid);
-
-impl UploadJobId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Display, Hash, From, FromStr)]
-#[repr(transparent)]
-pub struct DownloadJobId(Uuid);
-
-impl DownloadJobId {
-    pub fn new() -> Self {
-        Self(Uuid::new_v4())
-    }
-}
+use crate::media::{DownloadJobId, UploadJobId};
 
 #[derive(Message)]
 #[rtype(result = "anyhow::Result<()>")]
@@ -57,14 +38,12 @@ pub struct ImportMedia {
 #[rtype(result = "()")]
 pub struct NotifyDownloadProgress {
     pub job_id:   DownloadJobId,
-    pub media_id: AppMediaObjectId,
-    pub state:    MediaJobState,
+    pub download: MediaDownload,
 }
 
 #[derive(Message, Clone)]
 #[rtype(result = "()")]
 pub struct NotifyUploadProgress {
-    pub job_id:   UploadJobId,
-    pub media_id: AppMediaObjectId,
-    pub state:    MediaJobState,
+    pub job_id: UploadJobId,
+    pub upload: MediaUpload,
 }

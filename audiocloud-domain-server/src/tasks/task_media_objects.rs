@@ -4,11 +4,11 @@ use audiocloud_api::common::media::MediaObject;
 use audiocloud_api::newtypes::AppMediaObjectId;
 
 #[derive(Default)]
-pub struct SessionMedia {
+pub struct TaskMediaObjects {
     pub media: HashMap<AppMediaObjectId, MediaObject>,
 }
 
-impl SessionMedia {
+impl TaskMediaObjects {
     pub fn waiting_for_media(&self) -> HashSet<AppMediaObjectId> {
         let mut rv = HashSet::new();
 

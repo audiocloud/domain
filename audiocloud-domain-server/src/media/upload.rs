@@ -4,41 +4,41 @@ use std::path::PathBuf;
 use actix::{Actor, ActorContext, ActorFutureExt, Context, ContextFutureSpawner, Supervised, WrapFuture};
 use actix_broker::BrokerIssue;
 use futures::TryStreamExt;
+use reqwest::Client;
 use serde_json::json;
 use tokio::fs::File;
 use tokio_util::io::StreamReader;
 use tracing::*;
 
-use audiocloud_api::common::media::{MediaJobState, UploadToDomain};
+use audiocloud_api::common::media::MediaJobState;
 use audiocloud_api::common::time::now;
-use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId};
+use audiocloud_api::MediaUpload;
 
-use crate::media::messages::{NotifyUploadProgress, UploadJobId};
+use crate::db::Db;
+use crate::media::messages::NotifyUploadProgress;
+use crate::media::UploadJobId;
 
 #[derive(Debug)]
 pub struct Uploader {
+    db:          Db,
     job_id:      UploadJobId,
-    media_id:    AppMediaObjectId,
-    session_id:  Option<AppTaskId>,
-    upload:      Option<UploadToDomain>,
+    upload:      MediaUpload,
     destination: PathBuf,
-    client:      reqwest::Client,
+    client:      Client,
     state:       MediaJobState,
 }
 
 impl Uploader {
-    pub fn new(job_id: UploadJobId,
-               client: reqwest::Client,
+    pub fn new(db: Db,
+               job_id: UploadJobId,
+               client: Client,
                destination: PathBuf,
-               session_id: Option<AppTaskId>,
-               media_id: AppMediaObjectId,
-               upload: Option<UploadToDomain>)
+               upload: MediaUpload)
                -> anyhow::Result<Self> {
         let state = MediaJobState::default();
 
-        Ok(Self { job_id,
-                  media_id,
-                  session_id,
+        Ok(Self { db,
+                  job_id,
                   upload,
                   destination,
                   client,
@@ -48,26 +48,19 @@ impl Uploader {
     fn upload(&mut self, ctx: &mut Context<Self>) {
         let destination = self.destination.clone();
         let client = self.client.clone();
-        let session_id = self.session_id.clone();
-        let media_id = self.media_id.clone();
+        let media_id = self.upload.media_id.clone();
         let upload = self.upload.clone();
+        let db = self.db.clone();
 
         async move {
-            let upload = match upload {
-                Some(upload) => upload,
-                None => {
-                    get_cloud_client().get_media_as_upload(session_id.as_ref(), &media_id)
-                                      .await?
-                }
-            };
-
-            if let Some(media) = db.get_media(&media_id).await? {
+            if let Some(media) = db.fetch_media_by_id(&media_id).await? {
                 match (media.path.as_ref(), media.metadata.as_ref()) {
                     (Some(path), Some(metadata)) => {
                         // TODO: more checks, for example media hash?
-                        // TODO: actually check the on-disk size, not DB size?
 
-                        if metadata.bytes == upload.bytes {
+                        let fs_metadata_bytes = tokio::fs::metadata(path).await.map(|m| m.len()).unwrap_or_default();
+                        let upload_bytes = upload.upload.bytes;
+                        if metadata.bytes == upload_bytes && fs_metadata_bytes == upload_bytes {
                             debug!(%media_id, "Media already uploaded");
                             return Ok(());
                         }
@@ -78,7 +71,7 @@ impl Uploader {
 
             let mut file = File::create(&destination).await?;
 
-            let stream = client.get(&upload.url)
+            let stream = client.get(&upload.upload.url)
                                .send()
                                .await?
                                .bytes_stream()
@@ -88,11 +81,10 @@ impl Uploader {
 
             tokio::io::copy(&mut stream, &mut file).await?;
 
-            if let Some(notify_url) = upload.notify_url {
+            if let Some(notify_url) = upload.upload.notify_url {
                 client.post(&notify_url)
                       .json(&json!({
-                                "context": &upload.context,
-                                "session_id": &session_id,
+                                "context": &upload.upload.context,
                                 "media_id": &media_id,
                             }))
                       .send()
@@ -121,9 +113,8 @@ impl Uploader {
 
     fn notify_supervisor(&mut self) {
         self.state.updated_at = now();
-        self.issue_system_async(NotifyUploadProgress { job_id:   self.job_id,
-                                                       media_id: self.media_id.clone(),
-                                                       state:    self.state.clone(), });
+        self.issue_system_async(NotifyUploadProgress { job_id: self.job_id,
+                                                       upload: self.upload.clone(), });
     }
 }
 

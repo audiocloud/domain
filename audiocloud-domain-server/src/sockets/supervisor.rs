@@ -7,7 +7,7 @@ use actix::{
     Actor, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, WrapFuture,
 };
 use bytes::Bytes;
-use futures::FutureExt;
+use futures::{FutureExt, SinkExt};
 use nanoid::nanoid;
 use tracing::*;
 
@@ -22,7 +22,7 @@ use audiocloud_api::{RequestId, SerializableResult};
 use crate::sockets::web_rtc::{AddIceCandidate, WebRtcActor};
 use crate::sockets::web_sockets::WebSocketActor;
 use crate::sockets::{get_next_socket_id, SocketId, SocketMembership, SocketsOpts};
-use crate::task::messages::{NotifyStreamingPacket, NotifyTaskDeleted, NotifyTaskSecurity};
+use crate::tasks::messages::{NotifyStreamingPacket, NotifyTaskDeleted, NotifyTaskSecurity};
 use crate::ResponseMedia;
 
 use super::messages::*;
@@ -53,17 +53,6 @@ struct SocketContext {
 }
 
 impl Socket {
-    pub async fn send(&self, msg: SocketSend) {
-        match &self.actor_addr {
-            SocketActorAddr::WebRtc(addr) => {
-                let _ = addr.send(msg).await;
-            }
-            SocketActorAddr::WebSocket(addr) => {
-                let _ = addr.send(msg).await;
-            }
-        }
-    }
-
     pub fn is_valid(&self) -> bool {
         self.last_pong_at.elapsed() < Duration::from_secs(5)
         && match &self.actor_addr {
@@ -99,7 +88,15 @@ impl SocketsSupervisor {
             let ping = Bytes::from(ping);
 
             for socket in self.sockets.values() {
-                socket.send(SocketSend::Bytes(ping.clone()));
+                let pong = SocketSend::Bytes(ping.clone());
+                match &socket.actor_addr {
+                    SocketActorAddr::WebRtc(web_rtc) => {
+                        web_rtc.send(pong).map(drop).into_actor(self).spawn(ctx);
+                    }
+                    SocketActorAddr::WebSocket(web_socket) => {
+                        web_socket.send(pong).map(drop).into_actor(self).spawn(ctx);
+                    }
+                }
             }
         }
     }
@@ -135,7 +132,7 @@ impl SocketsSupervisor {
 
         let socket = match self.sockets.get_mut(&socket_id) {
             None => {
-                warn!(%socket_id, ?message, "Received message from unknown socket, dropping message");
+                warn!(%socket_id, "Received message from unknown socket, dropping message");
                 return;
             }
             Some(socket) => socket,
@@ -183,7 +180,14 @@ impl SocketsSupervisor {
                     ResponseMedia::Json => SocketSend::Bytes(MsgPack.serialize(&message)?.into()),
                 };
 
-                socket.send(cmd).map(drop).into_actor(self).spawn(ctx);
+                match &socket.actor_addr {
+                    SocketActorAddr::WebRtc(web_rtc) => {
+                        web_rtc.send(cmd).map(drop).into_actor(self).spawn(ctx);
+                    }
+                    SocketActorAddr::WebSocket(web_socket) => {
+                        web_socket.send(cmd).map(drop).into_actor(self).spawn(ctx);
+                    }
+                }
             }
         }
 

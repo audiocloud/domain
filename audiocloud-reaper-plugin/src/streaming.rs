@@ -4,10 +4,10 @@ use std::ptr::slice_from_raw_parts;
 
 use anyhow::anyhow;
 use libflac_sys::{
-    FLAC__byte, FLAC__stream_encoder_delete, FLAC__stream_encoder_finish, FLAC__stream_encoder_init_stream,
-    FLAC__stream_encoder_new, FLAC__stream_encoder_process, FLAC__stream_encoder_set_bits_per_sample,
-    FLAC__stream_encoder_set_channels, FLAC__stream_encoder_set_sample_rate, FLAC__stream_encoder_set_streamable_subset,
-    FLAC__StreamEncoder, FLAC__StreamEncoderWriteStatus,
+    FLAC__StreamEncoder, FLAC__StreamEncoderWriteStatus, FLAC__byte, FLAC__stream_encoder_delete,
+    FLAC__stream_encoder_finish, FLAC__stream_encoder_init_stream, FLAC__stream_encoder_new,
+    FLAC__stream_encoder_process, FLAC__stream_encoder_set_bits_per_sample, FLAC__stream_encoder_set_channels,
+    FLAC__stream_encoder_set_sample_rate, FLAC__stream_encoder_set_streamable_subset,
 };
 use r8brain_rs::PrecisionProfile;
 use tracing::*;
@@ -260,7 +260,7 @@ pub struct EncoderChain {
     encoder:        FlacEncoder,
     queue:          VecDeque<AudioBuf>,
     stream:         u64,
-    pub play: RequestPlay,
+    pub play:       RequestPlay,
     pub compressed: VecDeque<CompressedAudio>,
 }
 

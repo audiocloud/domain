@@ -7,6 +7,7 @@ use actix::{
 };
 use anyhow::anyhow;
 use clap::Args;
+use futures::executor::block_on;
 use futures::FutureExt;
 use once_cell::sync::OnceCell;
 use tracing::*;
@@ -16,7 +17,7 @@ use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice::udp_network::{EphemeralUDP, UDPNetwork};
-use webrtc::ice_transport::ice_candidate::RTCIceCandidate;
+use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
@@ -114,7 +115,8 @@ impl Actor for WebRtcActor {
         self.data_channel.on_close({
                              let addr = addr.clone();
                              Box::new(move || {
-                                 Box::pin(async {
+                                 let addr = addr.clone();
+                                 Box::pin(async move {
                                      let _ = addr.send(Closed).await;
                                  })
                              })
@@ -123,7 +125,8 @@ impl Actor for WebRtcActor {
         self.data_channel.on_message({
                              let addr = addr.clone();
                              Box::new(move |data| {
-                                 Box::pin(async {
+                                 let addr = addr.clone();
+                                 Box::pin(async move {
                                      let _ = addr.send(OnMessage(data)).await;
                                  })
                              })
@@ -136,7 +139,7 @@ impl Handler<Closed> for WebRtcActor {
 
     fn handle(&mut self, _: Closed, ctx: &mut Self::Context) {
         debug!("DataChannel closed, Closing WebRTC connection");
-        self.peer_connection.close();
+        let _ = block_on(self.peer_connection.close());
         ctx.stop();
     }
 }
@@ -177,18 +180,17 @@ impl Handler<SocketSend> for WebRtcActor {
 }
 
 impl Handler<AddIceCandidate> for WebRtcActor {
-    type Result = LocalBoxActorFuture<Self, anyhow::Result<()>>;
+    type Result = anyhow::Result<()>;
 
     fn handle(&mut self, msg: AddIceCandidate, ctx: &mut Self::Context) -> Self::Result {
-        match serde_json::from_str::<RTCIceCandidate>(&msg.candidate) {
-            Ok(candidate) => self.peer_connection
-                                 .add_ice_candidate(candidate)
-                                 .into_actor(self)
-                                 .map(|res, _, _| res.map_err(|err| err.into()))
-                                 .boxed_local(),
+        match serde_json::from_str::<RTCIceCandidateInit>(&msg.candidate) {
+            Ok(candidate) => {
+                block_on(self.peer_connection.add_ice_candidate(candidate))?;
+                Ok(())
+            }
             Err(error) => {
                 warn!(%error, id = %self.id, "Failed to parse ICE candidate");
-                fut::err(error.into()).into_actor(self).boxed_local()
+                Err(error.into())
             }
         }
     }

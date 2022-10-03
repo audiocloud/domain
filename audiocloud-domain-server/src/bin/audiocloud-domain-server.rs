@@ -2,10 +2,10 @@ use std::env;
 
 use actix_web::middleware::Logger;
 use actix_web::{App, HttpServer};
-use clap::{Args, Parser};
+use clap::Parser;
 use tracing::*;
 
-use audiocloud_domain_server::{config, db, events, fixed_instances, media, rest_api, sockets, task};
+use audiocloud_domain_server::{config, db, events, fixed_instances, media, rest_api, sockets, tasks};
 
 #[derive(Parser)]
 struct Opts {
@@ -32,7 +32,7 @@ struct Opts {
 
 #[actix_web::main]
 async fn main() -> anyhow::Result<()> {
-    // the domain server is basically a bunch of timers and event handlers running on top of a mongodb database.
+    // the domain server is basically a bunch of timers and event handlers running on top of an sqlite database.
 
     let _ = dotenv::dotenv();
 
@@ -57,11 +57,11 @@ async fn main() -> anyhow::Result<()> {
 
     debug!(" ✔ Media");
 
-    fixed_instances::init(cfg.clone()).await?;
+    let routing = fixed_instances::init(&cfg, db.clone()).await?;
 
     debug!(" ✔ Instances");
 
-    task::init(db.clone());
+    tasks::init(db.clone(), &cfg, routing)?;
 
     debug!(" ✔ Tasks");
 
@@ -69,11 +69,17 @@ async fn main() -> anyhow::Result<()> {
 
     events::init(cfg.command_source.clone(), cfg.event_sink.clone()).await?;
 
+    debug!(" ✔ Commands / Events");
+
     debug!("Going online");
 
-    task::become_online();
+    tasks::become_online();
 
-    sockets::init().await?;
+    debug!(" ✔ Online");
+
+    sockets::init(opts.sockets)?;
+
+    debug!("✔ Sockets");
 
     info!(bind = opts.bind,
           port = opts.port,
@@ -83,7 +89,7 @@ async fn main() -> anyhow::Result<()> {
     HttpServer::new(|| {
         App::new().wrap(Logger::default())
                   .configure(rest_api::configure)
-                  .configure(web_sockets::configure)
+                  .configure(sockets::configure)
     }).bind((opts.bind.as_str(), opts.port))?
       .run()
       .await?;

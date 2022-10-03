@@ -6,29 +6,29 @@ use reaper_medium::{MediaTrack, ProjectContext};
 use tracing::*;
 use uuid::Uuid;
 
+use crate::audio_engine;
+use crate::audio_engine::media_item::{EngineMediaItem, EngineMediaItemTemplate};
+use crate::audio_engine::project::{get_track_peak_meters, EngineProject, EngineProjectTemplateSnapshot};
+use crate::audio_engine::{append_track, delete_track, set_track_chunk};
 use audiocloud_api::common::model::MultiChannelValue;
 use audiocloud_api::common::task::{NodePadId, TrackMedia, TrackNode, UpdateTaskTrackMedia};
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, TrackMediaId, TrackNodeId};
-use crate::audio_engine;
-use crate::audio_engine::media_item::{AudioEngineMediaItem, AudioEngineMediaItemTemplate};
-use crate::audio_engine::project::{AudioEngineProject, AudioEngineProjectTemplateSnapshot, get_track_peak_meters};
-use crate::audio_engine::{append_track, delete_track, set_track_chunk};
 
 #[derive(Debug)]
-pub struct AudioEngineMediaTrack {
-    id: TrackNodeId,
+pub struct EngineMediaTrack {
+    id:       TrackNodeId,
     track_id: Uuid,
     app_id:   AppId,
-    flow_id: NodePadId,
+    flow_id:  NodePadId,
     track:    MediaTrack,
-    media:    HashMap<TrackMediaId, AudioEngineMediaItem>,
-    spec: TrackNode,
+    media:    HashMap<TrackMediaId, EngineMediaItem>,
+    spec:     TrackNode,
     root_dir: PathBuf,
 }
 
-impl AudioEngineMediaTrack {
+impl EngineMediaTrack {
     #[instrument(skip_all, err)]
-    pub fn new(project: &AudioEngineProject,
+    pub fn new(project: &EngineProject,
                app_id: AppId,
                track_id: TrackNodeId,
                spec: TrackNode,
@@ -46,7 +46,7 @@ impl AudioEngineMediaTrack {
 
         for (media_id, media_spec) in spec.media.clone() {
             media.insert(media_id.clone(),
-                         AudioEngineMediaItem::new(track, &root_dir, &app_id, media_id, media_spec, existing_media)?);
+                         EngineMediaItem::new(track, &root_dir, &app_id, media_id, media_spec, existing_media)?);
         }
 
         let rv = Self { track_id: id,
@@ -70,8 +70,8 @@ impl AudioEngineMediaTrack {
         &self.flow_id
     }
 
-    pub fn get_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<String> {
-        Ok(audio_engine::beautify_chunk(AudioEngineMediaTrackTemplate { project, track: self }.render()?))
+    pub fn get_state_chunk(&self, project: &EngineProjectTemplateSnapshot) -> anyhow::Result<String> {
+        Ok(audio_engine::beautify_chunk(EngineMediaTrackTemplate { project, track: self }.render()?))
     }
 
     pub fn on_media_updated(&mut self, available: &HashMap<AppMediaObjectId, String>) -> bool {
@@ -112,7 +112,7 @@ impl AudioEngineMediaTrack {
         self.delete_media(&media_id)?;
 
         self.media.insert(media_id.clone(),
-                          AudioEngineMediaItem::new(self.track, &self.root_dir, &self.app_id, media_id, spec, media)?);
+                          EngineMediaItem::new(self.track, &self.root_dir, &self.app_id, media_id, spec, media)?);
 
         Ok(true)
     }
@@ -128,7 +128,7 @@ impl AudioEngineMediaTrack {
     }
 
     #[instrument(skip_all, err, fields(id = %self.id))]
-    pub fn update_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<()> {
+    pub fn update_state_chunk(&self, project: &EngineProjectTemplateSnapshot) -> anyhow::Result<()> {
         set_track_chunk(project.context(), self.track, &self.get_state_chunk(project)?)?;
 
         Ok(())
@@ -142,7 +142,7 @@ impl AudioEngineMediaTrack {
 
 #[derive(Template)]
 #[template(path = "audio_engine/media_track.txt")]
-struct AudioEngineMediaTrackTemplate<'a> {
-    project: &'a AudioEngineProjectTemplateSnapshot,
-    track:   &'a AudioEngineMediaTrack,
+struct EngineMediaTrackTemplate<'a> {
+    project: &'a EngineProjectTemplateSnapshot,
+    track:   &'a EngineMediaTrack,
 }

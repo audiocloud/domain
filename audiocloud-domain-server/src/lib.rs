@@ -12,7 +12,7 @@ pub mod media;
 pub mod nats;
 pub mod rest_api;
 pub mod sockets;
-pub mod task;
+pub mod tasks;
 pub mod tracker;
 
 #[derive(Clone, Copy, IsVariant)]

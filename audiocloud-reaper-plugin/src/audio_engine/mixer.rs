@@ -1,42 +1,42 @@
-use std::collections::HashMap;
-use std::ffi::CStr;
 use askama::Template;
 use reaper_medium::{MediaTrack, ProjectContext, Reaper, TrackAttributeKey};
+use std::collections::HashMap;
+use std::ffi::CStr;
 use tracing::*;
 use uuid::Uuid;
 
+use crate::audio_engine::project::{
+    get_track_peak_meters, set_track_master_send, EngineProject, EngineProjectTemplateSnapshot,
+};
+use crate::audio_engine::ConnectionTemplate;
+use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk};
 use audiocloud_api::common::media::RequestRender;
 use audiocloud_api::common::model::MultiChannelValue;
 use audiocloud_api::common::task::{MixerNode, NodePadId};
 use audiocloud_api::newtypes::MixerNodeId;
-use crate::audio_engine::project::{
-    AudioEngineProject, AudioEngineProjectTemplateSnapshot, get_track_peak_meters, set_track_master_send,
-};
-use crate::audio_engine::ConnectionTemplate;
-use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk};
 
 #[derive(Debug)]
-pub struct AudioEngineMixer {
-    mixer_id: MixerNodeId,
-    input_flow_id: NodePadId,
+pub struct AudioMixer {
+    mixer_id:       MixerNodeId,
+    input_flow_id:  NodePadId,
     output_flow_id: NodePadId,
     input_id:       Uuid,
     output_id:      Uuid,
     input_track:    MediaTrack,
     output_track:   MediaTrack,
-    spec: MixerNode,
+    spec:           MixerNode,
 }
 
-impl AudioEngineMixer {
+impl AudioMixer {
     pub(crate) fn delete(&self, context: ProjectContext) {
         delete_track(context, self.input_track);
         delete_track(context, self.output_track);
     }
 }
 
-impl AudioEngineMixer {
+impl AudioMixer {
     #[instrument(skip_all, err)]
-    pub fn new(project: &AudioEngineProject, mixer_id: MixerNodeId, spec: MixerNode) -> anyhow::Result<Self> {
+    pub fn new(project: &EngineProject, mixer_id: MixerNodeId, spec: MixerNode) -> anyhow::Result<Self> {
         let input_flow_id = NodePadId::MixerInput(mixer_id.clone());
         let output_flow_id = NodePadId::MixerOutput(mixer_id.clone());
 
@@ -59,16 +59,16 @@ impl AudioEngineMixer {
         self.input_track
     }
 
-    pub fn get_input_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<String> {
-        Ok(beautify_chunk(AudioEngineMixerInputTemplate { project, mixer: self }.render()?))
+    pub fn get_input_state_chunk(&self, project: &EngineProjectTemplateSnapshot) -> anyhow::Result<String> {
+        Ok(beautify_chunk(AudioMixerInputTemplate { project, mixer: self }.render()?))
     }
 
-    pub fn get_output_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<String> {
-        Ok(beautify_chunk(AudioEngineMixerOutputTemplate { project, mixer: self }.render()?))
+    pub fn get_output_state_chunk(&self, project: &EngineProjectTemplateSnapshot) -> anyhow::Result<String> {
+        Ok(beautify_chunk(AudioMixerOutputTemplate { project, mixer: self }.render()?))
     }
 
     #[instrument(skip_all, err, fields(id = %self.mixer_id))]
-    pub fn update_state_chunk(&self, project: &AudioEngineProjectTemplateSnapshot) -> anyhow::Result<()> {
+    pub fn update_state_chunk(&self, project: &EngineProjectTemplateSnapshot) -> anyhow::Result<()> {
         set_track_chunk(project.context(),
                         self.input_track,
                         &self.get_input_state_chunk(project)?)?;
@@ -144,14 +144,14 @@ impl AudioEngineMixer {
 
 #[derive(Template)]
 #[template(path = "audio_engine/mixer_track_input.txt")]
-struct AudioEngineMixerInputTemplate<'a> {
-    project: &'a AudioEngineProjectTemplateSnapshot,
-    mixer:   &'a AudioEngineMixer,
+struct AudioMixerInputTemplate<'a> {
+    project: &'a EngineProjectTemplateSnapshot,
+    mixer:   &'a AudioMixer,
 }
 
 #[derive(Template)]
 #[template(path = "audio_engine/mixer_track_output.txt")]
-struct AudioEngineMixerOutputTemplate<'a> {
-    project: &'a AudioEngineProjectTemplateSnapshot,
-    mixer:   &'a AudioEngineMixer,
+struct AudioMixerOutputTemplate<'a> {
+    project: &'a EngineProjectTemplateSnapshot,
+    mixer:   &'a AudioMixer,
 }

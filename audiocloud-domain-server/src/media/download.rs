@@ -2,62 +2,63 @@ use std::path::PathBuf;
 
 use actix::{Actor, ActorContext, ActorFutureExt, Context, ContextFutureSpawner, Supervised, WrapFuture};
 use actix_broker::BrokerIssue;
+use futures::executor::block_on;
+use reqwest::Client;
 use serde_json::json;
 use tokio::fs::File;
+use tokio::task::block_in_place;
 use tracing::*;
 
-use audiocloud_api::common::media::{DownloadFromDomain, MediaJobState};
 use audiocloud_api::common::time::now;
-use audiocloud_api::newtypes::AppMediaObjectId;
+use audiocloud_api::MediaDownload;
 
-use crate::media::messages::{DownloadJobId, NotifyDownloadProgress};
+use crate::db::Db;
+use crate::media::messages::NotifyDownloadProgress;
+use crate::media::DownloadJobId;
 
 #[derive(Debug)]
 pub struct Downloader {
+    db:       Db,
     job_id:   DownloadJobId,
-    media_id: AppMediaObjectId,
-    download: DownloadFromDomain,
+    download: MediaDownload,
     source:   PathBuf,
-    state:    MediaJobState,
-    client:   reqwest::Client,
+    client:   Client,
 }
 
 impl Downloader {
-    pub fn new(job_id: DownloadJobId,
-               client: reqwest::Client,
+    pub fn new(db: Db,
+               job_id: DownloadJobId,
+               client: Client,
                source: PathBuf,
-               media_id: AppMediaObjectId,
-               download: DownloadFromDomain)
+               download: MediaDownload)
                -> anyhow::Result<Self> {
-        let state = MediaJobState::default();
-
-        Ok(Self { job_id,
-                  media_id,
+        Ok(Self { db,
+                  job_id,
                   download,
                   source,
-                  client,
-                  state })
+                  client })
     }
 
     #[instrument(skip(ctx))]
-    fn download(&self, ctx: &mut Context<Self>) {
+    fn download(&mut self, ctx: &mut Context<Self>) {
         debug!("starting download");
 
         let source = self.source.clone();
         let download = self.download.clone();
         let client = self.client.clone();
-        let media_id = self.media_id.clone();
+        let media_id = self.download.media_id.clone();
+        let db = self.db.clone();
 
         async move {
-            client.put(&download.url)
+            client.put(&download.download.url)
                   .body(File::open(&source).await?)
                   .send()
                   .await?;
 
-            if let Some(notify_url) = &download.notify_url {
+            if let Some(notify_url) = &download.download.notify_url {
                 client.post(notify_url)
                       .json(&json!({
-                                "context": &download.context,
+                                "context": &download.download.context,
                                 "id": &media_id,
                             }))
                       .send()
@@ -68,19 +69,19 @@ impl Downloader {
         }.into_actor(self)
          .map(|res, actor, ctx| match res {
              Ok(_) => {
-                 actor.state.error = None;
-                 actor.state.in_progress = false;
+                 actor.download.state.error = None;
+                 actor.download.state.in_progress = false;
 
-                 actor.notify_supervisor();
+                 block_on(actor.save_and_notify());
 
                  ctx.stop();
              }
              Err(err) => {
                  warn!(%err, "download failed");
 
-                 actor.state.error = Some(err.to_string());
+                 actor.download.state.error = Some(err.to_string());
 
-                 actor.notify_supervisor();
+                 block_on(actor.save_and_notify());
 
                  actor.restarting(ctx);
              }
@@ -88,12 +89,11 @@ impl Downloader {
          .spawn(ctx);
     }
 
-    fn notify_supervisor(&mut self) {
-        self.state.updated_at = now();
-
+    async fn save_and_notify(&mut self) {
+        self.download.state.updated_at = now();
+        let _ = self.db.save_download_job(&self.job_id, &self.download).await;
         self.issue_system_async(NotifyDownloadProgress { job_id:   self.job_id,
-                                                         media_id: self.media_id.clone(),
-                                                         state:    self.state.clone(), });
+                                                         download: self.download.clone(), });
     }
 }
 
@@ -108,20 +108,20 @@ impl Actor for Downloader {
 impl Supervised for Downloader {
     #[instrument(skip(ctx))]
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        self.state.progress = 0.0;
+        self.download.state.progress = 0.0;
 
-        if self.state.retry > 5 {
+        if self.download.state.retry > 5 {
             warn!("final failure");
 
-            self.state.in_progress = false;
+            self.download.state.in_progress = false;
 
-            self.notify_supervisor();
+            block_on(self.save_and_notify());
 
             ctx.stop();
         } else {
-            self.state.retry += 1;
+            self.download.state.retry += 1;
 
-            self.notify_supervisor();
+            block_on(self.save_and_notify());
 
             self.download(ctx);
         }

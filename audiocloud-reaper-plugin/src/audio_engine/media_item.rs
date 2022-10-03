@@ -3,30 +3,30 @@ use std::ffi::CStr;
 use std::path::PathBuf;
 
 use askama::Template;
+use audiocloud_api::common::task::{TrackMedia, UpdateTaskTrackMedia};
 use cstr::cstr;
 use reaper_medium::{MediaItem, MediaItemTake, MediaTrack, Reaper};
 use tracing::*;
 use uuid::Uuid;
-use audiocloud_api::common::task::{TrackMedia, UpdateTaskTrackMedia};
 
+use crate::audio_engine::media_track::EngineMediaTrack;
+use crate::audio_engine::project::EngineProjectTemplateSnapshot;
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, TrackMediaId};
-use crate::audio_engine::media_track::AudioEngineMediaTrack;
-use crate::audio_engine::project::AudioEngineProjectTemplateSnapshot;
 
 #[derive(Debug)]
-pub struct AudioEngineMediaItem {
-    media_id: TrackMediaId,
+pub struct EngineMediaItem {
+    media_id:  TrackMediaId,
     object_id: AppMediaObjectId,
     item_id:   Uuid,
     take_id:   Uuid,
     track:     MediaTrack,
     item:      MediaItem,
     take:      MediaItemTake,
-    spec: TrackMedia,
+    spec:      TrackMedia,
     path:      Option<String>,
 }
 
-impl AudioEngineMediaItem {
+impl EngineMediaItem {
     #[instrument(skip_all, err)]
     pub fn new(track: MediaTrack,
                media_root: &PathBuf,
@@ -146,16 +146,16 @@ fn get_media_item_take_uuid(media_item_take: MediaItemTake) -> anyhow::Result<Uu
 
 #[derive(Template)]
 #[template(path = "audio_engine/media_item.txt")]
-pub struct AudioEngineMediaItemTemplate<'a> {
-    media:   &'a AudioEngineMediaItem,
-    track:   &'a AudioEngineMediaTrack,
-    project: &'a AudioEngineProjectTemplateSnapshot,
+pub struct EngineMediaItemTemplate<'a> {
+    media:   &'a EngineMediaItem,
+    track:   &'a EngineMediaTrack,
+    project: &'a EngineProjectTemplateSnapshot,
 }
 
-impl<'a> AudioEngineMediaItemTemplate<'a> {
-    pub fn new(media: &'a AudioEngineMediaItem,
-               track: &'a AudioEngineMediaTrack,
-               project: &'a AudioEngineProjectTemplateSnapshot)
+impl<'a> EngineMediaItemTemplate<'a> {
+    pub fn new(media: &'a EngineMediaItem,
+               track: &'a EngineMediaTrack,
+               project: &'a EngineProjectTemplateSnapshot)
                -> Self {
         Self { media, track, project }
     }

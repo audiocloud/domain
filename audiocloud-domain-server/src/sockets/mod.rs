@@ -1,10 +1,12 @@
 use actix::{Addr, Supervisor};
 use anyhow::anyhow;
-use audiocloud_api::{SecureKey, SocketId};
 use clap::Args;
 use nanoid::nanoid;
+use once_cell::sync::OnceCell;
+
+use audiocloud_api::{SecureKey, SocketId};
 pub use supervisor::SocketsSupervisor;
-use tokio::sync::OnceCell;
+pub use web_sockets::configure;
 
 mod messages;
 mod supervisor;
@@ -25,14 +27,15 @@ fn get_next_socket_id() -> SocketId {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct SocketMembership {
-    secure_key:    SecureKey,
-    socket_id: SocketId,
+    secure_key: SecureKey,
+    socket_id:  SocketId,
 }
 
 pub fn init(cfg: SocketsOpts) -> anyhow::Result<()> {
+    let web_rtc_cfg = cfg.web_rtc.clone();
     let supervisor = SocketsSupervisor::new(cfg);
 
-    web_rtc::init(&cfg.web_rtc)?;
+    web_rtc::init(&web_rtc_cfg)?;
 
     SOCKETS_SUPERVISOR.set(Supervisor::start(move |_| supervisor))
                       .map_err(|_| anyhow!("Sockets supervisor already initialized"))?;

@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 pub fn merge_values(maybe_object: &mut Value, other: Value) {
-    if let ((Value::Object(mut object), Value::Object(other))) = (maybe_object, other) {
+    if let (Value::Object(object), Value::Object(other)) = (maybe_object, other) {
         object.extend(other.into_iter());
     }
 }

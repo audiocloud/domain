@@ -2,31 +2,39 @@ use std::collections::HashMap;
 
 use actix::Message;
 
-use crate::DomainResult;
-use audiocloud_api::audio_engine::event::AudioEngineEvent;
+use audiocloud_api::audio_engine::event::EngineEvent;
 use audiocloud_api::common::change::{DesiredTaskPlayState, TaskState};
 use audiocloud_api::common::media::{MediaObject, RenderId};
 use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::common::task::TaskSpec;
-use audiocloud_api::domain::tasks::TaskUpdated;
-use audiocloud_api::domain::DomainCommand;
+use audiocloud_api::domain::tasks::{TaskCreated, TaskDeleted, TaskUpdated};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
-use audiocloud_api::{StreamingPacket, TaskReservation};
+use audiocloud_api::{CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, StreamingPacket, TaskReservation};
+
+use crate::DomainResult;
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "DomainResult<TaskUpdated>")]
-pub struct SetTaskDesiredState {
+pub struct SetTaskDesiredPlayState {
     pub task_id: AppTaskId,
     pub desired: DesiredTaskPlayState,
     pub version: u64,
 }
 
 #[derive(Message, Clone, Debug)]
-#[rtype(result = "anyhow::Result<()>")]
-pub struct ExecuteTaskCommand {
-    pub session_id: AppTaskId,
-    pub command:    DomainCommand,
-    pub security:   TaskPermissions,
+#[rtype(result = "DomainResult<TaskCreated>")]
+pub struct CreateTask {
+    pub app_session_id: AppTaskId,
+    pub reservations:   CreateTaskReservation,
+    pub spec:           CreateTaskSpec,
+    pub security:       CreateTaskSecurity,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<TaskDeleted>")]
+pub struct DeleteTask {
+    pub app_session_id: AppTaskId,
+    pub version:        u64,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -59,8 +67,8 @@ pub struct NotifyTaskSpec {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyTaskReservation {
-    pub task_id: AppTaskId,
-    pub reservation:    TaskReservation,
+    pub task_id:     AppTaskId,
+    pub reservation: TaskReservation,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -72,9 +80,9 @@ pub struct NotifyTaskState {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifyAudioEngineEvent {
+pub struct NotifyEngineEvent {
     pub engine_id: EngineId,
-    pub event:     AudioEngineEvent,
+    pub event:     EngineEvent,
 }
 
 #[derive(Message, Clone, Debug)]

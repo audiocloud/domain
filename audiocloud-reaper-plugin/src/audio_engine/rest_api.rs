@@ -4,15 +4,15 @@ use std::time::Duration;
 use actix_web::error::ErrorInternalServerError;
 use actix_web::rt::time::timeout;
 use actix_web::rt::Runtime;
-use actix_web::{App, Error, get, HttpServer, post, put, Responder, web};
+use actix_web::{get, post, put, web, App, Error, HttpServer, Responder};
 use flume::Sender;
 use serde::{Deserialize, Serialize};
 use tracing_actix_web::TracingLogger;
 
-use audiocloud_api::audio_engine::command::AudioEngineCommand;
-use audiocloud_api::common::task::TaskSpec;
-use audiocloud_api::cloud::domains::InstanceRouting;
+use audiocloud_api::audio_engine::command::EngineCommand;
+use audiocloud_api::cloud::domains::FixedInstanceRouting;
 use audiocloud_api::common::media::{PlayId, RenderId, RequestPlay, RequestRender};
+use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::newtypes::{AppId, AppMediaObjectId, AppTaskId, FixedInstanceId, TaskId};
 
 use crate::audio_engine::{EngineStatus, ReaperEngineCommand};
@@ -24,7 +24,7 @@ pub fn run(tx_cmd: Sender<ReaperEngineCommand>) {
 }
 
 async fn http_server(tx_cmd: Sender<ReaperEngineCommand>) -> anyhow::Result<()> {
-    let data = web::Data::new(AudioEngineClient(tx_cmd));
+    let data = web::Data::new(EngineClient(tx_cmd));
     HttpServer::new(move || {
         App::new().app_data(data.clone())
                   .service(get_status)
@@ -43,9 +43,9 @@ async fn http_server(tx_cmd: Sender<ReaperEngineCommand>) -> anyhow::Result<()> 
 }
 
 #[derive(Clone)]
-struct AudioEngineClient(Sender<ReaperEngineCommand>);
+struct EngineClient(Sender<ReaperEngineCommand>);
 
-impl AudioEngineClient {
+impl EngineClient {
     async fn request<R>(&self, f: impl FnOnce(Sender<anyhow::Result<R>>) -> ReaperEngineCommand) -> anyhow::Result<R> {
         let (tx, rx) = flume::unbounded();
         self.0.send_async(f(tx)).await?;
@@ -57,39 +57,52 @@ impl AudioEngineClient {
     }
 
     pub async fn render(&self, session_id: AppTaskId, render: RequestRender) -> anyhow::Result<()> {
-        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::Render { task_id: session_id, render }, tx)))
+        self.request(move |tx| {
+                ReaperEngineCommand::Request((EngineCommand::Render { task_id: session_id,
+                                                                      render },
+                                              tx))
+            })
             .await
     }
 
     pub async fn play(&self, session_id: AppTaskId, play: RequestPlay) -> anyhow::Result<()> {
-        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::Play { task_id: session_id, play }, tx)))
+        self.request(move |tx| {
+                ReaperEngineCommand::Request((EngineCommand::Play { task_id: session_id,
+                                                                    play },
+                                              tx))
+            })
             .await
     }
 
     pub async fn stop_render(&self, session_id: AppTaskId, render_id: RenderId) -> anyhow::Result<()> {
         self.request(move |tx| {
-                ReaperEngineCommand::Request((AudioEngineCommand::StopRender { task_id: session_id, render_id }, tx))
+                ReaperEngineCommand::Request((EngineCommand::CancelRender { task_id: session_id,
+                                                                            render_id },
+                                              tx))
             })
             .await
     }
 
     pub async fn stop_play(&self, session_id: AppTaskId, play_id: PlayId) -> anyhow::Result<()> {
-        self.request(move |tx| ReaperEngineCommand::Request((AudioEngineCommand::StopPlay { task_id: session_id, play_id }, tx)))
+        self.request(move |tx| {
+                ReaperEngineCommand::Request((EngineCommand::StopPlay { task_id: session_id,
+                                                                        play_id },
+                                              tx))
+            })
             .await
     }
 
     pub async fn set_session_spec(&self,
                                   session_id: AppTaskId,
                                   spec: TaskSpec,
-                                  instances: HashMap<FixedInstanceId, InstanceRouting>,
+                                  instances: HashMap<FixedInstanceId, FixedInstanceRouting>,
                                   media_ready: HashMap<AppMediaObjectId, String>)
                                   -> anyhow::Result<()> {
         self.request(move |tx| {
-                ReaperEngineCommand::Request((AudioEngineCommand::SetSpec {
-                    task_id: session_id,
-                                                                            spec,
-                                                                            instances,
-                                                                            media_ready },
+                ReaperEngineCommand::Request((EngineCommand::SetSpec { task_id: session_id,
+                                                                       spec,
+                                                                       instances,
+                                                                       media_ready },
                                               tx))
             })
             .await
@@ -97,12 +110,12 @@ impl AudioEngineClient {
 }
 
 #[get("/v1/status")]
-async fn get_status(client: web::Data<AudioEngineClient>) -> impl Responder {
+async fn get_status(client: web::Data<EngineClient>) -> impl Responder {
     Ok::<_, Error>(web::Json(client.get_status().await.map_err(ErrorInternalServerError)?))
 }
 
 #[put("/v1/apps/{app_id}/sessions/{session_id}/spec")]
-async fn set_spec(client: web::Data<AudioEngineClient>,
+async fn set_spec(client: web::Data<EngineClient>,
                   path: web::Path<(AppId, TaskId)>,
                   body: web::Json<SetSessionSpec>)
                   -> impl Responder {
@@ -116,7 +129,7 @@ async fn set_spec(client: web::Data<AudioEngineClient>,
 }
 
 #[post("/v1/apps/{app_id}/sessions/{session_id}/render")]
-async fn do_render(client: web::Data<AudioEngineClient>,
+async fn do_render(client: web::Data<EngineClient>,
                    path: web::Path<(AppId, TaskId)>,
                    body: web::Json<RequestRender>)
                    -> impl Responder {
@@ -128,7 +141,7 @@ async fn do_render(client: web::Data<AudioEngineClient>,
 }
 
 #[post("/v1/apps/{app_id}/sessions/{session_id}/play")]
-async fn do_play(client: web::Data<AudioEngineClient>,
+async fn do_play(client: web::Data<EngineClient>,
                  path: web::Path<(AppId, TaskId)>,
                  body: web::Json<RequestPlay>)
                  -> impl Responder {
@@ -140,9 +153,7 @@ async fn do_play(client: web::Data<AudioEngineClient>,
 }
 
 #[post("/v1/apps/{app_id}/sessions/{session_id}/stop/play/{play_id}")]
-async fn do_stop_play(client: web::Data<AudioEngineClient>,
-                      path: web::Path<(AppId, TaskId, PlayId)>)
-                      -> impl Responder {
+async fn do_stop_play(client: web::Data<EngineClient>, path: web::Path<(AppId, TaskId, PlayId)>) -> impl Responder {
     let (app_id, session_id, play_id) = path.into_inner();
     let id = AppTaskId::new(app_id, session_id);
 
@@ -150,9 +161,7 @@ async fn do_stop_play(client: web::Data<AudioEngineClient>,
 }
 
 #[post("/v1/apps/{app_id}/sessions/{session_id}/stop/render/{render_id}")]
-async fn do_stop_render(client: web::Data<AudioEngineClient>,
-                        path: web::Path<(AppId, TaskId, RenderId)>)
-                        -> impl Responder {
+async fn do_stop_render(client: web::Data<EngineClient>, path: web::Path<(AppId, TaskId, RenderId)>) -> impl Responder {
     let (app_id, session_id, render_id) = path.into_inner();
     let id = AppTaskId::new(app_id, session_id);
 
@@ -163,7 +172,7 @@ async fn do_stop_render(client: web::Data<AudioEngineClient>,
 
 #[derive(Deserialize, Serialize)]
 struct SetSessionSpec {
-    session: TaskSpec,
-    instances:   HashMap<FixedInstanceId, InstanceRouting>,
+    session:     TaskSpec,
+    instances:   HashMap<FixedInstanceId, FixedInstanceRouting>,
     media_ready: HashMap<AppMediaObjectId, String>,
 }

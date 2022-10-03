@@ -11,26 +11,28 @@ use lazy_static::lazy_static;
 use reaper_medium::ProjectContext::CurrentProject;
 use reaper_medium::{
     AutoSeekBehavior, ChunkCacheHint, CommandId, EditMode, MediaTrack, PlayState, PositionInSeconds, ProjectContext,
-    ProjectRef, Reaper, ReaperPanValue, ReaperVolumeValue, ReaProject, SetEditCurPosOptions, TimeRangeType,
+    ProjectRef, ReaProject, Reaper, ReaperPanValue, ReaperVolumeValue, SetEditCurPosOptions, TimeRangeType,
     TrackAttributeKey, TrackSendCategory, TrackSendRef,
 };
 use tempdir::TempDir;
 use tracing::*;
 
-use audiocloud_api::audio_engine::event::AudioEngineEvent;
+use audiocloud_api::audio_engine::event::EngineEvent;
+use audiocloud_api::cloud::domains::FixedInstanceRouting;
 use audiocloud_api::common::change::{ModifyTaskSpec, UpdateTaskPlay};
-use audiocloud_api::common::task::{ConnectionValues, FixedInstanceNode, MixerNode, NodeConnection, NodePadId, TaskSpec, TimeSegment, TrackNode};
-use audiocloud_api::cloud::domains::InstanceRouting;
 use audiocloud_api::common::media::{PlayId, RenderId, RequestPlay, RequestRender};
 use audiocloud_api::common::model::{ModelValue, MultiChannelValue};
+use audiocloud_api::common::task::{
+    ConnectionValues, FixedInstanceNode, MixerNode, NodeConnection, NodePadId, TaskSpec, TimeSegment, TrackNode,
+};
+use audiocloud_api::common::time::Timestamped;
 use audiocloud_api::newtypes::{
     AppMediaObjectId, AppTaskId, FixedInstanceId, FixedInstanceNodeId, MixerNodeId, NodeConnectionId, TrackNodeId,
 };
-use audiocloud_api::common::time::Timestamped;
 
-use crate::audio_engine::fixed_instance::AudioEngineFixedInstance;
-use crate::audio_engine::media_track::AudioEngineMediaTrack;
-use crate::audio_engine::mixer::AudioEngineMixer;
+use crate::audio_engine::fixed_instance::EngineFixedInstance;
+use crate::audio_engine::media_track::EngineMediaTrack;
+use crate::audio_engine::mixer::AudioMixer;
 use crate::audio_engine::{EngineStatus, PluginRegistry};
 
 #[derive(Debug, Clone)]
@@ -42,29 +44,29 @@ pub enum ProjectPlayState {
 }
 
 #[derive(Debug)]
-pub struct AudioEngineProject {
-    id: AppTaskId,
+pub struct EngineProject {
+    id:                    AppTaskId,
     project:               ReaProject,
-    tracks:                HashMap<TrackNodeId, AudioEngineMediaTrack>,
-    fixed_instances:       HashMap<FixedInstanceNodeId, AudioEngineFixedInstance>,
-    mixers:                HashMap<MixerNodeId, AudioEngineMixer>,
-    spec: TaskSpec,
+    tracks:                HashMap<TrackNodeId, EngineMediaTrack>,
+    fixed_instances:       HashMap<FixedInstanceNodeId, EngineFixedInstance>,
+    mixers:                HashMap<MixerNodeId, AudioMixer>,
+    spec:                  TaskSpec,
     local_media_root:      PathBuf,
     shared_media_root:     PathBuf,
     pub play_state:        Timestamped<ProjectPlayState>,
     pub temp_dir:          TempDir,
     pub session_path:      PathBuf,
     pub reaper_play_state: Timestamped<PlayState>,
-    pub events:            VecDeque<AudioEngineEvent>,
+    pub events:            VecDeque<EngineEvent>,
 }
 
 #[derive(Debug, Clone)]
-pub struct AudioEngineProjectTemplateSnapshot {
+pub struct EngineProjectTemplateSnapshot {
     context:     ProjectContext,
     connections: HashMap<NodeConnectionId, NodeConnection>,
 }
 
-impl AudioEngineProjectTemplateSnapshot {
+impl EngineProjectTemplateSnapshot {
     pub fn context(&self) -> ProjectContext {
         self.context
     }
@@ -116,19 +118,19 @@ lazy_static! {
 
 #[derive(Template)]
 #[template(path = "audio_engine/project.txt")]
-struct AudioEngineProjectTemplate<'a> {
+struct EngineProjectTemplate<'a> {
     spec:       &'a TaskSpec,
     session_id: &'a AppTaskId,
     media_root: String,
 }
 
-impl AudioEngineProject {
+impl EngineProject {
     #[instrument(skip_all, err)]
     pub fn new(id: AppTaskId,
                temp_dir: TempDir,
                shared_media_root: PathBuf,
                session_spec: TaskSpec,
-               instances: HashMap<FixedInstanceId, InstanceRouting>,
+               instances: HashMap<FixedInstanceId, FixedInstanceRouting>,
                media: HashMap<AppMediaObjectId, String>)
                -> anyhow::Result<Self> {
         let reaper = Reaper::get();
@@ -138,9 +140,9 @@ impl AudioEngineProject {
         let session_path = temp_dir.path().join("session.rpp");
 
         fs::write(&session_path,
-                  AudioEngineProjectTemplate { spec:       &session_spec,
-                                               session_id: &id,
-                                               media_root: local_media_root.to_string_lossy().to_string(), }.render()?)?;
+                  EngineProjectTemplate { spec:       &session_spec,
+                                          session_id: &id,
+                                          media_root: local_media_root.to_string_lossy().to_string(), }.render()?)?;
 
         reaper.main_on_command_ex(*CMD_CREATE_PROJECT_TAB, 0, CurrentProject);
 
@@ -184,9 +186,9 @@ impl AudioEngineProject {
         Ok(rv)
     }
 
-    pub fn template_snapshot(&self) -> AudioEngineProjectTemplateSnapshot {
-        AudioEngineProjectTemplateSnapshot { context:     self.context(),
-                                             connections: self.spec.connections.clone(), }
+    pub fn template_snapshot(&self) -> EngineProjectTemplateSnapshot {
+        EngineProjectTemplateSnapshot { context:     self.context(),
+                                        connections: self.spec.connections.clone(), }
     }
 
     pub fn play_ready(&mut self, play_id: PlayId) {
@@ -211,7 +213,7 @@ impl AudioEngineProject {
                 debug!(play_id = %play.play_id, "waiting for plugin to be ready...");
                 if self.play_state.elapsed().num_seconds() > 1 {
                     self.play_state = ProjectPlayState::Stopped.into();
-                    self.events.push_back(AudioEngineEvent::Error { task_id: self.id.clone(),
+                    self.events.push_back(EngineEvent::Error { task_id: self.id.clone(),
                         error:
                         format!("Timed out preparing resampling or compression"), });
                 }
@@ -247,15 +249,15 @@ impl AudioEngineProject {
         if let Some(mixer) = self.mixers.get_mut(&mixer_id) {
             if let Some(path) = mixer.clear_render() {
                 self.events
-                    .push_back(AudioEngineEvent::RenderingFinished { task_id: self.id.clone(),
-                                                                     render_id,
-                                                                     path });
+                    .push_back(EngineEvent::RenderingFinished { task_id: self.id.clone(),
+                                                                render_id,
+                                                                path });
             } else {
                 // we did not get a path
                 self.events
-                    .push_back(AudioEngineEvent::RenderingFailed { task_id: self.id.clone(),
-                                                                   render_id,
-                                                                   error: format!("Rendered file not found") });
+                    .push_back(EngineEvent::RenderingFailed { task_id: self.id.clone(),
+                                                              render_id,
+                                                              error: format!("Rendered file not found") });
             }
         }
 
@@ -320,7 +322,7 @@ impl AudioEngineProject {
     }
 }
 
-impl Drop for AudioEngineProject {
+impl Drop for EngineProject {
     fn drop(&mut self) {
         if self.project.as_ptr() != null_mut() {
             let reaper = Reaper::get();
@@ -334,14 +336,14 @@ impl Drop for AudioEngineProject {
     }
 }
 
-impl AudioEngineProject {
+impl EngineProject {
     pub fn add_track(&mut self,
                      id: TrackNodeId,
                      spec: TrackNode,
                      media: &HashMap<AppMediaObjectId, String>)
                      -> anyhow::Result<()> {
         self.tracks.insert(id.clone(),
-                           AudioEngineMediaTrack::new(self, self.id.app_id.clone(), id.clone(), spec, media)?);
+                           EngineMediaTrack::new(self, self.id.app_id.clone(), id.clone(), spec, media)?);
 
         Ok(())
     }
@@ -355,12 +357,12 @@ impl AudioEngineProject {
     pub fn add_fixed_instance(&mut self,
                               fixed_id: FixedInstanceNodeId,
                               spec: FixedInstanceNode,
-                              instances: &HashMap<FixedInstanceId, InstanceRouting>)
+                              instances: &HashMap<FixedInstanceId, FixedInstanceRouting>)
                               -> anyhow::Result<()> {
         let routing = instances.get(&spec.instance_id).cloned();
 
         self.fixed_instances.insert(fixed_id.clone(),
-                                    AudioEngineFixedInstance::new(self, fixed_id.clone(), spec, routing)?);
+                                    EngineFixedInstance::new(self, fixed_id.clone(), spec, routing)?);
 
         Ok(())
     }
@@ -375,7 +377,7 @@ impl AudioEngineProject {
 
     pub fn add_mixer(&mut self, mixer_id: MixerNodeId, spec: MixerNode) -> anyhow::Result<()> {
         self.mixers
-            .insert(mixer_id.clone(), AudioEngineMixer::new(self, mixer_id.clone(), spec)?);
+            .insert(mixer_id.clone(), AudioMixer::new(self, mixer_id.clone(), spec)?);
 
         Ok(())
     }
@@ -487,11 +489,10 @@ impl AudioEngineProject {
                     let _ = mixer.clear_render();
                 }
 
-                self.events.push_back(AudioEngineEvent::RenderingFailed {
-                    task_id: self.id.clone(),
-                    render_id: render.render_id,
-                    error: format!("Rendering stopped prematurely")
-                });
+                self.events
+                    .push_back(EngineEvent::RenderingFailed { task_id:   self.id.clone(),
+                                                              render_id: render.render_id,
+                                                              error:     format!("Rendering stopped prematurely"), });
             }
             _ => {
                 reaper.on_stop_button_ex(context);
@@ -506,7 +507,7 @@ impl AudioEngineProject {
     #[instrument(skip_all, err)]
     pub fn set_spec(&mut self,
                     spec: TaskSpec,
-                    instances: HashMap<FixedInstanceId, InstanceRouting>,
+                    instances: HashMap<FixedInstanceId, FixedInstanceRouting>,
                     media: HashMap<AppMediaObjectId, String>)
                     -> anyhow::Result<()> {
         if &self.spec == &spec {
@@ -560,7 +561,7 @@ impl AudioEngineProject {
 
     pub fn modify_spec(&mut self,
                        transaction: Vec<ModifyTaskSpec>,
-                       instances: HashMap<FixedInstanceId, InstanceRouting>,
+                       instances: HashMap<FixedInstanceId, FixedInstanceRouting>,
                        media_ready: HashMap<AppMediaObjectId, String>)
                        -> anyhow::Result<()> {
         let current_spec = self.spec.clone();
@@ -584,21 +585,21 @@ impl AudioEngineProject {
         let snapshot = self.template_snapshot();
         let chunk = match flow_id {
             NodePadId::MixerInput(mixer_id) => self.mixers
-                                                       .get(mixer_id)
-                                                       .ok_or_else(|| anyhow!("Mixer {mixer_id} not found"))?
-                                                       .get_input_state_chunk(&snapshot)?,
+                                                   .get(mixer_id)
+                                                   .ok_or_else(|| anyhow!("Mixer {mixer_id} not found"))?
+                                                   .get_input_state_chunk(&snapshot)?,
             NodePadId::MixerOutput(mixer_id) => self.mixers
-                                                        .get(mixer_id)
-                                                        .ok_or_else(|| anyhow!("Mixer {mixer_id} not found"))?
-                                                        .get_output_state_chunk(&snapshot)?,
+                                                    .get(mixer_id)
+                                                    .ok_or_else(|| anyhow!("Mixer {mixer_id} not found"))?
+                                                    .get_output_state_chunk(&snapshot)?,
             NodePadId::FixedInstanceInput(fixed_id) => self.fixed_instances
-                                                               .get(fixed_id)
-                                                               .ok_or_else(|| anyhow!("Fixed {fixed_id} not found"))?
-                                                               .get_send_state_chunk(&snapshot)?,
+                                                           .get(fixed_id)
+                                                           .ok_or_else(|| anyhow!("Fixed {fixed_id} not found"))?
+                                                           .get_send_state_chunk(&snapshot)?,
             NodePadId::FixedInstanceOutput(fixed_id) => self.fixed_instances
-                                                                .get(fixed_id)
-                                                                .ok_or_else(|| anyhow!("Fixed {fixed_id} not found"))?
-                                                                .get_return_state_chunk(&snapshot)?,
+                                                            .get(fixed_id)
+                                                            .ok_or_else(|| anyhow!("Fixed {fixed_id} not found"))?
+                                                            .get_return_state_chunk(&snapshot)?,
             NodePadId::DynamicInstanceInput(_) => {
                 return Err(anyhow!("Dynamic instances not supported yet"));
             }
@@ -606,9 +607,9 @@ impl AudioEngineProject {
                 return Err(anyhow!("Dynamic instances not supported yet"));
             }
             NodePadId::TrackOutput(track_id) => self.tracks
-                                                        .get(track_id)
-                                                        .ok_or_else(|| anyhow!("Track {track_id} not found"))?
-                                                        .get_state_chunk(&snapshot)?,
+                                                    .get(track_id)
+                                                    .ok_or_else(|| anyhow!("Track {track_id} not found"))?
+                                                    .get_state_chunk(&snapshot)?,
         };
 
         self.set_track_state_chunk(flow_id, chunk)?;
@@ -618,7 +619,7 @@ impl AudioEngineProject {
 
     fn modify_spec_one(&mut self,
                        item: ModifyTaskSpec,
-                       instances: &HashMap<FixedInstanceId, InstanceRouting>,
+                       instances: &HashMap<FixedInstanceId, FixedInstanceRouting>,
                        media: &HashMap<AppMediaObjectId, String>,
                        dirty: &mut HashSet<NodePadId>)
                        -> anyhow::Result<()> {
@@ -626,14 +627,14 @@ impl AudioEngineProject {
             ModifyTaskSpec::AddTrack { track_id, channels } => {
                 self.add_track(track_id.clone(),
                                TrackNode { channels,
-                                              media: HashMap::new() },
+                                           media: HashMap::new() },
                                media)?;
 
                 dirty.insert(NodePadId::TrackOutput(track_id));
             }
             ModifyTaskSpec::AddTrackMedia { track_id,
-                                               media_id,
-                                               spec, } => {
+                                            media_id,
+                                            spec, } => {
                 if let Some(track) = self.tracks.get_mut(&track_id) {
                     if track.add_media(media_id, spec, media)? {
                         dirty.insert(track.get_flow_id().clone());
@@ -643,8 +644,8 @@ impl AudioEngineProject {
                 }
             }
             ModifyTaskSpec::UpdateTrackMedia { track_id,
-                                                  media_id,
-                                                  update, } => {
+                                               media_id,
+                                               update, } => {
                 if let Some(track) = self.tracks.get_mut(&track_id) {
                     if track.set_media_values(media_id, update, media)? {
                         dirty.insert(track.get_flow_id().clone());
@@ -665,7 +666,8 @@ impl AudioEngineProject {
             ModifyTaskSpec::DeleteTrack { track_id } => {
                 self.delete_track(&track_id);
             }
-            ModifyTaskSpec::AddFixedInstance { fixed_id, spec: process } => {
+            ModifyTaskSpec::AddFixedInstance { fixed_id,
+                                               spec: process, } => {
                 self.add_fixed_instance(fixed_id.clone(), process, instances)?;
 
                 dirty.insert(NodePadId::FixedInstanceInput(fixed_id.clone()));
@@ -734,7 +736,7 @@ impl AudioEngineProject {
     }
 
     pub fn on_instances_updated(&mut self,
-                                instances: &HashMap<FixedInstanceId, InstanceRouting>)
+                                instances: &HashMap<FixedInstanceId, FixedInstanceRouting>)
                                 -> anyhow::Result<()> {
         let snapshot = self.template_snapshot();
 
@@ -771,11 +773,9 @@ impl AudioEngineProject {
         let track =
             match target {
                 NodePadId::MixerInput(mixer_id) => self.mixers.get(mixer_id).map(|mixer| mixer.get_input_track()),
-                NodePadId::FixedInstanceInput(fixed_id) => {
-                    self.fixed_instances
-                        .get(fixed_id)
-                        .map(|fixed_instance| fixed_instance.get_input_track())
-                }
+                NodePadId::FixedInstanceInput(fixed_id) => self.fixed_instances
+                                                               .get(fixed_id)
+                                                               .map(|fixed_instance| fixed_instance.get_input_track()),
                 other => return Err(anyhow!("Unsupported target {other}")),
             }.ok_or_else(|| anyhow!("Connection target {target} not found"))?;
 

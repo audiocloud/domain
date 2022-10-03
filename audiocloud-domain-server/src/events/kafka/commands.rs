@@ -1,7 +1,6 @@
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, StreamHandler, Supervised, Supervisor};
 use actix_broker::BrokerIssue;
 use anyhow::anyhow;
-use futures::StreamExt;
 use once_cell::sync::OnceCell;
 use rdkafka::config::FromClientConfigAndContext;
 use rdkafka::consumer::{Consumer, ConsumerContext, Rebalance, StreamConsumer};
@@ -22,11 +21,11 @@ pub async fn init(topic: String,
                   password: String,
                   maybe_offset: Option<i64>)
                   -> anyhow::Result<()> {
-    KAFKA_DOMAIN_COMMANDS_LISTENER.set(Supervisor::start(move || KafkaDomainCommandsListener { topic,
-                                                                                               brokers,
-                                                                                               username,
-                                                                                               password,
-                                                                                               maybe_offset }))
+    KAFKA_DOMAIN_COMMANDS_LISTENER.set(Supervisor::start(move |_| KafkaDomainCommandsListener { topic,
+                                                                                                brokers,
+                                                                                                username,
+                                                                                                password,
+                                                                                                maybe_offset }))
                                   .map_err(|_| anyhow!("KAFKA_DOMAIN_COMMANDS_LISTENER already initialized"))?;
     Ok(())
 }
@@ -68,19 +67,35 @@ impl Actor for KafkaDomainCommandsListener {
 
 impl Supervised for KafkaDomainCommandsListener {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        let config = super::create_config(&self.brokers, &self.username, &self.password);
+        let mut init = || -> anyhow::Result<()> {
+            let config = super::create_config(&self.brokers, &self.username, &self.password);
 
-        let consumer = LoggingConsumer::from_config_and_context(&config, CustomContext)?;
+            let consumer = LoggingConsumer::from_config_and_context(&config, CustomContext)?;
 
-        let mut topics = TopicPartitionList::new();
-        topics.add_partition_offset(&self.topic, 0, match self.maybe_offset {
-                  None => Offset::OffsetTail(100),
-                  Some(offset) => Offset::Offset(offset as i64),
-              })?;
+            let mut topics = TopicPartitionList::new();
+            topics.add_partition_offset(&self.topic, 0, match self.maybe_offset {
+                      None => Offset::OffsetTail(100),
+                      Some(offset) => Offset::Offset(offset as i64),
+                  })?;
 
-        consumer.assign(&topics)?;
+            consumer.assign(&topics)?;
 
-        ctx.add_stream(consumer.stream());
+            let stream = futures::stream::unfold(consumer, |consumer| async move {
+                match consumer.recv().await {
+                    Ok(item) => Some((Ok(item.detach()), consumer)),
+                    Err(error) => {
+                        warn!(%error, "Error receiving item");
+                        None
+                    }
+                }
+            });
+
+            ctx.add_stream(stream);
+
+            Ok(())
+        };
+
+        init().expect("initialization success");
     }
 }
 

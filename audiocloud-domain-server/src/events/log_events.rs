@@ -4,7 +4,9 @@ use tracing::debug;
 
 use crate::events::NotifyDomainEvent;
 
-pub async fn init() -> anyhow::Result<()> {}
+pub async fn init() -> anyhow::Result<()> {
+    Ok(())
+}
 
 struct LogEventsActor;
 

@@ -31,24 +31,26 @@ struct AppTaskIdPath {
     task_id: TaskId,
 }
 
-fn not_implemented_yet(call: &'static str) -> DomainError {
-    DomainError::NotImplemented { call:   call.to_string(),
-                                  reason: "Not implemented yet".to_string(), }
+fn not_implemented_yet<T>(call: &'static str) -> Result<T, DomainError> {
+    Err(DomainError::NotImplemented { call:   call.to_string(),
+                                      reason: "Not implemented yet".to_string(), })
 }
 
 #[get("/")]
 async fn list_tasks(responder: ApiResponder) -> ApiResponse<TaskSummaryList> {
     responder.respond(async move { not_implemented_yet("list_tasks") })
+             .await
 }
 
 #[post("/")]
 async fn create_task(responder: ApiResponder, create: Json<CreateTask>) -> ApiResponse<TaskCreated> {
     responder.respond(async move { not_implemented_yet("create_task") })
+             .await
 }
 
 #[get("/{app_id}/{task_id}")]
 async fn get_task(responder: ApiResponder, task_id: Path<AppTaskIdPath>) -> ApiResponse<TaskWithStatusAndSpec> {
-    responder.respond(async move { not_implemented_yet("get_task") })
+    responder.respond(async move { not_implemented_yet("get_task") }).await
 }
 
 #[post("/{app_id}/{task_id}/modify")]
@@ -57,11 +59,13 @@ async fn modify_task(responder: ApiResponder,
                      modify: Json<ModifyTask>)
                      -> ApiResponse<TaskUpdated> {
     responder.respond(async move { not_implemented_yet("modify_task") })
+             .await
 }
 
 #[delete("/{app_id}/{task_id}")]
 async fn delete_task(responder: ApiResponder, task_id: Path<AppTaskIdPath>) -> ApiResponse<TaskDeleted> {
     responder.respond(async move { not_implemented_yet("delete_task") })
+             .await
 }
 
 #[post("/{app_id}/{task_id}/transport/render")]
@@ -70,6 +74,7 @@ async fn render_task(responder: ApiResponder,
                      render: Json<RequestRender>)
                      -> ApiResponse<TaskRendering> {
     responder.respond(async move { not_implemented_yet("render_task") })
+             .await
 }
 
 #[post("/{app_id}/{task_id}/transport/play")]
@@ -77,7 +82,7 @@ async fn play_task(responder: ApiResponder,
                    task_id: Path<AppTaskIdPath>,
                    play: Json<RequestPlay>)
                    -> ApiResponse<TaskPlaying> {
-    responder.respond(async move { not_implemented_yet("play_task") })
+    responder.respond(async move { not_implemented_yet("play_task") }).await
 }
 
 #[post("/{app_id}/{task_id}/transport/seek")]
@@ -85,7 +90,7 @@ async fn seek_task(responder: ApiResponder,
                    task_id: Path<AppTaskIdPath>,
                    seek: Json<RequestSeek>)
                    -> ApiResponse<TaskSought> {
-    responder.respond(async move { not_implemented_yet("seek_task") })
+    responder.respond(async move { not_implemented_yet("seek_task") }).await
 }
 
 #[post("/{app_id}/{task_id}/transport/cancel")]
@@ -94,6 +99,7 @@ async fn cancel_render_task(responder: ApiResponder,
                             cancel: Json<RequestCancelRender>)
                             -> ApiResponse<TaskRenderCancelled> {
     responder.respond(async move { not_implemented_yet("cancel_render_task") })
+             .await
 }
 
 #[post("/{app_id}/{task_id}/transport/stop")]
@@ -102,4 +108,5 @@ async fn stop_play_task(responder: ApiResponder,
                         stop: Json<RequestStopPlay>)
                         -> ApiResponse<TaskPlayStopped> {
     responder.respond(async move { not_implemented_yet("stop_play_task") })
+             .await
 }

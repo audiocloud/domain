@@ -1,63 +1,155 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::str::FromStr;
 
 use anyhow::anyhow;
-use kv::{Msgpack, TransactionError};
+use sqlx::prelude::*;
 
-use audiocloud_api::{AppMediaObjectId, AppTaskId, MediaObject};
+use audiocloud_api::{
+    now, AppMediaObjectId, MediaDownload, MediaJobState, MediaMetadata, MediaObject, MediaUpload, Timestamp,
+};
 
 use crate::db::Db;
+use crate::media::{DownloadJobId, UploadJobId};
+
+#[derive(Debug, FromRow)]
+struct MediaJobRow {
+    id:            String,
+    media_id:      String,
+    kind:          String,
+    spec:          sqlx::types::Json<serde_json::Value>,
+    state:         sqlx::types::Json<MediaJobState>,
+    last_modified: Timestamp,
+    active:        i64,
+}
+
+impl TryInto<MediaDownload> for MediaJobRow {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<MediaDownload, Self::Error> {
+        let Self { media_id,
+                   kind,
+                   spec,
+                   state,
+                   .. } = self;
+        if kind != KIND_DOWNLOAD {
+            return Err(anyhow!("Job is not download"));
+        }
+
+        Ok(MediaDownload { media_id: { AppMediaObjectId::from_str(&media_id)? },
+                           download: { serde_json::from_value(spec.0)? },
+                           state:    { state.0 }, })
+    }
+}
+
+impl TryInto<MediaUpload> for MediaJobRow {
+    type Error = anyhow::Error;
+
+    fn try_into(self) -> Result<MediaUpload, Self::Error> {
+        let Self { media_id,
+                   kind,
+                   spec,
+                   state,
+                   .. } = self;
+        if kind != KIND_UPLOAD {
+            return Err(anyhow!("Job is not upload"));
+        }
+
+        Ok(MediaUpload { media_id: { AppMediaObjectId::from_str(&media_id)? },
+                         upload:   { serde_json::from_value(spec.0)? },
+                         state:    { state.0 }, })
+    }
+}
+
+#[derive(Debug, FromRow)]
+struct MediaObjectRow {
+    id:        String,
+    path:      Option<String>,
+    metadata:  Option<sqlx::types::Json<MediaMetadata>>,
+    last_used: Timestamp,
+}
+
+const KIND_DOWNLOAD: &str = "download";
+const KIND_UPLOAD: &str = "upload";
+
+pub type UploadJobs = HashMap<UploadJobId, MediaUpload>;
+pub type DownloadJobs = HashMap<DownloadJobId, MediaDownload>;
 
 impl Db {
-    pub fn get_media_info(&self,
-                          media_ids: &HashSet<AppMediaObjectId>)
-                          -> anyhow::Result<HashMap<AppMediaObjectId, MediaObject>> {
-        Ok(self.media_info.transaction(move |media_info| {
-                               let mut rv = HashMap::new();
+    pub async fn fetch_pending_download_jobs(&self, limit: usize) -> anyhow::Result<DownloadJobs> {
+        let mut rv = HashMap::new();
+        for row in self.fetch_jobs(false, KIND_DOWNLOAD, limit).await? {
+            let job_id = DownloadJobId::from_str(&row.id)?;
 
-                               for id in media_ids {
-                                   if let Some(media) = media_info.get(&id.to_string())? {
-                                       rv.insert(id.clone(), media.0);
-                                   }
-                               }
+            rv.insert(job_id, row.try_into()?);
+        }
 
-                               Ok(rv)
-                           })?)
+        Ok(rv)
     }
 
-    pub fn get_media_for_task(&self, task_id: &AppTaskId) -> anyhow::Result<HashMap<AppMediaObjectId, MediaObject>> {
-        Ok(self.task_specs
-               .transaction2(&self.media_info, move |task_specs, media_info| {
-                   let mut rv = HashMap::new();
-                   let app_id = task_id.app_id.clone();
-                   let task_spec = task_specs.get(&task_id.to_string())?
-                                             .ok_or_else(|| TransactionError::Abort(anyhow!("Task not found")))?
-                                             .0;
+    pub async fn fetch_pending_upload_jobs(&self, limit: usize) -> anyhow::Result<UploadJobs> {
+        let mut rv = HashMap::new();
+        for row in self.fetch_jobs(false, KIND_UPLOAD, limit).await? {
+            let job_id = UploadJobId::from_str(&row.id)?;
+            rv.insert(job_id, row.try_into()?);
+        }
 
-                   for media_id in task_spec.get_media_object_ids(&app_id) {
-                       if let Some(media) = media_info.get(&media_id.to_string())? {
-                           rv.insert(media_id, media.0);
-                       }
-                   }
-
-                   Ok(rv)
-               })?)
+        Ok(rv)
     }
 
-    pub fn save_media(&self, media: MediaObject) -> anyhow::Result<()> {
-        self.media_info.set(&media.id.to_string(), &Msgpack(media))?;
+    pub async fn fetch_jobs(&self, active: bool, kind: &'static str, limit: usize) -> anyhow::Result<Vec<MediaJobRow>> {
+        let query = r#"SELECT * FROM media_job WHERE active = ? AND kind = ? AND media_id IS NOT NULL ORDER BY media_id LIMIT ?"#;
+
+        Ok(sqlx::query_as(query).bind(active)
+                                .bind(kind)
+                                .bind(limit as u32)
+                                .fetch_all(&self.pool)
+                                .await?)
+    }
+
+    pub async fn fetch_media_by_id(&self, id: &AppMediaObjectId) -> anyhow::Result<Option<MediaObject>> {
+        let opt: Option<MediaObjectRow> =
+            sqlx::query_as(r#"SELECT * FROM media_object WHERE id = ?"#).bind(id.to_string())
+                                                                        .fetch_optional(&self.pool)
+                                                                        .await?;
+
+        Ok(match opt {
+            None => None,
+            Some(MediaObjectRow { id, path, metadata, .. }) => {
+                Some(MediaObject { id:       { AppMediaObjectId::from_str(&id)? },
+                                   metadata: { metadata.map(|json| json.0) },
+                                   path:     { path },
+                                   download: { None },
+                                   upload:   { None }, })
+            }
+        })
+    }
+
+    pub async fn delete_upload(&self, id: &UploadJobId) -> anyhow::Result<()> {
+        self.delete_job(id.to_string()).await
+    }
+
+    pub async fn save_download_job(&self, id: &DownloadJobId, download: &MediaDownload) -> anyhow::Result<()> {
+        sqlx::query(r#"INSERT OR REPLACE INTO media_job (id, kind, spec, state, last_modified, active, media_id) VALUES(?, ?, ?, ?, ?, ?, ?)"#)
+          .bind(id.to_string())
+          .bind(KIND_DOWNLOAD.to_string())
+          .bind(serde_json::to_string(&download.download)?)
+          .bind(serde_json::to_string(&download.state)?)
+          .bind(now())
+          .bind(download.state.in_progress)
+          .bind(download.media_id.to_string())
+          .execute(&self.pool).await?;
 
         Ok(())
     }
 
-    pub fn create_default_media_if_not_exists(&self, id: &AppMediaObjectId) -> anyhow::Result<()> {
-        self.media_info.transaction(move |media_info| {
-                            if media_info.get(&id.to_string())?.is_none() {
-                                media_info.set(&id.to_string(), &Msgpack(MediaObject::new(id)))?;
-                            }
+    pub async fn delete_download(&self, id: &DownloadJobId) -> anyhow::Result<()> {
+        self.delete_job(id.to_string()).await
+    }
 
-                            Ok(())
-                        })?;
-
+    async fn delete_job(&self, id: String) -> anyhow::Result<()> {
+        let id = id.to_string();
+        sqlx::query!(r#"DELETE FROM media_job WHERE id = ?"#, id).execute(&self.pool)
+                                                                 .await?;
         Ok(())
     }
 }

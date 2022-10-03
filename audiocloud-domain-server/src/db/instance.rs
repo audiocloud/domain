@@ -1,17 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-use audiocloud_api::common::media::PlayId;
 use audiocloud_api::cloud::domains::{DomainMediaInstanceConfig, DomainPowerInstanceConfig};
 use audiocloud_api::common::instance::{
     DesiredInstancePlayState, DesiredInstancePowerState, InstancePlayState, InstancePowerState,
 };
+use audiocloud_api::common::media::PlayId;
 use audiocloud_api::common::time::Timestamped;
 
 use crate::tracker::RequestTracker;
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstancePower {
-    pub spec: DomainPowerInstanceConfig,
+    pub spec:          DomainPowerInstanceConfig,
     pub state:         Timestamped<InstancePowerState>,
     pub channel_state: Timestamped<bool>,
     pub desired:       Timestamped<DesiredInstancePowerState>,
@@ -30,7 +30,7 @@ impl From<DomainPowerInstanceConfig> for InstancePower {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct InstancePlay {
-    pub spec: DomainMediaInstanceConfig,
+    pub spec:    DomainMediaInstanceConfig,
     pub state:   Timestamped<InstancePlayState>,
     pub media:   Option<Timestamped<f64>>,
     pub desired: Timestamped<DesiredInstancePlayState>,

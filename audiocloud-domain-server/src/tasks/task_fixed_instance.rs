@@ -1,26 +1,22 @@
 use std::collections::{HashMap, HashSet};
 
-use actix::Addr;
-
 use audiocloud_api::common::instance::DesiredInstancePlayState;
 use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::newtypes::FixedInstanceId;
+use audiocloud_api::Timestamped;
 
-use crate::fixed_instances::messages::{NotifyInstanceState, SetInstanceDesiredPlayState};
-use crate::fixed_instances::supervisor::FixedInstancesSupervisor;
+use crate::fixed_instances::{get_instance_supervisor, NotifyInstanceState, SetInstanceDesiredPlayState};
 use crate::tracker::RequestTracker;
 
-pub struct SessionInstance {
-    state:     NotifyInstanceState,
-    tracker:   RequestTracker,
-    instances: Addr<FixedInstancesSupervisor>,
+pub struct TaskFixedInstance {
+    state:   Timestamped<NotifyInstanceState>,
+    tracker: RequestTracker,
 }
 
-impl SessionInstance {
-    pub fn new(state_spec: NotifyInstanceState, instances: &Addr<FixedInstancesSupervisor>) -> Self {
-        Self { state:     state_spec,
-               tracker:   RequestTracker::new(),
-               instances: instances.clone(), }
+impl TaskFixedInstance {
+    pub fn new(state_spec: NotifyInstanceState) -> Self {
+        Self { state:   Timestamped::new(state_spec),
+               tracker: RequestTracker::new(), }
     }
 
     pub fn reset_request_tracker(&mut self) {
@@ -28,7 +24,7 @@ impl SessionInstance {
     }
 
     pub fn set_instance_state(&mut self, state: NotifyInstanceState) {
-        self.state = state;
+        self.state = Timestamped::new(state);
         self.reset_request_tracker();
     }
 
@@ -37,7 +33,7 @@ impl SessionInstance {
     }
 
     pub fn check_power(&self) -> bool {
-        if let Some(power) = &self.state.power {
+        if let Some(power) = &self.state.value().power {
             power.actual.value().is_powered_on()
         } else {
             true
@@ -45,12 +41,11 @@ impl SessionInstance {
     }
 
     pub fn check_play(&mut self, instance_id: &FixedInstanceId, play: &DesiredInstancePlayState) -> bool {
-        if let Some(media) = &self.state.play {
+        if let Some(media) = &self.state.value().play {
             if media.desired.value() != play {
                 if self.tracker.should_retry() {
-                    self.instances
-                        .do_send(SetInstanceDesiredPlayState { instance_id: instance_id.clone(),
-                                                           desired:     play.clone(), });
+                    get_instance_supervisor().do_send(SetInstanceDesiredPlayState { instance_id: instance_id.clone(),
+                                                                                    desired:     play.clone(), });
 
                     self.tracker.retried();
                 }
@@ -65,25 +60,29 @@ impl SessionInstance {
     }
 }
 
-pub struct SessionInstances {
-    instances: HashMap<FixedInstanceId, SessionInstance>,
+pub struct TaskFixedInstances {
+    instances: HashMap<FixedInstanceId, TaskFixedInstance>,
     play:      DesiredInstancePlayState,
 }
 
-impl Default for SessionInstances {
+impl Default for TaskFixedInstances {
     fn default() -> Self {
         Self { instances: Default::default(),
                play:      DesiredInstancePlayState::Stopped, }
     }
 }
 
-impl SessionInstances {
-    pub fn notify_instance_state_changed(&mut self, notify: NotifyInstanceState, supervisor: &Addr<FixedInstancesSupervisor>) {
-        let entry = self.instances
-                        .entry(notify.instance_id.clone())
-                        .or_insert_with(|| SessionInstance::new(notify.clone(), supervisor));
-
-        entry.set_instance_state(notify);
+impl TaskFixedInstances {
+    pub fn notify_instance_state_changed(&mut self, notify: NotifyInstanceState) {
+        match self.instances.get_mut(&notify.instance_id) {
+            None => {
+                self.instances
+                    .insert(notify.instance_id.clone(), TaskFixedInstance::new(notify));
+            }
+            Some(task_instance) => {
+                task_instance.set_instance_state(notify);
+            }
+        }
     }
 
     pub fn set_desired_state(&mut self, play: DesiredInstancePlayState) {
@@ -128,14 +127,16 @@ impl SessionInstances {
     }
 }
 
-fn is_satisfied(i: &SessionInstance) -> (bool, bool) {
+fn is_satisfied(i: &TaskFixedInstance) -> (bool, bool) {
     let power_satisfied = i.state
+                           .value()
                            .power
                            .as_ref()
                            .map(|power| power.actual.value().satisfies(power.desired.value().clone()))
                            .unwrap_or(true);
 
     let play_satisfied = i.state
+                          .value()
                           .play
                           .as_ref()
                           .map(|play| play.actual.value().satisfies(play.desired.value()))
