@@ -36,6 +36,7 @@ async-trait = "0.1"
 derive_more = "0.99"
 mime = "0.3"
 nanoid = "0.4"
+globwalk = "0.8"
 
 [dependencies.sqlx]
 version = "0.6"

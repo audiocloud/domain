@@ -14,6 +14,7 @@ pub mod rest_api;
 pub mod sockets;
 pub mod tasks;
 pub mod tracker;
+pub mod models;
 
 #[derive(Clone, Copy, IsVariant)]
 pub enum ResponseMedia {

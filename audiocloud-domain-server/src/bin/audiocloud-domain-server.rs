@@ -5,7 +5,7 @@ use actix_web::{App, HttpServer};
 use clap::Parser;
 use tracing::*;
 
-use audiocloud_domain_server::{config, db, events, fixed_instances, media, rest_api, sockets, tasks};
+use audiocloud_domain_server::{config, db, events, fixed_instances, media, models, nats, rest_api, sockets, tasks};
 
 #[derive(Parser)]
 struct Opts {
@@ -16,6 +16,10 @@ struct Opts {
     /// REST and WebSocket API host
     #[clap(short, long, env, default_value = "0.0.0.0")]
     bind: String,
+
+    /// NATS URL
+    #[clap(long, env, default_value = "nats://localhost:4222")]
+    nats_url: String,
 
     #[clap(flatten)]
     db: db::DataOpts,
@@ -52,6 +56,14 @@ async fn main() -> anyhow::Result<()> {
     debug!("Initializing database");
 
     let db = db::init(opts.db).await?;
+
+    nats::init(&opts.nats_url).await?;
+
+    debug!(" ✔ NATS");
+
+    models::init(&cfg, db.clone()).await?;
+
+    debug!(" ✔ Models");
 
     media::init(opts.media, db.clone()).await?;
 
