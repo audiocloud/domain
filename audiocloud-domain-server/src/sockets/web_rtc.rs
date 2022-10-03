@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
-use actix::fut::LocalBoxActorFuture;
 use actix::{
-    fut, Actor, ActorContext, ActorFutureExt, ActorTryFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler,
-    Message, WrapFuture,
+    Actor, ActorContext, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, Message, WrapFuture,
 };
 use anyhow::anyhow;
 use clap::Args;
@@ -17,7 +15,7 @@ use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
 use webrtc::data_channel::data_channel_message::DataChannelMessage;
 use webrtc::data_channel::RTCDataChannel;
 use webrtc::ice::udp_network::{EphemeralUDP, UDPNetwork};
-use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
+use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
 use webrtc::ice_transport::ice_server::RTCIceServer;
 use webrtc::peer_connection::configuration::RTCConfiguration;
 use webrtc::peer_connection::RTCPeerConnection;
@@ -112,25 +110,25 @@ impl Actor for WebRtcActor {
                "WebRTC connection started");
 
         let addr = ctx.address();
-        self.data_channel.on_close({
-                             let addr = addr.clone();
-                             Box::new(move || {
-                                 let addr = addr.clone();
-                                 Box::pin(async move {
-                                     let _ = addr.send(Closed).await;
-                                 })
-                             })
-                         });
+        block_on(self.data_channel.on_close({
+                                      let addr = addr.clone();
+                                      Box::new(move || {
+                                          let addr = addr.clone();
+                                          Box::pin(async move {
+                                              let _ = addr.send(Closed).await;
+                                          })
+                                      })
+                                  }));
 
-        self.data_channel.on_message({
-                             let addr = addr.clone();
-                             Box::new(move |data| {
-                                 let addr = addr.clone();
-                                 Box::pin(async move {
-                                     let _ = addr.send(OnMessage(data)).await;
-                                 })
-                             })
-                         });
+        block_on(self.data_channel.on_message({
+                                      let addr = addr.clone();
+                                      Box::new(move |data| {
+                                          let addr = addr.clone();
+                                          Box::pin(async move {
+                                              let _ = addr.send(OnMessage(data)).await;
+                                          })
+                                      })
+                                  }));
     }
 }
 
