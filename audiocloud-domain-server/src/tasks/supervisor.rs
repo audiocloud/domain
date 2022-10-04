@@ -7,11 +7,10 @@ use tracing::warn;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInstanceRoutingMap};
 use audiocloud_api::common::change::TaskState;
-use audiocloud_api::common::task::Task;
-use audiocloud_api::domain::tasks::TaskUpdated;
+use audiocloud_api::domain::tasks::{TaskCreated, TaskSummary, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec};
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::newtypes::{AppTaskId, EngineId};
-use audiocloud_api::FixedInstanceId;
+use audiocloud_api::{DomainId, FixedInstanceId, TaskReservation, TaskSecurity, TaskSpec};
 
 use crate::db::Db;
 use crate::fixed_instances::NotifyFixedInstanceReports;
@@ -19,17 +18,25 @@ use crate::tasks::messages::{
     BecomeOnline, NotifyEngineEvent, NotifyMediaTaskState, NotifyTaskSpec, NotifyTaskState, SetTaskDesiredPlayState,
 };
 use crate::tasks::task::TaskActor;
+use crate::tasks::{CreateTask, GetTaskWithStatusAndSpec, ListTasks};
 use crate::DomainResult;
 
 pub struct TasksSupervisor {
     db:                        Db,
-    active:                    HashMap<AppTaskId, Addr<TaskActor>>,
-    tasks:                     HashMap<AppTaskId, Task>,
-    state:                     HashMap<AppTaskId, TaskState>,
+    tasks:                     HashMap<AppTaskId, SupervisedTask>,
     engines:                   HashMap<EngineId, Engine>,
     fixed_instance_membership: HashMap<FixedInstanceId, AppTaskId>,
     fixed_instance_routing:    FixedInstanceRoutingMap,
     online:                    bool,
+}
+
+struct SupervisedTask {
+    pub domain_id:    DomainId,
+    pub reservations: TaskReservation,
+    pub spec:         TaskSpec,
+    pub security:     TaskSecurity,
+    pub state:        TaskState,
+    pub actor:        Option<Addr<TaskActor>>,
 }
 
 struct Engine {
@@ -38,15 +45,25 @@ struct Engine {
 
 impl TasksSupervisor {
     pub fn new(db: Db, cfg: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<Self> {
-        let tasks = cfg.tasks.iter().map(|(id, task)| (id.clone(), task.clone())).collect();
+        let tasks = cfg.tasks
+                       .iter()
+                       .map(|(id, task)| {
+                           (id.clone(),
+                            SupervisedTask { domain_id:    { task.domain_id.clone() },
+                                             reservations: { task.reservations.clone() },
+                                             spec:         { task.spec.clone() },
+                                             security:     { task.security.clone() },
+                                             state:        { Default::default() },
+                                             actor:        { None }, })
+                       })
+                       .collect();
+
         let engines = cfg.engines
                          .iter()
                          .map(|(id, config)| (id.clone(), Engine { config: config.clone() }))
                          .collect();
 
         Ok(Self { db:                        { db },
-                  active:                    { HashMap::new() },
-                  state:                     { HashMap::new() },
                   fixed_instance_membership: { HashMap::new() },
                   fixed_instance_routing:    { routing },
                   tasks:                     { tasks },
@@ -100,8 +117,8 @@ impl Handler<NotifyFixedInstanceReports> for TasksSupervisor {
 
     fn handle(&mut self, msg: NotifyFixedInstanceReports, ctx: &mut Self::Context) -> Self::Result {
         if let Some(task_id) = self.fixed_instance_membership.get(&msg.instance_id) {
-            if let Some(task_address) = self.active.get(task_id) {
-                task_address.do_send(msg);
+            if let Some(actor_addr) = self.tasks.get(task_id).and_then(|task| task.actor.as_ref()) {
+                actor_addr.do_send(msg);
             }
         }
     }
@@ -113,13 +130,15 @@ impl Handler<SetTaskDesiredPlayState> for TasksSupervisor {
     fn handle(&mut self, msg: SetTaskDesiredPlayState, ctx: &mut Self::Context) -> Self::Result {
         use DomainError::*;
 
-        if let Some(task) = self.active.get_mut(&msg.task_id) {
+        if let Some(task) = self.tasks.get(&msg.task_id).and_then(|task| task.actor.as_ref()) {
             let task_id = msg.task_id.clone();
             task.send(msg)
                 .into_actor(self)
                 .map(move |res, actor, ctx| match res {
                     Ok(result) => result,
-                    Err(err) => Err(BadGateway { error: format!("Task actor {task_id} failed: {err}"), }),
+                    Err(err) => {
+                        Err(BadGateway { error: format!("Task actor {task_id} failed to set desired state: {err}"), })
+                    }
                 })
                 .boxed_local()
         } else {
@@ -135,16 +154,23 @@ impl Handler<BecomeOnline> for TasksSupervisor {
     fn handle(&mut self, msg: BecomeOnline, ctx: &mut Self::Context) -> Self::Result {
         if !self.online {
             self.online = true;
-            for (id, session) in self.tasks.iter() {
-                if session.reservations.contains_now() {
+
+            // generate an actor map to later assign
+            let mut actors = HashMap::new();
+
+            for (id, task) in self.tasks.iter() {
+                if task.reservations.contains_now() {
                     if let Some(engine_id) = self.allocate_engine() {
                         match TaskActor::new(id.clone(),
+                                             task.domain_id.clone(),
                                              engine_id.clone(),
-                                             session.clone(),
+                                             task.reservations.clone(),
+                                             task.spec.clone(),
+                                             task.security.clone(),
                                              self.fixed_instance_routing.clone())
                         {
                             Ok(actor) => {
-                                self.active.insert(id.clone(), Supervisor::start(move |_| actor));
+                                actors.insert(id.clone(), Supervisor::start(move |_| actor));
                             }
                             Err(error) => {
                                 warn!(%error, "Failed to start task");
@@ -155,6 +181,12 @@ impl Handler<BecomeOnline> for TasksSupervisor {
                     }
                 }
             }
+
+            for (id, task) in self.tasks.iter_mut() {
+                if let Some(actor) = actors.remove(&id) {
+                    task.actor.replace(actor);
+                }
+            }
         }
     }
 }
@@ -163,7 +195,9 @@ impl Handler<NotifyTaskState> for TasksSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyTaskState, ctx: &mut Self::Context) -> Self::Result {
-        self.state.insert(msg.session_id, msg.state);
+        if let Some(task) = self.tasks.get_mut(&msg.task_id) {
+            task.state = msg.state;
+        }
     }
 }
 
@@ -172,7 +206,7 @@ impl Handler<NotifyEngineEvent> for TasksSupervisor {
 
     fn handle(&mut self, msg: NotifyEngineEvent, ctx: &mut Self::Context) -> Self::Result {
         let session_id = msg.event.task_id();
-        match self.active.get(session_id) {
+        match self.tasks.get(session_id).and_then(|task| task.actor.as_ref()) {
             Some(session) => {
                 session.do_send(msg);
             }
@@ -188,13 +222,57 @@ impl Handler<NotifyMediaTaskState> for TasksSupervisor {
 
     fn handle(&mut self, msg: NotifyMediaTaskState, ctx: &mut Self::Context) -> Self::Result {
         let session_id = &msg.task_id;
-        match self.active.get(session_id) {
+        match self.tasks.get(session_id).and_then(|task| task.actor.as_ref()) {
             Some(session) => {
                 session.do_send(msg);
             }
             None => {
                 warn!(%session_id, "Dropping media service event for unknown / inactive session");
             }
+        }
+    }
+}
+
+impl Handler<ListTasks> for TasksSupervisor {
+    type Result = TaskSummaryList;
+
+    fn handle(&mut self, msg: ListTasks, ctx: &mut Self::Context) -> Self::Result {
+        let mut rv = vec![];
+        for (id, task) in &self.tasks {
+            // TODO: missing `waiting_for_instances` and `waiting_for_media`
+            // TODO: would be nice if TaskSummary included timestamps
+            rv.push(TaskSummary { app_id:                id.app_id.clone(),
+                                  task_id:               id.task_id.clone(),
+                                  play_state:            task.state.play_state.value().clone(),
+                                  waiting_for_instances: Default::default(),
+                                  waiting_for_media:     Default::default(), });
+        }
+
+        rv
+    }
+}
+
+impl Handler<CreateTask> for TasksSupervisor {
+    type Result = DomainResult<TaskCreated>;
+
+    fn handle(&mut self, msg: CreateTask, ctx: &mut Self::Context) -> Self::Result {
+        todo!()
+    }
+}
+
+impl Handler<GetTaskWithStatusAndSpec> for TasksSupervisor {
+    type Result = DomainResult<TaskWithStatusAndSpec>;
+
+    fn handle(&mut self, msg: GetTaskWithStatusAndSpec, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(task) = self.tasks.get(&msg.task_id) {
+            Ok(TaskWithStatusAndSpec { app_id:     msg.task_id.app_id.clone(),
+                                       task_id:    msg.task_id.task_id.clone(),
+                                       play_state: task.state.play_state.value().clone(),
+                                       instances:  Default::default(),
+                                       media:      Default::default(),
+                                       spec:       Default::default(), })
+        } else {
+            Err(DomainError::TaskNotFound { task_id: msg.task_id })
         }
     }
 }

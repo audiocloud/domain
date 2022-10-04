@@ -77,13 +77,9 @@ async fn main() -> anyhow::Result<()> {
 
     debug!(" ✔ Tasks");
 
-    debug!("Initializing distributed commands / events");
-
     events::init(cfg.command_source.clone(), cfg.event_sink.clone()).await?;
 
     debug!(" ✔ Commands / Events");
-
-    debug!("Going online");
 
     tasks::become_online();
 
@@ -91,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
 
     sockets::init(opts.sockets)?;
 
-    debug!("✔ Sockets");
+    debug!(" ✔ Sockets");
 
     info!(bind = opts.bind,
           port = opts.port,

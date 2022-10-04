@@ -13,8 +13,8 @@ use audiocloud_api::audio_engine::{EngineCommand, EngineError, EngineEvent};
 use audiocloud_api::cloud::domains::FixedInstanceRouting;
 use audiocloud_api::domain::tasks::TaskUpdated;
 use audiocloud_api::{
-    AppMediaObjectId, AppTaskId, DesiredInstancePlayState, DesiredTaskPlayState, EngineId, FixedInstanceId,
-    SerializableResult, Task,
+    AppMediaObjectId, AppTaskId, DesiredInstancePlayState, DesiredTaskPlayState, DomainId, EngineId, FixedInstanceId,
+    SerializableResult, Task, TaskReservation, TaskSecurity, TaskSpec,
 };
 
 use crate::config::NotifyFixedInstanceRouting;
@@ -30,8 +30,11 @@ use super::task_media_objects::TaskMediaObjects;
 
 pub struct TaskActor {
     id:                     AppTaskId,
-    task:                   Task,
     engine_id:              EngineId,
+    domain_id:              DomainId,
+    reservations:           TaskReservation,
+    spec:                   TaskSpec,
+    security:               TaskSecurity,
     engine_command_subject: String,
     fixed_instance_routing: HashMap<FixedInstanceId, FixedInstanceRouting>,
     fixed_instances:        TaskFixedInstances,
@@ -171,16 +174,22 @@ impl Handler<SetTaskDesiredPlayState> for TaskActor {
 
 impl TaskActor {
     pub fn new(id: AppTaskId,
+               domain_id: DomainId,
                engine_id: EngineId,
-               task: Task,
+               reservations: TaskReservation,
+               spec: TaskSpec,
+               security: TaskSecurity,
                routing: HashMap<FixedInstanceId, FixedInstanceRouting>)
                -> anyhow::Result<Self> {
         let engine_command_subject = engine_id.engine_command_subject();
 
         Ok(Self { id:                     { id.clone() },
                   engine_id:              { engine_id },
+                  domain_id:              { domain_id },
+                  reservations:           { reservations },
+                  spec:                   { spec },
+                  security:               { security },
                   engine_command_subject: { engine_command_subject },
-                  task:                   { task },
                   fixed_instance_routing: { routing },
                   fixed_instances:        { TaskFixedInstances::default() },
                   media_objects:          { TaskMediaObjects::default() },
@@ -189,7 +198,7 @@ impl TaskActor {
 
     fn update(&mut self, ctx: &mut <Self as Actor>::Context) {
         self.engine
-            .set_instances_are_ready(self.fixed_instances.update(&self.task.spec));
+            .set_instances_are_ready(self.fixed_instances.update(&self.spec));
 
         if let Some(engine_cmd) = self.engine.update() {
             nats::request_msgpack(self.engine_command_subject.clone(), engine_cmd).into_actor(self)
@@ -200,7 +209,7 @@ impl TaskActor {
 
     fn set_engine_spec(&mut self, ctx: &mut Context<TaskActor>) {
         let cmd = EngineCommand::SetSpec { task_id:     { self.id.clone() },
-                                           spec:        { self.task.spec.clone() },
+                                           spec:        { self.spec.clone() },
                                            instances:   { self.engine_fixed_instance_routing() },
                                            media_ready: { self.engine_media_paths() }, };
 
@@ -224,8 +233,7 @@ impl TaskActor {
     }
 
     fn update_fixed_instance_state(&self, ctx: &mut <Self as Actor>::Context) {
-        get_instance_supervisor().send(GetMultipleFixedInstanceState { instance_ids: self.task
-                                                                                         .reservations
+        get_instance_supervisor().send(GetMultipleFixedInstanceState { instance_ids: self.reservations
                                                                                          .fixed_instances
                                                                                          .clone(), })
                                  .into_actor(self)
@@ -241,7 +249,7 @@ impl TaskActor {
         self.fixed_instance_routing
             .iter()
             .filter_map(|(id, routing)| {
-                if self.task.reservations.fixed_instances.contains(id) {
+                if self.reservations.fixed_instances.contains(id) {
                     Some((id.clone(), routing.clone()))
                 } else {
                     None

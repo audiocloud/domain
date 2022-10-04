@@ -7,7 +7,7 @@ use audiocloud_api::common::change::{DesiredTaskPlayState, TaskState};
 use audiocloud_api::common::media::{MediaObject, RenderId};
 use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::common::task::TaskSpec;
-use audiocloud_api::domain::tasks::{TaskCreated, TaskDeleted, TaskUpdated};
+use audiocloud_api::domain::tasks::{TaskCreated, TaskDeleted, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
 use audiocloud_api::{CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, StreamingPacket, TaskReservation};
 
@@ -74,7 +74,7 @@ pub struct NotifyTaskReservation {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyTaskState {
-    pub session_id: AppTaskId,
+    pub task_id: AppTaskId,
     pub state:      TaskState,
 }
 
@@ -116,3 +116,13 @@ pub struct NotifyRenderFailed {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct BecomeOnline;
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "TaskSummaryList")]
+pub struct ListTasks;
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<TaskWithStatusAndSpec>")]
+pub struct GetTaskWithStatusAndSpec {
+    pub task_id: AppTaskId,
+}

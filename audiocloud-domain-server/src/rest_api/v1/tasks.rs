@@ -1,5 +1,9 @@
+use std::convert::identity;
+
+use actix::MailboxError;
 use actix_web::web::Json;
 use actix_web::{delete, get, post, web};
+use futures::FutureExt;
 use serde::Deserialize;
 use web::Path;
 
@@ -8,9 +12,12 @@ use audiocloud_api::domain::tasks::{
     CreateTask, ModifyTask, TaskCreated, TaskDeleted, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec,
 };
 use audiocloud_api::domain::DomainError;
-use audiocloud_api::{AppId, RequestCancelRender, RequestPlay, RequestRender, RequestSeek, RequestStopPlay, TaskId};
+use audiocloud_api::{
+    AppId, AppTaskId, RequestCancelRender, RequestPlay, RequestRender, RequestSeek, RequestStopPlay, TaskId,
+};
 
 use crate::rest_api::{ApiResponder, ApiResponse};
+use crate::tasks::{get_tasks_supervisor, messages, ListTasks};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(list_tasks)
@@ -31,6 +38,17 @@ struct AppTaskIdPath {
     task_id: TaskId,
 }
 
+impl Into<AppTaskId> for AppTaskIdPath {
+    fn into(self) -> AppTaskId {
+        let Self { app_id, task_id } = self;
+        AppTaskId { app_id, task_id }
+    }
+}
+
+fn bad_gateway(err: MailboxError) -> DomainError {
+    DomainError::BadGateway { error: err.to_string() }
+}
+
 fn not_implemented_yet<T>(call: &'static str) -> Result<T, DomainError> {
     Err(DomainError::NotImplemented { call:   call.to_string(),
                                       reason: "Not implemented yet".to_string(), })
@@ -38,19 +56,37 @@ fn not_implemented_yet<T>(call: &'static str) -> Result<T, DomainError> {
 
 #[get("/")]
 async fn list_tasks(responder: ApiResponder) -> ApiResponse<TaskSummaryList> {
-    responder.respond(async move { not_implemented_yet("list_tasks") })
+    responder.respond(async move { get_tasks_supervisor().send(ListTasks).await.map_err(bad_gateway) })
              .await
 }
 
 #[post("/")]
 async fn create_task(responder: ApiResponder, create: Json<CreateTask>) -> ApiResponse<TaskCreated> {
-    responder.respond(async move { not_implemented_yet("create_task") })
+    let create = messages::CreateTask { app_session_id: create.0.task_id,
+                                        reservations:   create.0.reservations,
+                                        spec:           create.0.spec,
+                                        security:       create.0.security, };
+
+    responder.respond(async move {
+                 get_tasks_supervisor().send(create)
+                                       .await
+                                       .map_err(bad_gateway)
+                                       .and_then(identity)
+             })
              .await
 }
 
 #[get("/{app_id}/{task_id}")]
 async fn get_task(responder: ApiResponder, task_id: Path<AppTaskIdPath>) -> ApiResponse<TaskWithStatusAndSpec> {
-    responder.respond(async move { not_implemented_yet("get_task") }).await
+    let task_id = task_id.into_inner().into();
+    let get = messages::GetTaskWithStatusAndSpec { task_id };
+    responder.respond(async move {
+                 get_tasks_supervisor().send(get)
+                                       .await
+                                       .map_err(bad_gateway)
+                                       .and_then(identity)
+             })
+             .await
 }
 
 #[post("/{app_id}/{task_id}/modify")]
