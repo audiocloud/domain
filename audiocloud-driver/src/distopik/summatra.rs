@@ -13,7 +13,6 @@ impl InstanceConfig for Config {
     }
 }
 
-
 // struct Dual1084 {
 //     id:             FixedInstanceId,
 //     config:         Config,
@@ -24,7 +23,7 @@ impl InstanceConfig for Config {
 //     input_gain:             [UnipotRegion; 2],//[L,D]
 //     input_gain_param:       ModelParameter,   //  1
 //     high_pass_filter:       [UnipotRegion; 4],
-//     high_pass_filter_param: ModelParameter,   
+//     high_pass_filter_param: ModelParameter,
 //     low_freq:               [UnipotRegion; 4],//[L,D,L,D]
 //     low_freq_param:         ModelParameter,   //  1   2
 //     low_gain:               [UnipotRegion; 2],
@@ -59,7 +58,7 @@ impl InstanceConfig for Config {
 
 // impl UnipotRegion {
 //     pub fn new(pot_id: usize, bits: impl Iterator<Item = usize>) -> Self {
-//         Self { 
+//         Self {
 //             bits: bits.collect(),
 //             pot_id,
 //         }
@@ -84,7 +83,7 @@ impl InstanceConfig for Config {
 
 // impl UnirelRegion {
 //     pub fn new(pot_id: usize, bits: impl Iterator<Item = usize>) -> Self {
-//         Self { 
+//         Self {
 //             bits: bits.collect(),
 //             pot_id,
 //         }
@@ -132,7 +131,7 @@ impl InstanceConfig for Config {
 //                       io_exp_data:            [[0; 6]; 8],
 //                       input_gain:             [UnipotRegion::new(3, 72..=79), UnipotRegion::new(1, 72..=79)],
 //                       input_gain_param:       dual_1084::input_gain(),
-//                       high_pass_filter:       [UnipotRegion::new(3, 56..=61), UnipotRegion::new(1, 56..=61), 
+//                       high_pass_filter:       [UnipotRegion::new(3, 56..=61), UnipotRegion::new(1, 56..=61),
 //                                                UnipotRegion::new(3, [62,63,48,49,50,51].into_iter()), UnipotRegion::new(1, [62,63,48,49,50,51].into_iter())],
 //                       high_pass_filter_param: dual_1084::high_pass_filter(),
 //                       low_freq:               [UnipotRegion::new(3, 16..=21), UnipotRegion::new(1, (16..=21).rev()),
@@ -161,7 +160,7 @@ impl InstanceConfig for Config {
 //                       output_pad_param:       dual_1084::output_pad(),
 //                       eql_toggle:             [UnipotRegion::new(3, 52..=52), UnipotRegion::new(1, 52..=52)],
 //                       eql_toggle_param:       dual_1084::eql_toggle(),
-                    
+
 //                     })
 //     }
 // }

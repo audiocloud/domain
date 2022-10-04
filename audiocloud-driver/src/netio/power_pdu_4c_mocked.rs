@@ -7,10 +7,10 @@ use maplit::hashmap;
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
-use audiocloud_api::model::{enumerate_multi_channel_value_bool, ModelValue};
+use audiocloud_api::common::model::{enumerate_multi_channel_value_bool, ModelValue};
+use audiocloud_api::common::time::Timestamped;
+use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::newtypes::FixedInstanceId;
-use audiocloud_api::time::Timestamped;
 use audiocloud_models::netio::netio_4c::*;
 
 use crate::{emit_event, Command, InstanceConfig};

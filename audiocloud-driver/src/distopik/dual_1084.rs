@@ -9,10 +9,10 @@ use nix::{ioctl_none, ioctl_write_ptr};
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError};
-use audiocloud_api::model::{Model, ModelParameter, ModelValue};
+use audiocloud_api::common::model::{Model, ModelParameter, ModelValue};
+use audiocloud_api::common::time::{now, Timestamp};
+use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError};
 use audiocloud_api::newtypes::FixedInstanceId;
-use audiocloud_api::time::{now, Timestamp};
 use audiocloud_models::distopik::dual_1084::{self};
 
 use crate::utils::*;
@@ -136,8 +136,11 @@ impl UnirelRegion {
                 temp = true;
             }
             if i == 0 {
-                if temp == false {temp = true;}
-                else {temp = false;}
+                if temp == false {
+                    temp = true;
+                } else {
+                    temp = false;
+                }
             }
 
             write_bit_16(&mut memory[self.pot_id][(bit / 16) + 1], (bit % 16) as u16, temp as u16);
@@ -148,7 +151,7 @@ impl UnirelRegion {
 
 impl Dual1084 {
     pub fn new(id: FixedInstanceId, config: Config) -> anyhow::Result<Self> {
-        info!("👋 Summatra Nuclear driver");
+        info!("👋 Summatra Nuclear instance_driver");
         let raw_fd = File::options().read(true).write(true).open("/dev/PIVO")?.into_raw_fd();
         let model = dual_1084::distopik_dual_1084_model();
         let values = NotifyInstanceValues::new(id.clone());
@@ -254,7 +257,6 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in low_mid_gain.into_iter().enumerate() {
                         let rescaled = rescale_param(value, &self.low_mid_gain_param, ch, 128.0);
                         self.low_mid_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-
                     }
                 }
                 if let Some(low_mid_freq) = params.remove(&dual_1084::LOW_MID_FREQ) {
@@ -265,7 +267,7 @@ impl Handler<Command> for Dual1084 {
                 }
                 if let Some(low_mid_width) = params.remove(&dual_1084::LOW_MID_WIDTH) {
                     for (ch, value) in low_mid_width.into_iter().enumerate() {
-                            //let rescaled = rescale_param(value, &self.low_mid_width_param,  , 128.0);
+                        //let rescaled = rescale_param(value, &self.low_mid_width_param,  , 128.0);
                         if let Some(ModelValue::Bool(value)) = value {
                             self.low_mid_width[ch].write_switch(&mut self.io_exp_data, value as u16);
                         }
@@ -281,7 +283,6 @@ impl Handler<Command> for Dual1084 {
                     for (ch, value) in high_mid_freq.into_iter().enumerate() {
                         let rescaled = repoint_param(value, &self.high_mid_freq_param, ch);
                         self.high_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        
                     }
                 }
                 if let Some(high_mid_width) = params.remove(&dual_1084::HIGH_MID_WIDTH) {
@@ -342,12 +343,14 @@ impl Dual1084 {
             for i in 0..4 {
                 if self.io_exp_data[io_boards[i] as usize][0] == 1 {
                     if (j < 5 && (io_boards[i] != 7)) {
-                        spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x12) << 16) | swap_u16(self.io_exp_data[io_boards[i] as usize][j + 1]) as u32;
+                        spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x12) << 16)
+                                                          | swap_u16(self.io_exp_data[io_boards[i] as usize][j + 1])
+                                                            as u32;
                         spi_data[8] |= 1 << io_boards[i];
                     }
-                    if (j == 0 && (io_boards[i] == 7)){
-                        
-                        spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x9) << 16) | self.io_exp_data[io_boards[i] as usize][j + 1] as u32;
+                    if (j == 0 && (io_boards[i] == 7)) {
+                        spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x9) << 16)
+                                                          | self.io_exp_data[io_boards[i] as usize][j + 1] as u32;
                         spi_data[8] |= 1 << io_boards[i];
                         //info!("uint8_t: {:#?}", );
                     }

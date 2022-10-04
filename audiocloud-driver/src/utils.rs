@@ -1,3 +1,4 @@
+use audiocloud_api::common::model::{ModelParameter, ModelValue, ModelValueOption};
 use audiocloud_api::model::{ModelParameter, ModelValue, ModelValueOption};
 use std::ops::Range;
 
@@ -35,21 +36,18 @@ pub fn rescale_param(value: Option<ModelValue>, range: &ModelParameter, ch: usiz
 
 pub fn repoint_param(value: Option<ModelValue>, ladder: &ModelParameter, ch: usize) -> f64 {
     if let Some(ModelValue::Number(value)) = value {
-        ladder
-            .values
-            .iter()
-            .position(|x| *x == ModelValueOption::Single(ModelValue::Number(value)))
-            .unwrap() as f64
-    }
-    else if let Some(ModelValue::Bool(state)) = value {
-      if state == false {
-        return 0.0;
-      } else {
-        1.0
-      }
-    } 
-    else {
-      0.0
+        ladder.values
+              .iter()
+              .position(|x| *x == ModelValueOption::Single(ModelValue::Number(value)))
+              .unwrap() as f64
+    } else if let Some(ModelValue::Bool(state)) = value {
+        if state == false {
+            return 0.0;
+        } else {
+            1.0
+        }
+    } else {
+        0.0
     }
 }
 

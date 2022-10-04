@@ -1,39 +1,38 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::CStr;
 use std::path::PathBuf;
 
 use askama::Template;
+use audiocloud_api::common::task::{TrackMedia, UpdateTaskTrackMedia};
 use cstr::cstr;
 use reaper_medium::{MediaItem, MediaItemTake, MediaTrack, Reaper};
 use tracing::*;
 use uuid::Uuid;
 
-use audiocloud_api::newtypes::{AppId, AppMediaObjectId, MediaId};
-use audiocloud_api::session::{SessionTrackMedia, UpdateSessionTrackMedia};
-
-use crate::audio_engine::media_track::AudioEngineMediaTrack;
-use crate::audio_engine::project::AudioEngineProjectTemplateSnapshot;
+use crate::audio_engine::media_track::EngineMediaTrack;
+use crate::audio_engine::project::EngineProjectTemplateSnapshot;
+use audiocloud_api::newtypes::{AppId, AppMediaObjectId, TrackMediaId};
 
 #[derive(Debug)]
-pub struct AudioEngineMediaItem {
-    media_id:  MediaId,
+pub struct EngineMediaItem {
+    media_id:  TrackMediaId,
     object_id: AppMediaObjectId,
     item_id:   Uuid,
     take_id:   Uuid,
     track:     MediaTrack,
     item:      MediaItem,
     take:      MediaItemTake,
-    spec:      SessionTrackMedia,
+    spec:      TrackMedia,
     path:      Option<String>,
 }
 
-impl AudioEngineMediaItem {
+impl EngineMediaItem {
     #[instrument(skip_all, err)]
     pub fn new(track: MediaTrack,
                media_root: &PathBuf,
                app_id: &AppId,
-               media_id: MediaId,
-               spec: SessionTrackMedia,
+               media_id: TrackMediaId,
+               spec: TrackMedia,
                media: &HashMap<AppMediaObjectId, String>)
                -> anyhow::Result<Self> {
         let object_id = spec.object_id.clone().for_app(app_id.clone());
@@ -102,7 +101,7 @@ impl AudioEngineMediaItem {
         false
     }
 
-    pub fn update(&mut self, update: UpdateSessionTrackMedia) {
+    pub fn update(&mut self, update: UpdateTaskTrackMedia) {
         self.spec.update(update.clone());
     }
 }
@@ -147,16 +146,16 @@ fn get_media_item_take_uuid(media_item_take: MediaItemTake) -> anyhow::Result<Uu
 
 #[derive(Template)]
 #[template(path = "audio_engine/media_item.txt")]
-pub struct AudioEngineMediaItemTemplate<'a> {
-    media:   &'a AudioEngineMediaItem,
-    track:   &'a AudioEngineMediaTrack,
-    project: &'a AudioEngineProjectTemplateSnapshot,
+pub struct EngineMediaItemTemplate<'a> {
+    media:   &'a EngineMediaItem,
+    track:   &'a EngineMediaTrack,
+    project: &'a EngineProjectTemplateSnapshot,
 }
 
-impl<'a> AudioEngineMediaItemTemplate<'a> {
-    pub fn new(media: &'a AudioEngineMediaItem,
-               track: &'a AudioEngineMediaTrack,
-               project: &'a AudioEngineProjectTemplateSnapshot)
+impl<'a> EngineMediaItemTemplate<'a> {
+    pub fn new(media: &'a EngineMediaItem,
+               track: &'a EngineMediaTrack,
+               project: &'a EngineProjectTemplateSnapshot)
                -> Self {
         Self { media, track, project }
     }

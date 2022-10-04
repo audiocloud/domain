@@ -14,7 +14,7 @@ use tracing::*;
 use vst::buffer::AudioBuffer;
 
 use audiocloud_api::audio_engine::CompressedAudio;
-use audiocloud_api::change::{PlayId, PlaySession};
+use audiocloud_api::common::media::{PlayId, RequestPlay};
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct StreamingConfig {
@@ -260,14 +260,14 @@ pub struct EncoderChain {
     encoder:        FlacEncoder,
     queue:          VecDeque<AudioBuf>,
     stream:         u64,
-    pub play:       PlaySession,
+    pub play:       RequestPlay,
     pub compressed: VecDeque<CompressedAudio>,
 }
 
 unsafe impl Send for EncoderChain {}
 
 impl EncoderChain {
-    pub fn new(play: PlaySession, native_channels: usize, native_sample_rate: usize) -> anyhow::Result<Self> {
+    pub fn new(play: RequestPlay, native_channels: usize, native_sample_rate: usize) -> anyhow::Result<Self> {
         let play_sample_rate: usize = play.sample_rate.into();
         let resampler = if native_sample_rate == play_sample_rate {
             None

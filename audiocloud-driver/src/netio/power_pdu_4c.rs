@@ -13,10 +13,10 @@ use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tracing::*;
 
-use audiocloud_api::driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
-use audiocloud_api::model::ModelValue;
+use audiocloud_api::common::model::ModelValue;
+use audiocloud_api::common::time::{Timestamp, Timestamped};
+use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::newtypes::FixedInstanceId;
-use audiocloud_api::time::{Timestamp, Timestamped};
 use audiocloud_models::netio::netio_4c::*;
 
 use crate::http_client::get_http_client;

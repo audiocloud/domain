@@ -12,12 +12,13 @@ use reaper_medium::{ProjectContext, ProjectRef, Reaper, ReaperSession};
 use tracing::*;
 use vst::prelude::*;
 
-use audiocloud_api::audio_engine::{AudioEngineEvent, CompressedAudio};
-use audiocloud_api::change::PlayId;
-use audiocloud_api::codec::{Codec, MsgPack};
-use audiocloud_api::newtypes::AppSessionId;
+use audiocloud_api::api::codec::{Codec, MsgPack};
+use audiocloud_api::audio_engine::event::EngineEvent;
+use audiocloud_api::audio_engine::CompressedAudio;
+use audiocloud_api::common::media::PlayId;
+use audiocloud_api::newtypes::AppTaskId;
 
-use crate::audio_engine::{PluginRegistry, ReaperAudioEngine, ReaperEngineCommand, StreamingPluginCommand};
+use crate::audio_engine::{PluginRegistry, ReaperEngine, ReaperEngineCommand, StreamingPluginCommand};
 use crate::streaming::EncoderChain;
 
 pub struct AudioCloudPlugin {
@@ -27,7 +28,7 @@ pub struct AudioCloudPlugin {
 }
 
 struct AudioCloudPluginActivation {
-    id:        AppSessionId,
+    id:        AppTaskId,
     rx_plugin: flume::Receiver<StreamingPluginCommand>,
     tx_engine: flume::Sender<ReaperEngineCommand>,
     chain:     Option<EncoderChain>,
@@ -79,7 +80,7 @@ impl Plugin for AudioCloudPlugin {
 
                 let cstr = CStr::from_ptr(notes.as_ptr());
 
-                AppSessionId::from_str(cstr.to_string_lossy().as_ref())
+                AppTaskId::from_str(cstr.to_string_lossy().as_ref())
             };
 
             debug!(?maybe_id, "plugin init");
@@ -233,7 +234,7 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
     Reaper::make_available_globally(reaper);
 
     let (tx_cmd, rx_cmd) = flume::unbounded();
-    let (tx_evt, rx_evt) = flume::unbounded::<AudioEngineEvent>();
+    let (tx_evt, rx_evt) = flume::unbounded::<EngineEvent>();
 
     let nats_url = env::var("NATS_URL").expect("NATS_URL env var must be set");
     let subscribe_topic = env::var("NATS_CMD_TOPIC").expect("NATS_CMD_TOPIC env var must be set");
@@ -289,7 +290,7 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
     debug!("Init plugin registry");
     PluginRegistry::init(tx_cmd.clone());
 
-    session.plugin_register_add_csurf_inst(Box::new(ReaperAudioEngine::new(shared_media_root, tx_cmd, rx_cmd, tx_evt)))
+    session.plugin_register_add_csurf_inst(Box::new(ReaperEngine::new(shared_media_root, tx_cmd, rx_cmd, tx_evt)))
            .expect("REAPER audio engine control surface register success");
 
     info!("init complete");

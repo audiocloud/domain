@@ -1,0 +1,51 @@
+use std::path::PathBuf;
+
+use clap::{Args, ValueEnum};
+use reqwest::Url;
+
+use audiocloud_api::cloud::domains::DomainConfig;
+
+mod cloud;
+mod file;
+mod messages;
+
+pub use messages::*;
+
+#[derive(Args)]
+pub struct ConfigOpts {
+    /// Source of the config
+    #[clap(short, long, env, default_value = "file", value_enum)]
+    pub config_source: ConfigSource,
+
+    /// Path to the config file
+    #[clap(long, env, default_value = "config.yaml", required_if_eq("config_source", "file"))]
+    pub config_file: PathBuf,
+
+    /// The base cloud URL to use for config retrieval
+    #[clap(long,
+           env,
+           default_value = "https://api.audiocloud.io",
+           required_if_eq("config_source", "cloud"))]
+    pub cloud_url: Url,
+
+    #[clap(long, env, required_if_eq("config_source", "cloud"))]
+    pub api_key: Option<String>,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+pub enum ConfigSource {
+    /// Load the config from an cloud or orchestrator
+    Cloud,
+    /// Load the config from a local file
+    File,
+}
+
+pub async fn init(cfg: ConfigOpts) -> anyhow::Result<DomainConfig> {
+    match cfg.config_source {
+        ConfigSource::Cloud => {
+            Ok(cloud::get_config(cfg.cloud_url,
+                                 cfg.api_key.expect("API key must be configured for cloud configuration")).await?)
+        }
+        ConfigSource::File => Ok(file::get_config(cfg.config_file).await?),
+    }
+}

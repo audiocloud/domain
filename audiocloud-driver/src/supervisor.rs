@@ -6,7 +6,7 @@ use actix_broker::BrokerSubscribe;
 use once_cell::sync::OnceCell;
 use tracing::*;
 
-use audiocloud_api::driver::InstanceDriverError;
+use audiocloud_api::instance_driver::InstanceDriverError;
 use audiocloud_api::newtypes::FixedInstanceId;
 
 use crate::nats::NatsOpts;
@@ -111,7 +111,7 @@ impl Actor for DriverSupervisor {
 
 impl Supervised for DriverSupervisor {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        warn!("Restarting driver supervisor");
+        warn!("Restarting instance_driver supervisor");
         self.subscribe_system_async::<NotifyInstanceValues>(ctx);
     }
 }

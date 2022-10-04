@@ -13,17 +13,18 @@ use serde::{Deserialize, Serialize};
 use tracing::*;
 use uuid::Uuid;
 
-use audiocloud_api::audio_engine::{AudioEngineCommand, AudioEngineEvent, CompressedAudio};
-use audiocloud_api::change::{PlayId, PlaySession, RenderId};
-use audiocloud_api::cloud::apps::SessionSpec;
-use audiocloud_api::cloud::domains::InstanceRouting;
-use audiocloud_api::model::MultiChannelValue;
-use audiocloud_api::newtypes::{AppMediaObjectId, AppSessionId, ConnectionId, FixedInstanceId};
-use audiocloud_api::session::{MixerChannels, SessionConnection, SessionFlowId};
-use project::AudioEngineProject;
+use audiocloud_api::audio_engine::command::EngineCommand;
+use audiocloud_api::audio_engine::event::EngineEvent;
+use audiocloud_api::audio_engine::CompressedAudio;
+use audiocloud_api::cloud::domains::FixedInstanceRouting;
+use audiocloud_api::common::media::{PlayId, RenderId, RequestPlay};
+use audiocloud_api::common::model::MultiChannelValue;
+use audiocloud_api::common::task::{MixerChannels, NodeConnection, NodePadId, TaskSpec};
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, FixedInstanceId, NodeConnectionId};
+use project::EngineProject;
 
-use crate::audio_engine::project::AudioEngineProjectTemplateSnapshot;
-use crate::events::AudioEngineCommandWithResultSender;
+use crate::audio_engine::project::EngineProjectTemplateSnapshot;
+use crate::events::EngineCommandWithResultSender;
 
 mod fixed_instance;
 mod media_item;
@@ -34,11 +35,11 @@ mod rest_api;
 
 pub struct PluginRegistry {
     pub tx_engine: Sender<ReaperEngineCommand>,
-    pub plugins:   HashMap<AppSessionId, Sender<StreamingPluginCommand>>,
+    pub plugins:   HashMap<AppTaskId, Sender<StreamingPluginCommand>>,
 }
 
 impl PluginRegistry {
-    pub fn register(id: AppSessionId, sender: Sender<StreamingPluginCommand>) -> Sender<ReaperEngineCommand> {
+    pub fn register(id: AppTaskId, sender: Sender<StreamingPluginCommand>) -> Sender<ReaperEngineCommand> {
         let mut lock = PLUGIN_REGISTRY.get()
                                       .expect("Plugin registry exists")
                                       .lock()
@@ -47,7 +48,7 @@ impl PluginRegistry {
         lock.tx_engine.clone()
     }
 
-    pub fn unregister(id: &AppSessionId) {
+    pub fn unregister(id: &AppTaskId) {
         let mut lock = PLUGIN_REGISTRY.get()
                                       .expect("Plugin registry exists")
                                       .lock()
@@ -55,7 +56,7 @@ impl PluginRegistry {
         lock.plugins.remove(id);
     }
 
-    pub fn play(app_session_id: &AppSessionId, play: PlaySession, context: ProjectContext) -> anyhow::Result<()> {
+    pub fn play(app_session_id: &AppTaskId, play: RequestPlay, context: ProjectContext) -> anyhow::Result<()> {
         let lock = PLUGIN_REGISTRY.get()
                                   .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
                                   .lock()
@@ -71,7 +72,7 @@ impl PluginRegistry {
         Ok(())
     }
 
-    pub fn flush(app_session_id: &AppSessionId, play_id: PlayId) -> anyhow::Result<()> {
+    pub fn flush(app_session_id: &AppTaskId, play_id: PlayId) -> anyhow::Result<()> {
         let lock = PLUGIN_REGISTRY.get()
                                   .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
                                   .lock()
@@ -86,7 +87,7 @@ impl PluginRegistry {
         Ok(())
     }
 
-    pub fn has(app_session_id: &AppSessionId) -> anyhow::Result<bool> {
+    pub fn has(app_session_id: &AppTaskId) -> anyhow::Result<bool> {
         let lock = PLUGIN_REGISTRY.get()
                                   .ok_or_else(|| anyhow!("failed to obtain plugin registry: not initialized?"))?
                                   .lock()
@@ -107,11 +108,11 @@ static PLUGIN_REGISTRY: OnceCell<Mutex<PluginRegistry>> = OnceCell::new();
 
 #[derive(Debug)]
 pub enum ReaperEngineCommand {
-    PlayReady(AppSessionId, PlayId),
-    PlayError(AppSessionId, String),
-    Audio(AppSessionId, PlayId, CompressedAudio),
-    Request(AudioEngineCommandWithResultSender),
-    GetStatus(Sender<anyhow::Result<HashMap<AppSessionId, EngineStatus>>>),
+    PlayReady(AppTaskId, PlayId),
+    PlayError(AppTaskId, String),
+    Audio(AppTaskId, PlayId, CompressedAudio),
+    Request(EngineCommandWithResultSender),
+    GetStatus(Sender<anyhow::Result<HashMap<AppTaskId, EngineStatus>>>),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -127,7 +128,7 @@ pub struct EngineStatus {
 pub enum StreamingPluginCommand {
     Play {
         context: ProjectContext,
-        play:    PlaySession,
+        play:    RequestPlay,
     },
     Flush {
         play_id: PlayId,
@@ -135,21 +136,21 @@ pub enum StreamingPluginCommand {
 }
 
 #[derive(Debug)]
-pub struct ReaperAudioEngine {
+pub struct ReaperEngine {
     shared_media_root: PathBuf,
-    sessions:          HashMap<AppSessionId, AudioEngineProject>,
+    sessions:          HashMap<AppTaskId, EngineProject>,
     rx_cmd:            Receiver<ReaperEngineCommand>,
-    tx_evt:            Sender<AudioEngineEvent>,
+    tx_evt:            Sender<EngineEvent>,
 }
 
-impl Drop for ReaperAudioEngine {
+impl Drop for ReaperEngine {
     fn drop(&mut self) {
         warn!("ReaperAudioEngine dropped!");
     }
 }
 
-impl ReaperAudioEngine {
-    pub(crate) fn get_status(&self) -> anyhow::Result<HashMap<AppSessionId, EngineStatus>> {
+impl ReaperEngine {
+    pub(crate) fn get_status(&self) -> anyhow::Result<HashMap<AppTaskId, EngineStatus>> {
         let mut rv = HashMap::new();
         for (id, session) in &self.sessions {
             rv.insert(id.clone(), session.get_status()?);
@@ -159,29 +160,29 @@ impl ReaperAudioEngine {
     }
 }
 
-impl ReaperAudioEngine {
+impl ReaperEngine {
     #[instrument(skip_all)]
     pub fn new(shared_media_root: PathBuf,
                tx_cmd: Sender<ReaperEngineCommand>,
                rx_cmd: Receiver<ReaperEngineCommand>,
-               tx_evt: Sender<AudioEngineEvent>)
-               -> ReaperAudioEngine {
+               tx_evt: Sender<EngineEvent>)
+               -> ReaperEngine {
         thread::spawn(move || rest_api::run(tx_cmd));
 
-        ReaperAudioEngine { sessions: HashMap::new(),
-                            shared_media_root,
-                            rx_cmd,
-                            tx_evt }
+        ReaperEngine { sessions: HashMap::new(),
+                       shared_media_root,
+                       rx_cmd,
+                       tx_evt }
     }
 
     #[instrument(skip_all, err)]
-    fn dispatch_cmd(&mut self, cmd: AudioEngineCommand) -> anyhow::Result<()> {
-        use AudioEngineCommand::*;
+    fn dispatch_cmd(&mut self, cmd: EngineCommand) -> anyhow::Result<()> {
+        use audiocloud_api::audio_engine::command::EngineCommand::*;
 
         debug!(?cmd, "entered");
 
         match cmd {
-            SetSpec { session_id,
+            SetSpec { task_id: session_id,
                       spec,
                       instances,
                       media_ready, } => {
@@ -191,13 +192,13 @@ impl ReaperAudioEngine {
                     self.create_session(session_id, spec, instances, media_ready)?;
                 }
             }
-            Media { session_id,
+            Media { task_id: session_id,
                     media_ready: ready, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.on_media_updated(&ready)?;
                 }
             }
-            ModifySpec { session_id,
+            ModifySpec { task_id: session_id,
                          transaction,
                          instances,
                          media_ready, } => {
@@ -207,54 +208,60 @@ impl ReaperAudioEngine {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            SetDynamicParameters { session_id, .. } => {
+            SetDynamicParameterValues { task_id: session_id, .. } => {
                 if let Some(_) = self.sessions.get_mut(&session_id) {
                     // TODO: implement dynamic parameters
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            Render { session_id, render } => {
+            Render { task_id: session_id,
+                     render, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.render(render)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            Play { session_id, play } => {
+            Play { task_id: session_id,
+                   play, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.play(play)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            UpdatePlay { session_id, update } => {
+            UpdatePlay { task_id: session_id,
+                         update, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.update_play(update)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            StopRender { session_id, render_id } => {
+            CancelRender { task_id: session_id,
+                           render_id, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.stop_render(render_id)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            StopPlay { session_id, play_id } => {
+            StopPlay { task_id: session_id,
+                       play_id, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.stop_play(play_id)?;
                 } else {
                     return Err(anyhow!("Session not found"));
                 }
             }
-            Instances { session_id, instances } => {
+            Instances { task_id: session_id,
+                        instances, } => {
                 if let Some(session) = self.sessions.get_mut(&session_id) {
                     session.on_instances_updated(&instances)?;
                 }
             }
-            Close { session_id } => {
+            Close { task_id: session_id } => {
                 if let Some(session) = self.sessions.remove(&session_id) {
                     drop(session);
                 } else {
@@ -266,9 +273,9 @@ impl ReaperAudioEngine {
     }
 
     fn create_session(&mut self,
-                      session_id: AppSessionId,
-                      spec: SessionSpec,
-                      instances: HashMap<FixedInstanceId, InstanceRouting>,
+                      session_id: AppTaskId,
+                      spec: TaskSpec,
+                      instances: HashMap<FixedInstanceId, FixedInstanceRouting>,
                       media: HashMap<AppMediaObjectId, String>)
                       -> anyhow::Result<()> {
         // create a temporary folder
@@ -277,29 +284,29 @@ impl ReaperAudioEngine {
         let temp_dir = tempdir::TempDir::new("audiocloud-session")?;
 
         self.sessions.insert(session_id.clone(),
-                             AudioEngineProject::new(session_id,
-                                                     temp_dir,
-                                                     self.shared_media_root.clone(),
-                                                     spec,
-                                                     instances,
-                                                     media)?);
+                             EngineProject::new(session_id,
+                                                temp_dir,
+                                                self.shared_media_root.clone(),
+                                                spec,
+                                                instances,
+                                                media)?);
 
         Ok(())
     }
 
     #[instrument(skip_all, err)]
     pub fn send_playing_audio_event(&mut self,
-                                    session_id: AppSessionId,
+                                    session_id: AppTaskId,
                                     play_id: PlayId,
                                     audio: CompressedAudio,
-                                    peak_meters: HashMap<SessionFlowId, MultiChannelValue>)
+                                    peak_meters: HashMap<NodePadId, MultiChannelValue>)
                                     -> anyhow::Result<()> {
         let dynamic_reports = Default::default();
-        let event = AudioEngineEvent::Playing { session_id,
-                                                play_id,
-                                                audio,
-                                                peak_meters,
-                                                dynamic_reports };
+        let event = EngineEvent::Playing { task_id: session_id,
+                                           play_id,
+                                           audio,
+                                           peak_meters,
+                                           dynamic_reports };
         debug!(?event);
 
         self.tx_evt.try_send(event)?;
@@ -308,7 +315,7 @@ impl ReaperAudioEngine {
     }
 }
 
-impl ControlSurface for ReaperAudioEngine {
+impl ControlSurface for ReaperEngine {
     #[instrument(skip(self))]
     fn run(&mut self) {
         while let Ok(cmd) = self.rx_cmd.try_recv() {
@@ -336,7 +343,8 @@ impl ControlSurface for ReaperAudioEngine {
                     let _ = send_status.send(self.get_status());
                 }
                 ReaperEngineCommand::PlayError(session_id, error) => {
-                    let _ = self.tx_evt.send(AudioEngineEvent::Error { session_id, error });
+                    let _ = self.tx_evt.send(EngineEvent::Error { task_id: session_id,
+                                                                  error });
                 }
             }
         }
@@ -378,15 +386,15 @@ pub fn beautify_chunk(chunk: String) -> String {
 #[derive(Template)]
 #[template(path = "audio_engine/auxrecv_connection.txt")]
 struct ConnectionTemplate<'a> {
-    id:         &'a ConnectionId,
-    project:    &'a AudioEngineProjectTemplateSnapshot,
-    connection: &'a SessionConnection,
+    id:         &'a NodeConnectionId,
+    project:    &'a EngineProjectTemplateSnapshot,
+    connection: &'a NodeConnection,
 }
 
 impl<'a> ConnectionTemplate<'a> {
-    pub fn new(project: &'a AudioEngineProjectTemplateSnapshot,
-               id: &'a ConnectionId,
-               connection: &'a SessionConnection)
+    pub fn new(project: &'a EngineProjectTemplateSnapshot,
+               id: &'a NodeConnectionId,
+               connection: &'a NodeConnection)
                -> Self {
         Self { id,
                project,
@@ -416,7 +424,7 @@ pub(crate) fn get_track_uuid(track: MediaTrack) -> Uuid {
     Uuid::try_parse(&s[1..s.len() - 1]).unwrap_or_else(|_| Uuid::new_v4())
 }
 
-pub(crate) fn append_track(flow_id: &SessionFlowId, context: ProjectContext) -> anyhow::Result<(MediaTrack, Uuid)> {
+pub(crate) fn append_track(flow_id: &NodePadId, context: ProjectContext) -> anyhow::Result<(MediaTrack, Uuid)> {
     let reaper = Reaper::get();
 
     let index = reaper.count_tracks(context);

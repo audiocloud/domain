@@ -1,7 +1,7 @@
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 
-use audiocloud_api::time::Timestamp;
+use audiocloud_api::common::time::Timestamp;
 
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 pub enum RequestTracker {
