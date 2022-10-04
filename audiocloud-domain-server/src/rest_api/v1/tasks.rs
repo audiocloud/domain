@@ -62,7 +62,7 @@ async fn list_tasks(responder: ApiResponder) -> ApiResponse<TaskSummaryList> {
 
 #[post("/")]
 async fn create_task(responder: ApiResponder, create: Json<CreateTask>) -> ApiResponse<TaskCreated> {
-    let create = messages::CreateTask { app_session_id: create.0.task_id,
+    let create = messages::CreateTask { task_id: create.0.task_id,
                                         reservations:   create.0.reservations,
                                         spec:           create.0.spec,
                                         security:       create.0.security, };

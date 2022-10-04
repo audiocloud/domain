@@ -5,6 +5,7 @@ use once_cell::sync::OnceCell;
 
 use audiocloud_api::cloud::domains::{DomainConfig, FixedInstanceRoutingMap};
 pub use messages::*;
+pub use supervisor::TaskOpts;
 use supervisor::TasksSupervisor;
 
 use crate::db::Db;
@@ -22,8 +23,8 @@ pub fn get_tasks_supervisor() -> &'static Addr<TasksSupervisor> {
     TASKS_SUPERVISOR.get().expect("Tasks supervisor not initialized")
 }
 
-pub fn init(db: Db, config: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<()> {
-    let supervisor = TasksSupervisor::new(db, config, routing)?;
+pub fn init(db: Db, opts: &TaskOpts, config: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<()> {
+    let supervisor = TasksSupervisor::new(db, opts, config, routing)?;
 
     TASKS_SUPERVISOR.set(Supervisor::start(move |_| supervisor))
                     .map_err(|_| anyhow!("Tasks supervisor already initialized"))?;

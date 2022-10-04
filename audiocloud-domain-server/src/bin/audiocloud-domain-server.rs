@@ -32,6 +32,9 @@ struct Opts {
 
     #[clap(flatten)]
     sockets: sockets::SocketsOpts,
+
+    #[clap(flatten)]
+    tasks: tasks::TaskOpts,
 }
 
 #[actix_web::main]
@@ -49,45 +52,45 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = Opts::parse();
 
-    debug!(source = ?opts.config.config_source, "Loading config");
+    info!(source = ?opts.config.config_source, "Loading config");
 
     let cfg = config::init(opts.config).await?;
 
-    debug!("Initializing database");
+    info!("Initializing database");
 
     let db = db::init(opts.db).await?;
 
     nats::init(&opts.nats_url).await?;
 
-    debug!(" ✔ NATS");
+    info!(" ✔ NATS");
 
     models::init(&cfg, db.clone()).await?;
 
-    debug!(" ✔ Models");
+    info!(" ✔ Models");
 
     media::init(opts.media, db.clone()).await?;
 
-    debug!(" ✔ Media");
+    info!(" ✔ Media");
 
     let routing = fixed_instances::init(&cfg, db.clone()).await?;
 
-    debug!(" ✔ Instances");
+    info!(" ✔ Instances");
 
-    tasks::init(db.clone(), &cfg, routing)?;
+    tasks::init(db.clone(), &opts.tasks, &cfg, routing)?;
 
-    debug!(" ✔ Tasks");
+    info!(" ✔ Tasks (Offline)");
 
     events::init(cfg.command_source.clone(), cfg.event_sink.clone()).await?;
 
-    debug!(" ✔ Commands / Events");
+    info!(" ✔ Commands / Events");
 
     tasks::become_online();
 
-    debug!(" ✔ Online");
+    info!(" ✔ Tasks (Online)");
 
     sockets::init(opts.sockets)?;
 
-    debug!(" ✔ Sockets");
+    info!(" ✔ Sockets");
 
     info!(bind = opts.bind,
           port = opts.port,

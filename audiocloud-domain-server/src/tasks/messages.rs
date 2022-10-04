@@ -24,7 +24,7 @@ pub struct SetTaskDesiredPlayState {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "DomainResult<TaskCreated>")]
 pub struct CreateTask {
-    pub app_session_id: AppTaskId,
+    pub task_id: AppTaskId,
     pub reservations:   CreateTaskReservation,
     pub spec:           CreateTaskSpec,
     pub security:       CreateTaskSecurity,
@@ -47,6 +47,18 @@ pub struct NotifyStreamingPacket {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyTaskDeleted {
+    pub task_id: AppTaskId,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct NotifyTaskActivated {
+    pub task_id: AppTaskId,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct NotifyTaskDeactivated {
     pub task_id: AppTaskId,
 }
 
@@ -75,7 +87,7 @@ pub struct NotifyTaskReservation {
 #[rtype(result = "()")]
 pub struct NotifyTaskState {
     pub task_id: AppTaskId,
-    pub state:      TaskState,
+    pub state:   TaskState,
 }
 
 #[derive(Message, Clone, Debug)]

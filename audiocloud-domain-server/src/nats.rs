@@ -23,10 +23,10 @@ pub async fn init(nats_url: &str) -> anyhow::Result<()> {
 
 pub fn subscribe<M: DeserializeOwned, C: Codec>(subject: String, codec: C) -> impl Stream<Item = M> {
     let conn = NATS_CONNECTION.get().expect("NATS_CONNECTION not initialized");
-    let rate = ThrottleRate::new(5, Duration::new(1, 0));
-    let pool = ThrottlePool::new(rate);
+    let throttle_rate = ThrottleRate::new(5, Duration::new(1, 0));
+    let throttle_pool = ThrottlePool::new(throttle_rate);
 
-    stream::repeat_with(move || conn.clone()).throttle(pool)
+    stream::repeat_with(move || conn.clone()).throttle(throttle_pool)
                                              .then(move |conn| {
                                                  let subject = subject.clone();
                                                  async move {
