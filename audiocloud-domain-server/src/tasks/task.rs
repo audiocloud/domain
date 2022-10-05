@@ -6,7 +6,7 @@ use std::time::Duration;
 use actix::{
     Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, MessageResult, Supervised, WrapFuture,
 };
-use actix_broker::BrokerSubscribe;
+use actix_broker::{BrokerIssue, BrokerSubscribe};
 use tracing::*;
 
 use audiocloud_api::audio_engine::{EngineCommand, EngineError, EngineEvent};
@@ -23,7 +23,10 @@ use crate::fixed_instances::{
 };
 use crate::nats;
 use crate::tasks::task_engine::TaskEngine;
-use crate::tasks::{NotifyEngineEvent, NotifyMediaTaskState, SetTaskDesiredPlayState};
+use crate::tasks::{
+    NotifyEngineEvent, NotifyMediaTaskState, NotifyTaskActivated, NotifyTaskReservation, NotifyTaskSecurity,
+    NotifyTaskSpec, SetTaskDesiredPlayState,
+};
 
 use super::task_fixed_instance::TaskFixedInstances;
 use super::task_media_objects::TaskMediaObjects;
@@ -52,6 +55,14 @@ impl Actor for TaskActor {
 
 impl Supervised for TaskActor {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
+        self.notify_task_spec();
+
+        self.notify_task_security();
+
+        self.notify_task_reservation();
+
+        self.issue_system_async(NotifyTaskActivated { task_id: Self.id.clone(), });
+
         // subscribe to routing changes
         self.subscribe_system_async::<NotifyFixedInstanceRouting>(ctx);
 
@@ -270,5 +281,20 @@ impl TaskActor {
         }
 
         self.update(ctx);
+    }
+
+    fn notify_task_spec(&mut self) {
+        self.issue_system_async(NotifyTaskSpec { task_id: Self.id.clone(),
+                                                 spec:    self.spec.clone(), });
+    }
+
+    fn notify_task_security(&mut self) {
+        self.issue_system_async(NotifyTaskSecurity { task_id:  self.id.clone(),
+                                                     security: self.security.clone(), });
+    }
+
+    fn notify_task_reservation(&mut self) {
+        self.issue_system_async(NotifyTaskReservation { task_id:     self.id.clone(),
+                                                        reservation: self.reservations.clone(), });
     }
 }

@@ -9,7 +9,9 @@ use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::domain::tasks::{TaskCreated, TaskDeleted, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
-use audiocloud_api::{CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, StreamingPacket, TaskReservation};
+use audiocloud_api::{
+    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, StreamingPacket, TaskReservation, TaskSecurity,
+};
 
 use crate::DomainResult;
 
@@ -24,10 +26,10 @@ pub struct SetTaskDesiredPlayState {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "DomainResult<TaskCreated>")]
 pub struct CreateTask {
-    pub task_id: AppTaskId,
-    pub reservations:   CreateTaskReservation,
-    pub spec:           CreateTaskSpec,
-    pub security:       CreateTaskSecurity,
+    pub task_id:      AppTaskId,
+    pub reservations: CreateTaskReservation,
+    pub spec:         CreateTaskSpec,
+    pub security:     CreateTaskSecurity,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -65,8 +67,8 @@ pub struct NotifyTaskDeactivated {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
 pub struct NotifyTaskSecurity {
-    pub session_id: AppTaskId,
-    pub security:   HashMap<SecureKey, TaskPermissions>,
+    pub task_id:  AppTaskId,
+    pub security: TaskSecurity,
 }
 
 #[derive(Message, Clone, Debug)]
