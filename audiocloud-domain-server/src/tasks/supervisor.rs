@@ -4,9 +4,13 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{fut, Actor, ActorFutureExt, Addr, AsyncContext, Context, Handler, Supervised, Supervisor, WrapFuture};
+use actix::{
+    fut, Actor, ActorFutureExt, ActorTryFutureExt, Addr, AsyncContext, Context, Handler, Supervised, Supervisor,
+    WrapFuture,
+};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use clap::Args;
+use futures::FutureExt;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInstanceRoutingMap};
@@ -23,8 +27,8 @@ use crate::tasks::messages::{
 };
 use crate::tasks::task::TaskActor;
 use crate::tasks::{
-    CreateTask, GetTaskWithStatusAndSpec, ListTasks, NotifyTaskActivated, NotifyTaskDeactivated, NotifyTaskDeleted,
-    NotifyTaskReservation, NotifyTaskSecurity,
+    CreateTask, GetTaskWithStatusAndSpec, ListTasks, ModifyTask, NotifyTaskActivated, NotifyTaskDeactivated,
+    NotifyTaskDeleted, NotifyTaskReservation, NotifyTaskSecurity,
 };
 use crate::DomainResult;
 
@@ -171,7 +175,7 @@ impl TasksSupervisor {
                         }
                     }
                 } else {
-                    warn!(%id, "No available audio engines to start session");
+                    warn!(%id, "No available audio engines to start task");
                 }
             }
         }
@@ -302,13 +306,13 @@ impl Handler<NotifyEngineEvent> for TasksSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyEngineEvent, ctx: &mut Self::Context) -> Self::Result {
-        let session_id = msg.event.task_id();
-        match self.tasks.get(session_id).and_then(|task| task.actor.as_ref()) {
+        let task_id = msg.event.task_id();
+        match self.tasks.get(task_id).and_then(|task| task.actor.as_ref()) {
             Some(session) => {
                 session.do_send(msg);
             }
             None => {
-                warn!(%session_id, "Dropping audio engine event for unknown / inactive session");
+                warn!(%task_id, "Dropping audio engine event for unknown / inactive task");
             }
         }
     }
@@ -318,13 +322,13 @@ impl Handler<NotifyMediaTaskState> for TasksSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyMediaTaskState, ctx: &mut Self::Context) -> Self::Result {
-        let session_id = &msg.task_id;
-        match self.tasks.get(session_id).and_then(|task| task.actor.as_ref()) {
-            Some(session) => {
-                session.do_send(msg);
+        let task_id = &msg.task_id;
+        match self.tasks.get(task_id).and_then(|task| task.actor.as_ref()) {
+            Some(task) => {
+                task.do_send(msg);
             }
             None => {
-                warn!(%session_id, "Dropping media service event for unknown / inactive session");
+                warn!(%task_id, "Dropping media service event for unknown / inactive task");
             }
         }
     }
@@ -385,6 +389,27 @@ impl Handler<GetTaskWithStatusAndSpec> for TasksSupervisor {
                                        spec:       Default::default(), })
         } else {
             Err(DomainError::TaskNotFound { task_id: msg.task_id })
+        }
+    }
+}
+
+impl Handler<ModifyTask> for TasksSupervisor {
+    type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;
+
+    fn handle(&mut self, msg: ModifyTask, ctx: &mut Self::Context) -> Self::Result {
+        match self.tasks.get(&msg.task_id).and_then(|task| task.actor.as_ref()) {
+            Some(session) => session.send(msg)
+                                    .into_actor(self)
+                                    .map(|result, _, _| match result {
+                                        Ok(result) => result,
+                                        Err(err) => Err(DomainError::BadGateway { error: err.to_string() }),
+                                    })
+                                    .boxed_local(),
+            None => {
+                warn!(task_id = %msg.task_id, "Dropping audio engine event for unknown / inactive session");
+                fut::err(DomainError::TaskNotFound { task_id: msg.task_id.clone(), }).into_actor(self)
+                                                                                     .boxed_local()
+            }
         }
     }
 }

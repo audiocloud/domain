@@ -21,12 +21,12 @@ use crate::config::NotifyFixedInstanceRouting;
 use crate::fixed_instances::{
     get_instance_supervisor, GetMultipleFixedInstanceState, NotifyFixedInstanceReports, NotifyInstanceState,
 };
-use crate::nats;
 use crate::tasks::task_engine::TaskEngine;
 use crate::tasks::{
-    NotifyEngineEvent, NotifyMediaTaskState, NotifyTaskActivated, NotifyTaskReservation, NotifyTaskSecurity,
-    NotifyTaskSpec, SetTaskDesiredPlayState,
+    ModifyTask, NotifyEngineEvent, NotifyMediaTaskState, NotifyTaskActivated, NotifyTaskReservation,
+    NotifyTaskSecurity, NotifyTaskSpec, SetTaskDesiredPlayState,
 };
+use crate::{nats, DomainResult};
 
 use super::task_fixed_instance::TaskFixedInstances;
 use super::task_media_objects::TaskMediaObjects;
@@ -61,7 +61,7 @@ impl Supervised for TaskActor {
 
         self.notify_task_reservation();
 
-        self.issue_system_async(NotifyTaskActivated { task_id: Self.id.clone(), });
+        self.issue_system_async(NotifyTaskActivated { task_id: self.id.clone(), });
 
         // subscribe to routing changes
         self.subscribe_system_async::<NotifyFixedInstanceRouting>(ctx);
@@ -183,6 +183,14 @@ impl Handler<SetTaskDesiredPlayState> for TaskActor {
     }
 }
 
+impl Handler<ModifyTask> for TaskActor {
+    type Result = DomainResult<TaskUpdated>;
+
+    fn handle(&mut self, msg: ModifyTask, ctx: &mut Self::Context) -> Self::Result {
+        todo!()
+    }
+}
+
 impl TaskActor {
     pub fn new(id: AppTaskId,
                domain_id: DomainId,
@@ -284,7 +292,7 @@ impl TaskActor {
     }
 
     fn notify_task_spec(&mut self) {
-        self.issue_system_async(NotifyTaskSpec { task_id: Self.id.clone(),
+        self.issue_system_async(NotifyTaskSpec { task_id: self.id.clone(),
                                                  spec:    self.spec.clone(), });
     }
 

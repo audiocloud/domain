@@ -17,7 +17,7 @@ use audiocloud_api::domain::streaming::DomainServerMessage::PeerConnectionRespon
 use audiocloud_api::domain::streaming::{DomainClientMessage, DomainServerMessage, PeerConnectionCreated};
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::newtypes::{AppTaskId, SecureKey};
-use audiocloud_api::{RequestId, SerializableResult};
+use audiocloud_api::{RequestId, SerializableResult, TaskSecurity};
 
 use crate::sockets::web_rtc::{AddIceCandidate, WebRtcActor};
 use crate::sockets::web_sockets::WebSocketActor;
@@ -31,7 +31,7 @@ pub struct SocketsSupervisor {
     opts:                SocketsOpts,
     sockets:             HashMap<SocketId, Socket>,
     task_socket_members: HashMap<AppTaskId, HashSet<SocketMembership>>,
-    security:            HashMap<AppTaskId, HashMap<SecureKey, TaskPermissions>>,
+    security:            HashMap<AppTaskId, TaskSecurity>,
 }
 
 #[derive(Debug)]

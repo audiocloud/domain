@@ -10,7 +10,8 @@ use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::domain::tasks::{TaskCreated, TaskDeleted, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
 use audiocloud_api::{
-    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, StreamingPacket, TaskReservation, TaskSecurity,
+    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, StreamingPacket, TaskReservation,
+    TaskSecurity,
 };
 
 use crate::DomainResult;
@@ -139,4 +140,10 @@ pub struct ListTasks;
 #[rtype(result = "DomainResult<TaskWithStatusAndSpec>")]
 pub struct GetTaskWithStatusAndSpec {
     pub task_id: AppTaskId,
+}
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<TaskUpdated>")]
+pub struct ModifyTask {
+    pub task_id:     AppTaskId,
+    pub modify_spec: Vec<ModifyTaskSpec>,
 }

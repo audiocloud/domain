@@ -62,10 +62,10 @@ async fn list_tasks(responder: ApiResponder) -> ApiResponse<TaskSummaryList> {
 
 #[post("/")]
 async fn create_task(responder: ApiResponder, create: Json<CreateTask>) -> ApiResponse<TaskCreated> {
-    let create = messages::CreateTask { task_id: create.0.task_id,
-                                        reservations:   create.0.reservations,
-                                        spec:           create.0.spec,
-                                        security:       create.0.security, };
+    let create = messages::CreateTask { task_id:      create.0.task_id,
+                                        reservations: create.0.reservations,
+                                        spec:         create.0.spec,
+                                        security:     create.0.security, };
 
     responder.respond(async move {
                  get_tasks_supervisor().send(create)
@@ -94,7 +94,16 @@ async fn modify_task(responder: ApiResponder,
                      task_id: Path<AppTaskIdPath>,
                      modify: Json<ModifyTask>)
                      -> ApiResponse<TaskUpdated> {
-    responder.respond(async move { not_implemented_yet("modify_task") })
+    let task_id = task_id.into_inner().into();
+    let modify = messages::ModifyTask { task_id,
+                                        modify_spec: modify.0.modify_spec };
+
+    responder.respond(async move {
+                 get_tasks_supervisor().send(modify)
+                                       .await
+                                       .map_err(bad_gateway)
+                                       .and_then(identity)
+             })
              .await
 }
 
