@@ -4,12 +4,11 @@ use clap::{Args, ValueEnum};
 use reqwest::Url;
 
 use audiocloud_api::cloud::domains::DomainConfig;
+pub use messages::*;
 
 mod cloud;
 mod file;
 mod messages;
-
-pub use messages::*;
 
 #[derive(Args)]
 pub struct ConfigOpts {
@@ -30,6 +29,9 @@ pub struct ConfigOpts {
 
     #[clap(long, env, required_if_eq("config_source", "cloud"))]
     pub api_key: Option<String>,
+
+    #[clap(long, env, default_value = "3600")]
+    pub config_refresh_seconds: usize,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -42,10 +44,10 @@ pub enum ConfigSource {
 
 pub async fn init(cfg: ConfigOpts) -> anyhow::Result<DomainConfig> {
     match cfg.config_source {
-        ConfigSource::Cloud => {
-            Ok(cloud::get_config(cfg.cloud_url,
-                                 cfg.api_key.expect("API key must be configured for cloud configuration")).await?)
-        }
+        ConfigSource::Cloud => Ok(cloud::get_config(cfg.cloud_url,
+                                                    cfg.api_key
+                                                       .expect("API key must be configured for cloud configuration"),
+                                                    cfg.config_refresh_seconds).await?),
         ConfigSource::File => Ok(file::get_config(cfg.config_file).await?),
     }
 }
