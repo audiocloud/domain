@@ -58,8 +58,7 @@ impl TasksSupervisor {
 
         task.spec = spec;
 
-        Ok(TaskUpdated::Updated { task_id:  { msg.task_id.task_id.clone() },
-                                  app_id:   { msg.task_id.app_id.clone() },
+        Ok(TaskUpdated::Updated { task_id:  { msg.task_id.clone() },
                                   revision: { task.spec.revision }, })
     }
 }

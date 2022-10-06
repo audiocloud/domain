@@ -27,7 +27,8 @@ mod handle_engine_events;
 mod handle_instance_events;
 mod handle_media_events;
 mod modify_task;
-mod set_desired_play_state;
+mod render_task;
+mod play_task;
 mod packet_handling;
 
 pub struct TaskActor {

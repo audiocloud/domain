@@ -22,7 +22,7 @@ use super::messages::*;
 
 mod packets;
 mod sockets;
-mod task_events;
+mod handle_task_events;
 mod timers;
 
 pub struct SocketsSupervisor {

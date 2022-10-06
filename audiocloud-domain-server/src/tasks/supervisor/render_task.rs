@@ -1,18 +1,19 @@
 use actix::fut::LocalBoxActorFuture;
 use actix::{fut, ActorFutureExt, Handler, WrapFuture};
 
+use audiocloud_api::audio_engine::TaskRendering;
 use audiocloud_api::domain::tasks::TaskUpdated;
 use audiocloud_api::domain::DomainError;
 
-use crate::tasks::SetTaskDesiredPlayState;
+use crate::tasks::RenderTask;
 use crate::DomainResult;
 
 use super::TasksSupervisor;
 
-impl Handler<SetTaskDesiredPlayState> for TasksSupervisor {
-    type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;
+impl Handler<RenderTask> for TasksSupervisor {
+    type Result = LocalBoxActorFuture<Self, DomainResult<TaskRendering>>;
 
-    fn handle(&mut self, msg: SetTaskDesiredPlayState, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: RenderTask, ctx: &mut Self::Context) -> Self::Result {
         use DomainError::*;
 
         if let Some(task) = self.tasks.get(&msg.task_id).and_then(|task| task.actor.as_ref()) {

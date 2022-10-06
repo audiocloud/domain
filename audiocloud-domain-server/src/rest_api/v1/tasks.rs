@@ -14,7 +14,8 @@ use audiocloud_api::domain::tasks::{
 };
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::{
-    AppId, AppTaskId, RequestCancelRender, RequestPlay, RequestRender, RequestSeek, RequestStopPlay, TaskId,
+    AppId, AppTaskId, DesiredTaskPlayState, RequestCancelRender, RequestPlay, RequestRender, RequestSeek,
+    RequestStopPlay, TaskId,
 };
 
 use crate::rest_api::{ApiResponder, ApiResponse};
@@ -93,6 +94,7 @@ async fn get_task(responder: ApiResponder, task_id: Path<AppTaskIdPath>) -> ApiR
 
 #[post("/{app_id}/{task_id}/modify")]
 async fn modify_task(responder: ApiResponder,
+                     security: DomainSecurity,
                      task_id: Path<AppTaskIdPath>,
                      modify: Json<ModifyTask>,
                      if_match: Header<IfMatch>)
@@ -103,7 +105,7 @@ async fn modify_task(responder: ApiResponder,
                  let modify = messages::ModifyTask { task_id:     { task_id },
                                                      modify_spec: { modify.into_inner().modify_spec },
                                                      revision:    { get_revision(if_match)? },
-                                                     security:    { DomainSecurity::Cloud }, };
+                                                     security:    { security }, };
 
                  get_tasks_supervisor().send(modify)
                                        .await
@@ -114,26 +116,70 @@ async fn modify_task(responder: ApiResponder,
 }
 
 #[delete("/{app_id}/{task_id}")]
-async fn delete_task(responder: ApiResponder, task_id: Path<AppTaskIdPath>) -> ApiResponse<TaskDeleted> {
-    responder.respond(async move { not_implemented_yet("delete_task") })
+async fn delete_task(responder: ApiResponder,
+                     security: DomainSecurity,
+                     task_id: Path<AppTaskIdPath>,
+                     if_match: Header<IfMatch>)
+                     -> ApiResponse<TaskDeleted> {
+    let task_id = task_id.into_inner().into();
+
+    responder.respond(async move {
+                 let delete = messages::DeleteTask { task_id:  { task_id },
+                                                     revision: { get_revision(if_match)? },
+                                                     security: { security }, };
+
+                 get_tasks_supervisor().send(delete)
+                                       .await
+                                       .map_err(bad_gateway)
+                                       .and_then(identity)
+             })
              .await
 }
 
 #[post("/{app_id}/{task_id}/transport/render")]
 async fn render_task(responder: ApiResponder,
                      task_id: Path<AppTaskIdPath>,
-                     render: Json<RequestRender>)
+                     render: Json<RequestRender>,
+                     if_match: Header<IfMatch>,
+                     security: DomainSecurity)
                      -> ApiResponse<TaskRendering> {
-    responder.respond(async move { not_implemented_yet("render_task") })
+    let task_id = task_id.into_inner().into();
+
+    responder.respond(async move {
+                 let render = messages::RenderTask { task_id:  { task_id },
+                                                     render:   { render.into_inner() },
+                                                     security: { security },
+                                                     revision: { get_revision(if_match)? }, };
+
+                 get_tasks_supervisor().send(render)
+                                       .await
+                                       .map_err(bad_gateway)
+                                       .and_then(identity)
+             })
              .await
 }
 
 #[post("/{app_id}/{task_id}/transport/play")]
 async fn play_task(responder: ApiResponder,
                    task_id: Path<AppTaskIdPath>,
-                   play: Json<RequestPlay>)
+                   play: Json<RequestPlay>,
+                   if_match: Header<IfMatch>,
+                   security: DomainSecurity)
                    -> ApiResponse<TaskPlaying> {
-    responder.respond(async move { not_implemented_yet("play_task") }).await
+    let task_id = task_id.into_inner().into();
+
+    responder.respond(async move {
+                 let render = messages::PlayTask { task_id:  { task_id },
+                                                   play:     { play.into_inner() },
+                                                   security: { security },
+                                                   revision: { get_revision(if_match)? }, };
+
+                 get_tasks_supervisor().send(render)
+                                       .await
+                                       .map_err(bad_gateway)
+                                       .and_then(identity)
+             })
+             .await
 }
 
 #[post("/{app_id}/{task_id}/transport/seek")]

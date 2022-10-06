@@ -15,8 +15,7 @@ impl Handler<GetTaskWithStatusAndSpec> for TasksSupervisor {
 
         if let Some(task) = self.tasks.get(&msg.task_id) {
             Ok(TaskWithStatusAndSpec { play_state: { task.state.play_state.value().clone() },
-                                       task_id:    { msg.task_id.task_id.clone() },
-                                       app_id:     { msg.task_id.app_id.clone() },
+                                       task_id:    { msg.task_id.clone() },
                                        instances:  { Default::default() },
                                        media:      { Default::default() },
                                        spec:       { Default::default() }, })

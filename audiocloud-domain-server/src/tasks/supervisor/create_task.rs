@@ -25,7 +25,6 @@ impl Handler<CreateTask> for TasksSupervisor {
 
         self.update(ctx);
 
-        Ok(TaskCreated::Created { task_id: msg.task_id.task_id.clone(),
-                                  app_id:  msg.task_id.app_id.clone(), })
+        Ok(TaskCreated::Created { task_id: msg.task_id.clone(), })
     }
 }

@@ -7,21 +7,33 @@ use audiocloud_api::common::change::{DesiredTaskPlayState, TaskState};
 use audiocloud_api::common::media::{MediaObject, RenderId};
 use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::common::task::TaskSpec;
-use audiocloud_api::domain::tasks::{TaskCreated, TaskDeleted, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec};
+use audiocloud_api::domain::tasks::{
+    TaskCreated, TaskDeleted, TaskPlaying, TaskRendering, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec,
+};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
 use audiocloud_api::{
-    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, StreamingPacket, TaskReservation,
-    TaskSecurity,
+    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, RequestPlay, RequestRender,
+    StreamingPacket, TaskReservation, TaskSecurity,
 };
 
 use crate::{DomainResult, DomainSecurity};
 
 #[derive(Message, Clone, Debug)]
-#[rtype(result = "DomainResult<TaskUpdated>")]
-pub struct SetTaskDesiredPlayState {
-    pub task_id: AppTaskId,
-    pub desired: DesiredTaskPlayState,
-    pub version: u64,
+#[rtype(result = "DomainResult<TaskRendering>")]
+pub struct RenderTask {
+    pub task_id:  AppTaskId,
+    pub render:   RequestRender,
+    pub security: DomainSecurity,
+    pub revision: u64,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<TaskPlaying>")]
+pub struct PlayTask {
+    pub task_id:  AppTaskId,
+    pub play:     RequestPlay,
+    pub security: DomainSecurity,
+    pub revision: u64,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -36,8 +48,9 @@ pub struct CreateTask {
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "DomainResult<TaskDeleted>")]
 pub struct DeleteTask {
-    pub app_session_id: AppTaskId,
-    pub version:        u64,
+    pub task_id:  AppTaskId,
+    pub revision: u64,
+    pub security: DomainSecurity,
 }
 
 #[derive(Message, Clone, Debug)]

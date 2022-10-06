@@ -1,7 +1,7 @@
 use std::env;
 
 use actix_web::middleware::Logger;
-use actix_web::{App, HttpServer};
+use actix_web::{web, App, HttpServer};
 use clap::Parser;
 use tracing::*;
 
@@ -35,6 +35,9 @@ struct Opts {
 
     #[clap(flatten)]
     tasks: tasks::TaskOpts,
+
+    #[clap(flatten)]
+    rest: rest_api::RestOpts,
 }
 
 #[actix_web::main]
@@ -96,9 +99,12 @@ async fn main() -> anyhow::Result<()> {
           port = opts.port,
           " ==== AudioCloud Domain server ==== ");
 
+    let rest_opts = web::Data::new(opts.rest.clone());
+
     // create actix
-    HttpServer::new(|| {
+    HttpServer::new(move || {
         App::new().wrap(Logger::default())
+                  .app_data(rest_opts.clone())
                   .configure(rest_api::configure)
                   .configure(sockets::configure)
     }).bind((opts.bind.as_str(), opts.port))?

@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use actix::{Actor, Addr, AsyncContext, Context, Handler, Supervised, Supervisor};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
-use clap::Args;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInstanceRoutingMap};
@@ -15,7 +14,6 @@ use audiocloud_api::newtypes::{AppTaskId, EngineId};
 use audiocloud_api::{now, DomainId, FixedInstanceId, TaskPermissions, TaskReservation, TaskSecurity, TaskSpec};
 
 use crate::db::Db;
-use crate::fixed_instances::NotifyFixedInstanceReports;
 use crate::tasks::messages::{BecomeOnline, NotifyTaskSpec, NotifyTaskState};
 use crate::tasks::task::TaskActor;
 use crate::tasks::{
@@ -27,6 +25,7 @@ const ALLOW_MODIFY_STRUCTURE: TaskPermissions = TaskPermissions { structure: tru
                                                                   ..TaskPermissions::empty() };
 
 mod create_task;
+mod delete_task;
 mod get_task;
 mod handle_engine_events;
 mod handle_instance_events;
@@ -34,7 +33,8 @@ mod handle_media_events;
 mod handle_task_events;
 mod list_tasks;
 mod modify_task;
-mod set_desired_play_state;
+mod play_task;
+mod render_task;
 
 pub struct TasksSupervisor {
     db:                        Db,

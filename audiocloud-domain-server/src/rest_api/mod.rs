@@ -1,22 +1,23 @@
 use std::convert::Infallible;
 use std::future::Future;
-use std::str::FromStr;
 
 use actix::fut;
 use actix::fut::Ready;
 use actix_web::body::{BoxBody, EitherBody};
 use actix_web::dev::Payload;
-use actix_web::error::ParseError;
-use actix_web::http::header::{Header, HeaderName, HeaderValue, TryIntoHeaderValue};
-use actix_web::{get, web, FromRequest, HttpMessage, HttpRequest, HttpResponse, HttpResponseBuilder, Responder};
+use actix_web::error::{ErrorBadRequest, ErrorInternalServerError, ErrorUnauthorized};
+use actix_web::http::header::{Header, AUTHORIZATION};
+use actix_web::{get, web, FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder};
+use anyhow::anyhow;
+use clap::{Args, ValueEnum};
 use reqwest::StatusCode;
 use serde::Serialize;
 use serde_json::json;
 
 use audiocloud_api::domain::DomainError;
-use audiocloud_api::{Codec, Json, MsgPack};
+use audiocloud_api::{Codec, Json, MsgPack, SecureKey};
 
-use crate::ResponseMedia;
+use crate::{DomainSecurity, ResponseMedia};
 
 mod v1;
 
@@ -116,4 +117,56 @@ impl<T> Responder for ApiResponse<T> where T: Serialize
             Err(err) => err_resp(err),
         }
     }
+}
+
+const HEADER_AUTH_PREFIX: &'static str = "Bearer ";
+
+impl FromRequest for DomainSecurity {
+    type Error = actix_web::Error;
+    type Future = Ready<Result<Self, actix_web::Error>>;
+
+    fn from_request(req: &HttpRequest, payload: &mut Payload) -> Self::Future {
+        let func = move || -> Result<Self, actix_web::Error> {
+            let auth_opts =
+                req.app_data::<web::Data<RestOpts>>()
+                   .ok_or_else(|| ErrorInternalServerError(anyhow!("Missing authentication configuration")))?;
+
+            match req.headers().get(AUTHORIZATION) {
+                None => match auth_opts.rest_auth_strategy {
+                    AuthStrategy::Development => Ok(DomainSecurity::Cloud),
+                    AuthStrategy::Production => Err(ErrorUnauthorized(anyhow!("Authentication missing"))),
+                },
+                Some(authorization) => {
+                    let authorization =
+                        authorization.to_str().map_err(|err| {
+                                                   ErrorBadRequest(anyhow!("Error parsing authorization header: {err}"))
+                                               })?;
+
+                    if !authorization.starts_with(HEADER_AUTH_PREFIX) {
+                        Err(ErrorUnauthorized(anyhow!("Authentication missing")))
+                    } else {
+                        Ok(DomainSecurity::SecureKey(SecureKey::new(authorization[HEADER_AUTH_PREFIX.len()..].to_string())))
+                    }
+                }
+            }
+        };
+
+        fut::ready(func())
+    }
+}
+
+#[derive(Args, Clone, Copy)]
+pub struct RestOpts {
+    /// Authentication strategy to use for incoming REST requests
+    #[clap(long, env, default_value = "production")]
+    pub rest_auth_strategy: AuthStrategy,
+}
+
+#[derive(ValueEnum, Copy, Clone)]
+pub enum AuthStrategy {
+    /// Every unauthenticated request is considered to be coming from a superuser (**dangerous!**)
+    Development,
+
+    /// Secure keys must be provided for all requests
+    Production,
 }
