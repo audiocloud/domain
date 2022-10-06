@@ -20,6 +20,10 @@ static SOCKETS_SUPERVISOR: OnceCell<Addr<SocketsSupervisor>> = OnceCell::new();
 pub struct SocketsOpts {
     #[clap(flatten)]
     web_rtc: web_rtc::WebRtcOpts,
+
+    /// Milliseconds to keep streaming packets cached if for redelivery
+    #[clap(long, env, default_value = "60000")]
+    pub packet_cache_max_retention_ms: usize,
 }
 
 fn get_next_socket_id() -> SocketId {

@@ -31,9 +31,7 @@ impl TaskActor {
 
     pub(crate) fn push_compressed_audio(&mut self, audio: CompressedAudio) {
         if self.engine.should_be_playing(&audio.play_id) {
-            self.packet
-                .audio
-                .push(DiffStamped::new(self.packet.created_at, audio.buffer));
+            self.packet.audio.push(DiffStamped::new(self.packet.created_at, audio));
         }
     }
 

@@ -1,65 +1,42 @@
 #![allow(unused_variables)]
 
 use std::collections::{HashMap, HashSet};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
-use actix::{
-    Actor, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, WrapFuture,
-};
-use bytes::Bytes;
-use derive_more::IsVariant;
-use futures::FutureExt;
-use nanoid::nanoid;
+use actix::{Actor, ActorFutureExt, Context, ContextFutureSpawner, Handler, Supervised, WrapFuture};
 use tracing::*;
 
 use audiocloud_api::api::codec::{Codec, MsgPack};
 use audiocloud_api::domain::streaming::DomainServerMessage::PeerConnectionResponse;
-use audiocloud_api::domain::streaming::{DomainClientMessage, DomainServerMessage, PeerConnectionCreated};
+use audiocloud_api::domain::streaming::{DomainClientMessage, PeerConnectionCreated};
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::newtypes::AppTaskId;
-use audiocloud_api::{RequestId, SerializableResult, TaskEvent, TaskSecurity};
+use audiocloud_api::{PlayId, RequestId, SerializableResult, StreamingPacket, TaskSecurity, Timestamped};
+use sockets::{Socket, SocketActorAddr};
 
 use crate::sockets::web_rtc::{AddIceCandidate, WebRtcActor};
-use crate::sockets::web_sockets::WebSocketActor;
 use crate::sockets::{get_next_socket_id, SocketId, SocketMembership, SocketsOpts};
-use crate::tasks::messages::{NotifyTaskDeleted, NotifyTaskSecurity};
 use crate::ResponseMedia;
 
 use super::messages::*;
+
+mod packets;
+mod sockets;
+mod task_events;
+mod timers;
 
 pub struct SocketsSupervisor {
     opts:                SocketsOpts,
     sockets:             HashMap<SocketId, Socket>,
     task_socket_members: HashMap<AppTaskId, HashSet<SocketMembership>>,
     security:            HashMap<AppTaskId, TaskSecurity>,
-}
-
-#[derive(Debug)]
-struct Socket {
-    actor_addr:   SocketActorAddr,
-    last_pong_at: Instant,
-}
-
-#[derive(Clone, Debug, IsVariant)]
-enum SocketActorAddr {
-    WebRtc(Addr<WebRtcActor>),
-    WebSocket(Addr<WebSocketActor>),
+    packet_cache:        HashMap<AppTaskId, HashMap<PlayId, HashMap<u64, Timestamped<StreamingPacket>>>>,
 }
 
 struct SocketContext {
     socket_id:  SocketId,
     request_id: RequestId,
     media:      ResponseMedia,
-}
-
-impl Socket {
-    pub fn is_valid(&self) -> bool {
-        self.last_pong_at.elapsed() < Duration::from_secs(5)
-        && match &self.actor_addr {
-            SocketActorAddr::WebRtc(addr) => addr.connected(),
-            SocketActorAddr::WebSocket(addr) => addr.connected(),
-        }
-    }
 }
 
 impl Actor for SocketsSupervisor {
@@ -73,40 +50,10 @@ impl Actor for SocketsSupervisor {
 impl SocketsSupervisor {
     pub fn new(opts: SocketsOpts) -> Self {
         Self { opts:                { opts },
-               sockets:             Default::default(),
-               task_socket_members: Default::default(),
-               security:            Default::default(), }
-    }
-
-    fn cleanup_stale_sockets(&mut self, ctx: &mut Context<Self>) {
-        self.sockets.retain(|_, socket| socket.is_valid());
-        self.prune_unlinked_access();
-    }
-
-    fn ping_active_sockets(&mut self, ctx: &mut Context<Self>) {
-        if let Ok(ping) = MsgPack.serialize(&DomainServerMessage::Ping { challenge: nanoid!() }) {
-            let ping = Bytes::from(ping);
-
-            for socket in self.sockets.values() {
-                let pong = SocketSend::Bytes(ping.clone());
-                match &socket.actor_addr {
-                    SocketActorAddr::WebRtc(web_rtc) => {
-                        web_rtc.send(pong).map(drop).into_actor(self).spawn(ctx);
-                    }
-                    SocketActorAddr::WebSocket(web_socket) => {
-                        web_socket.send(pong).map(drop).into_actor(self).spawn(ctx);
-                    }
-                }
-            }
-        }
-    }
-
-    fn prune_unlinked_access(&mut self) {
-        for (session_id, access) in self.task_socket_members.iter_mut() {
-            access.retain(|access| self.sockets.contains_key(&access.socket_id));
-        }
-
-        self.task_socket_members.retain(|_, access| !access.is_empty());
+               sockets:             { Default::default() },
+               task_socket_members: { Default::default() },
+               security:            { Default::default() },
+               packet_cache:        { Default::default() }, }
     }
 
     fn socket_received(&mut self, message: SocketReceived, ctx: &mut <Self as Actor>::Context) {
@@ -162,45 +109,6 @@ impl SocketsSupervisor {
                 socket.last_pong_at = Instant::now();
             }
         }
-    }
-
-    fn send_to_socket_by_id(&mut self,
-                            socket_id: &SocketId,
-                            message: DomainServerMessage,
-                            media: ResponseMedia,
-                            ctx: &mut <Self as Actor>::Context)
-                            -> anyhow::Result<()> {
-        match self.sockets.get(socket_id) {
-            None => {
-                warn!(?message, "Socket not found, dropping message");
-            }
-            Some(socket) => self.send_to_socket(socket, message, media, ctx)?,
-        }
-
-        Ok(())
-    }
-
-    fn send_to_socket(&self,
-                      socket: &Socket,
-                      message: DomainServerMessage,
-                      media: ResponseMedia,
-                      ctx: &mut Context<SocketsSupervisor>)
-                      -> anyhow::Result<()> {
-        let cmd = match media {
-            ResponseMedia::MsgPack => SocketSend::Text(serde_json::to_string(&message)?),
-            ResponseMedia::Json => SocketSend::Bytes(MsgPack.serialize(&message)?.into()),
-        };
-
-        match &socket.actor_addr {
-            SocketActorAddr::WebRtc(web_rtc) => {
-                web_rtc.send(cmd).map(drop).into_actor(self).spawn(ctx);
-            }
-            SocketActorAddr::WebSocket(web_socket) => {
-                web_socket.send(cmd).map(drop).into_actor(self).spawn(ctx);
-            }
-        }
-
-        Ok(())
     }
 
     fn request_peer_connection(&mut self,
@@ -295,60 +203,8 @@ impl Handler<SocketReceived> for SocketsSupervisor {
     }
 }
 
-impl Handler<NotifyTaskDeleted> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyTaskDeleted, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(accesses) = self.task_socket_members.remove(&msg.task_id) {
-            for access in accesses {
-                self.sockets.remove(&access.socket_id);
-            }
-        }
-        self.prune_unlinked_access();
-    }
-}
-
-impl Handler<NotifyTaskSecurity> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyTaskSecurity, ctx: &mut Self::Context) -> Self::Result {
-        self.security.insert(msg.task_id.clone(), msg.security.clone());
-    }
-}
-
-impl Handler<PublishStreamingPacket> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: PublishStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(members) = self.task_socket_members.get(&msg.task_id) {
-            let mut members =
-                members.iter()
-                       .filter_map(|socket| self.sockets.get(&socket.socket_id).filter(|socket| socket.is_valid()))
-                       .collect::<Vec<_>>();
-
-            members.sort_by_key(|socket| if socket.actor_addr.is_web_rtc() { 1 } else { 0 });
-
-            match members.first() {
-                None => {
-                    warn!(task_id = %msg.task_id, "Could not publish packet for task, no connected sockets found")
-                }
-                Some(socket) => {
-                    let event = TaskEvent::StreamingPacket { packet: msg.packet };
-                    let event = DomainServerMessage::TaskEvent { task_id: { msg.task_id.clone() },
-                                                                 event:   { event }, };
-
-                    if let Err(error) = self.send_to_socket(socket, event, ResponseMedia::MsgPack, ctx) {
-                        warn!(%error, "Could not publish packet");
-                    }
-                }
-            }
-        }
-    }
-}
-
 impl Supervised for SocketsSupervisor {
     fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        ctx.run_interval(Duration::from_millis(20), Self::cleanup_stale_sockets);
-        ctx.run_interval(Duration::from_secs(1), Self::ping_active_sockets);
+        self.register_timers(ctx);
     }
 }
