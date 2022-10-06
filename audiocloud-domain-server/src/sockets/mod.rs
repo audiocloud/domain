@@ -5,6 +5,7 @@ use nanoid::nanoid;
 use once_cell::sync::OnceCell;
 
 use audiocloud_api::{SecureKey, SocketId};
+pub use messages::*;
 pub use supervisor::SocketsSupervisor;
 pub use web_sockets::configure;
 

@@ -1,7 +1,7 @@
 use actix::{Addr, Message};
 use bytes::Bytes;
 
-use audiocloud_api::SocketId;
+use audiocloud_api::{AppTaskId, SocketId, StreamingPacket};
 
 use crate::sockets::web_rtc::WebRtcActor;
 use crate::sockets::web_sockets::WebSocketActor;
@@ -32,4 +32,11 @@ pub struct RegisterWebSocket {
 pub struct RegisterWebRtcSocket {
     pub address: Addr<WebRtcActor>,
     pub id:      SocketId,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct PublishStreamingPacket {
+    pub task_id: AppTaskId,
+    pub packet:  StreamingPacket,
 }

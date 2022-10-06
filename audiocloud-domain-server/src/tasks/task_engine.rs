@@ -103,4 +103,8 @@ impl TaskEngine {
             }
         }
     }
+
+    pub fn should_be_playing(&self, play_id: &PlayId) -> bool {
+        matches!(self.desired_play_state.value(), DesiredTaskPlayState::Play(play) if &play.play_id == play_id)
+    }
 }

@@ -42,13 +42,6 @@ pub struct DeleteTask {
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "()")]
-pub struct NotifyStreamingPacket {
-    pub session_id: AppTaskId,
-    pub packet:     StreamingPacket,
-}
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
 pub struct NotifyTaskDeleted {
     pub task_id: AppTaskId,
 }

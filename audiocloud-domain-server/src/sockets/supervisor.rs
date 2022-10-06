@@ -7,22 +7,22 @@ use actix::{
     Actor, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Supervised, WrapFuture,
 };
 use bytes::Bytes;
-use futures::{FutureExt, SinkExt};
+use derive_more::IsVariant;
+use futures::FutureExt;
 use nanoid::nanoid;
 use tracing::*;
 
 use audiocloud_api::api::codec::{Codec, MsgPack};
-use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::domain::streaming::DomainServerMessage::PeerConnectionResponse;
 use audiocloud_api::domain::streaming::{DomainClientMessage, DomainServerMessage, PeerConnectionCreated};
 use audiocloud_api::domain::DomainError;
-use audiocloud_api::newtypes::{AppTaskId, SecureKey};
-use audiocloud_api::{RequestId, SerializableResult, TaskSecurity};
+use audiocloud_api::newtypes::AppTaskId;
+use audiocloud_api::{RequestId, SerializableResult, TaskEvent, TaskSecurity};
 
 use crate::sockets::web_rtc::{AddIceCandidate, WebRtcActor};
 use crate::sockets::web_sockets::WebSocketActor;
 use crate::sockets::{get_next_socket_id, SocketId, SocketMembership, SocketsOpts};
-use crate::tasks::messages::{NotifyStreamingPacket, NotifyTaskDeleted, NotifyTaskSecurity};
+use crate::tasks::messages::{NotifyTaskDeleted, NotifyTaskSecurity};
 use crate::ResponseMedia;
 
 use super::messages::*;
@@ -40,7 +40,7 @@ struct Socket {
     last_pong_at: Instant,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, IsVariant)]
 enum SocketActorAddr {
     WebRtc(Addr<WebRtcActor>),
     WebSocket(Addr<WebSocketActor>),
@@ -164,30 +164,39 @@ impl SocketsSupervisor {
         }
     }
 
-    fn send_to_socket(&mut self,
-                      socket_id: &SocketId,
-                      message: DomainServerMessage,
-                      media: ResponseMedia,
-                      ctx: &mut <Self as Actor>::Context)
-                      -> anyhow::Result<()> {
+    fn send_to_socket_by_id(&mut self,
+                            socket_id: &SocketId,
+                            message: DomainServerMessage,
+                            media: ResponseMedia,
+                            ctx: &mut <Self as Actor>::Context)
+                            -> anyhow::Result<()> {
         match self.sockets.get(socket_id) {
             None => {
                 warn!(?message, "Socket not found, dropping message");
             }
-            Some(socket) => {
-                let cmd = match media {
-                    ResponseMedia::MsgPack => SocketSend::Text(serde_json::to_string(&message)?),
-                    ResponseMedia::Json => SocketSend::Bytes(MsgPack.serialize(&message)?.into()),
-                };
+            Some(socket) => self.send_to_socket(socket, message, media, ctx)?,
+        }
 
-                match &socket.actor_addr {
-                    SocketActorAddr::WebRtc(web_rtc) => {
-                        web_rtc.send(cmd).map(drop).into_actor(self).spawn(ctx);
-                    }
-                    SocketActorAddr::WebSocket(web_socket) => {
-                        web_socket.send(cmd).map(drop).into_actor(self).spawn(ctx);
-                    }
-                }
+        Ok(())
+    }
+
+    fn send_to_socket(&self,
+                      socket: &Socket,
+                      message: DomainServerMessage,
+                      media: ResponseMedia,
+                      ctx: &mut Context<SocketsSupervisor>)
+                      -> anyhow::Result<()> {
+        let cmd = match media {
+            ResponseMedia::MsgPack => SocketSend::Text(serde_json::to_string(&message)?),
+            ResponseMedia::Json => SocketSend::Bytes(MsgPack.serialize(&message)?.into()),
+        };
+
+        match &socket.actor_addr {
+            SocketActorAddr::WebRtc(web_rtc) => {
+                web_rtc.send(cmd).map(drop).into_actor(self).spawn(ctx);
+            }
+            SocketActorAddr::WebSocket(web_socket) => {
+                web_socket.send(cmd).map(drop).into_actor(self).spawn(ctx);
             }
         }
 
@@ -211,12 +220,13 @@ impl SocketsSupervisor {
                let result = match res {
                    Ok((addr, local_description)) => {
                        let addr = addr.start();
-                       let socket = Socket { actor_addr:   SocketActorAddr::WebRtc(addr),
-                                             last_pong_at: Instant::now(), };
+                       let socket = Socket { actor_addr:   { SocketActorAddr::WebRtc(addr) },
+                                             last_pong_at: { Instant::now() }, };
 
                        actor.sockets.insert(socket_id.clone(), socket);
-                       SerializableResult::Ok(PeerConnectionCreated::Created { socket_id,
-                                                                               remote_description: local_description })
+                       let res = PeerConnectionCreated::Created { socket_id:          { socket_id },
+                                                                  remote_description: { local_description }, };
+                       SerializableResult::Ok(res)
                    }
                    Err(error) => {
                        warn!(%error, "Failed to create WebRTC actor");
@@ -224,11 +234,10 @@ impl SocketsSupervisor {
                    }
                };
 
-               let _ = actor.send_to_socket(&request.socket_id,
-                                            PeerConnectionResponse { request_id: request.request_id,
-                                                                     result },
-                                            request.media,
-                                            ctx);
+               let response = PeerConnectionResponse { request_id: { request.request_id },
+                                                       result:     { result }, };
+
+               let _ = actor.send_to_socket_by_id(&request.socket_id, response, request.media, ctx);
            })
            .spawn(ctx);
     }
@@ -259,11 +268,11 @@ impl SocketsSupervisor {
         };
 
         if let Some(result) = result {
-            let _ = self.send_to_socket(&request.socket_id,
-                                        PeerConnectionResponse { request_id: request.request_id,
-                                                                 result },
-                                        request.media,
-                                        ctx);
+            let _ = self.send_to_socket_by_id(&request.socket_id,
+                                              PeerConnectionResponse { request_id: request.request_id,
+                                                                       result },
+                                              request.media,
+                                              ctx);
         }
     }
 }
@@ -307,11 +316,33 @@ impl Handler<NotifyTaskSecurity> for SocketsSupervisor {
     }
 }
 
-impl Handler<NotifyStreamingPacket> for SocketsSupervisor {
+impl Handler<PublishStreamingPacket> for SocketsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifyStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
-        // TODO: broadcast on the best quality
+    fn handle(&mut self, msg: PublishStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
+        if let Some(members) = self.task_socket_members.get(&msg.task_id) {
+            let mut members =
+                members.iter()
+                       .filter_map(|socket| self.sockets.get(&socket.socket_id).filter(|socket| socket.is_valid()))
+                       .collect::<Vec<_>>();
+
+            members.sort_by_key(|socket| if socket.actor_addr.is_web_rtc() { 1 } else { 0 });
+
+            match members.first() {
+                None => {
+                    warn!(task_id = %msg.task_id, "Could not publish packet for task, no connected sockets found")
+                }
+                Some(socket) => {
+                    let event = TaskEvent::StreamingPacket { packet: msg.packet };
+                    let event = DomainServerMessage::TaskEvent { task_id: { msg.task_id.clone() },
+                                                                 event:   { event }, };
+
+                    if let Err(error) = self.send_to_socket(socket, event, ResponseMedia::MsgPack, ctx) {
+                        warn!(%error, "Could not publish packet");
+                    }
+                }
+            }
+        }
     }
 }
 
