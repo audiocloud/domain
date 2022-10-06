@@ -19,7 +19,7 @@ use crate::fixed_instances::NotifyFixedInstanceReports;
 use crate::tasks::messages::{BecomeOnline, NotifyTaskSpec, NotifyTaskState};
 use crate::tasks::task::TaskActor;
 use crate::tasks::{
-    NotifyTaskActivated, NotifyTaskDeactivated, NotifyTaskDeleted, NotifyTaskReservation, NotifyTaskSecurity,
+    NotifyTaskActivated, NotifyTaskDeactivated, NotifyTaskDeleted, NotifyTaskReservation, NotifyTaskSecurity, TaskOpts,
 };
 use crate::{DomainResult, DomainSecurity};
 
@@ -35,13 +35,6 @@ mod handle_task_events;
 mod list_tasks;
 mod modify_task;
 mod set_desired_play_state;
-
-#[derive(Args, Clone, Debug, Copy)]
-pub struct TaskOpts {
-    /// Number of seconds to keep task information in the supervisor before forgetting it
-    #[clap(long, env, default_value = "3600")]
-    pub task_grace_seconds: usize,
-}
 
 pub struct TasksSupervisor {
     db:                        Db,
@@ -165,6 +158,7 @@ impl TasksSupervisor {
             if task.reservations.contains_now() && task.actor.is_none() {
                 if let Some(engine_id) = self.allocate_engine(&id, &task.spec) {
                     match TaskActor::new(id.clone(),
+                                         self.task_opts.clone(),
                                          task.domain_id.clone(),
                                          engine_id.clone(),
                                          task.reservations.clone(),

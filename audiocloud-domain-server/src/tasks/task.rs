@@ -3,36 +3,35 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use actix::{
-    Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, MessageResult, Supervised, WrapFuture,
-};
+use actix::{Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Supervised, WrapFuture};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use tracing::*;
 
-use audiocloud_api::audio_engine::{EngineCommand, EngineError, EngineEvent};
+use audiocloud_api::audio_engine::{EngineCommand, EngineError};
 use audiocloud_api::cloud::domains::FixedInstanceRouting;
-use audiocloud_api::domain::tasks::TaskUpdated;
 use audiocloud_api::{
-    AppMediaObjectId, AppTaskId, DesiredInstancePlayState, DesiredTaskPlayState, DomainId, EngineId, FixedInstanceId,
-    SerializableResult, Task, TaskReservation, TaskSecurity, TaskSpec,
+    AppMediaObjectId, AppTaskId, DomainId, EngineId, FixedInstanceId, SerializableResult, StreamingPacket,
+    TaskReservation, TaskSecurity, TaskSpec,
 };
 
 use crate::config::NotifyFixedInstanceRouting;
-use crate::fixed_instances::{
-    get_instance_supervisor, GetMultipleFixedInstanceState, NotifyFixedInstanceReports, NotifyInstanceState,
-};
+use crate::fixed_instances::{get_instance_supervisor, GetMultipleFixedInstanceState};
+use crate::nats;
 use crate::tasks::task_engine::TaskEngine;
-use crate::tasks::{
-    ModifyTask, NotifyEngineEvent, NotifyMediaTaskState, NotifyTaskActivated, NotifyTaskReservation,
-    NotifyTaskSecurity, NotifyTaskSpec, SetTaskDesiredPlayState,
-};
-use crate::{nats, DomainResult};
+use crate::tasks::{NotifyTaskActivated, NotifyTaskReservation, NotifyTaskSecurity, NotifyTaskSpec, TaskOpts};
 
 use super::task_fixed_instance::TaskFixedInstances;
 use super::task_media_objects::TaskMediaObjects;
 
+mod handle_engine_events;
+mod handle_instance_events;
+mod handle_media_events;
+mod modify_task;
+mod set_desired_play_state;
+
 pub struct TaskActor {
     id:                     AppTaskId,
+    opts:                   TaskOpts,
     engine_id:              EngineId,
     domain_id:              DomainId,
     reservations:           TaskReservation,
@@ -43,6 +42,7 @@ pub struct TaskActor {
     fixed_instances:        TaskFixedInstances,
     media_objects:          TaskMediaObjects,
     engine:                 TaskEngine,
+    packet:                 StreamingPacket,
 }
 
 impl Actor for TaskActor {
@@ -73,126 +73,9 @@ impl Supervised for TaskActor {
     }
 }
 
-impl Handler<NotifyFixedInstanceRouting> for TaskActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyFixedInstanceRouting, ctx: &mut Self::Context) -> Self::Result {
-        self.fixed_instance_routing = msg.routing;
-    }
-}
-
-impl Handler<NotifyEngineEvent> for TaskActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyEngineEvent, ctx: &mut Self::Context) -> Self::Result {
-        if &self.engine_id != &msg.engine_id {
-            return;
-        }
-
-        match msg.event {
-            EngineEvent::Stopped { task_id } => {
-                if &self.id == &task_id {
-                    self.engine.set_actual_stopped();
-                }
-            }
-            EngineEvent::Playing { task_id,
-                                   play_id,
-                                   audio,
-                                   output_peak_meters,
-                                   input_peak_meters,
-                                   dynamic_reports, } => {
-                if &self.id == &task_id {
-                    self.engine.set_actual_playing(play_id);
-                }
-            }
-            EngineEvent::PlayingFailed { task_id,
-                                         play_id,
-                                         error, } => {
-                if &self.id == &task_id {
-                    self.engine.set_desired_state(DesiredTaskPlayState::Stopped);
-                    self.engine.set_actual_stopped();
-                }
-            }
-            EngineEvent::Rendering { task_id,
-                                     render_id,
-                                     completion, } => {
-                if &self.id == &task_id {
-                    self.engine.set_actual_rendering(render_id);
-                }
-            }
-            EngineEvent::RenderingFinished { task_id,
-                                             render_id,
-                                             path, } => {
-                if &self.id == &task_id {
-                    self.engine.set_desired_state(DesiredTaskPlayState::Stopped);
-                    self.engine.set_actual_stopped();
-                }
-            }
-            EngineEvent::RenderingFailed { task_id,
-                                           render_id,
-                                           error, } => {
-                if &self.id == &task_id {
-                    self.engine.set_desired_state(DesiredTaskPlayState::Stopped);
-                    self.engine.set_actual_stopped();
-                }
-            }
-            EngineEvent::Error { task_id, error } => {
-                if &self.id == &task_id {
-                    // do not modify desired states..
-                }
-            }
-        }
-    }
-}
-
-impl Handler<NotifyFixedInstanceReports> for TaskActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyFixedInstanceReports, ctx: &mut Self::Context) -> Self::Result {
-        // TODO: update the current streaming packet with report information
-    }
-}
-
-impl Handler<NotifyMediaTaskState> for TaskActor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyMediaTaskState, ctx: &mut Self::Context) -> Self::Result {
-        self.media_objects.update_media(msg.media);
-        self.update(ctx);
-    }
-}
-
-impl Handler<SetTaskDesiredPlayState> for TaskActor {
-    type Result = MessageResult<SetTaskDesiredPlayState>;
-
-    fn handle(&mut self, msg: SetTaskDesiredPlayState, ctx: &mut Self::Context) -> Self::Result {
-        let desired_instance_state = match &msg.desired {
-            DesiredTaskPlayState::Stopped => DesiredInstancePlayState::Stopped,
-            DesiredTaskPlayState::Play(play) => DesiredInstancePlayState::Playing { play_id: play.play_id },
-            DesiredTaskPlayState::Render(render) => DesiredInstancePlayState::Rendering { render_id: render.render_id,
-                                                                                          length:    render.segment
-                                                                                                           .length, },
-        };
-
-        self.fixed_instances.set_desired_state(desired_instance_state);
-        let version = self.engine.set_desired_state(msg.desired);
-
-        MessageResult(Ok(TaskUpdated::Updated { app_id:  { self.id.app_id.clone() },
-                                                task_id: { self.id.task_id.clone() },
-                                                revision: { version }, }))
-    }
-}
-
-impl Handler<ModifyTask> for TaskActor {
-    type Result = DomainResult<TaskUpdated>;
-
-    fn handle(&mut self, msg: ModifyTask, ctx: &mut Self::Context) -> Self::Result {
-        todo!()
-    }
-}
-
 impl TaskActor {
     pub fn new(id: AppTaskId,
+               opts: TaskOpts,
                domain_id: DomainId,
                engine_id: EngineId,
                reservations: TaskReservation,
@@ -205,6 +88,7 @@ impl TaskActor {
         Ok(Self { id:                     { id.clone() },
                   engine_id:              { engine_id },
                   domain_id:              { domain_id },
+                  opts:                   { opts },
                   reservations:           { reservations },
                   spec:                   { spec },
                   security:               { security },
@@ -212,7 +96,8 @@ impl TaskActor {
                   fixed_instance_routing: { routing },
                   fixed_instances:        { TaskFixedInstances::default() },
                   media_objects:          { TaskMediaObjects::default() },
-                  engine:                 { TaskEngine::new(id.clone()) }, })
+                  engine:                 { TaskEngine::new(id.clone()) },
+                  packet:                 { Default::default() }, })
     }
 
     fn update(&mut self, ctx: &mut <Self as Actor>::Context) {
@@ -279,16 +164,6 @@ impl TaskActor {
 
     fn engine_media_paths(&self) -> HashMap<AppMediaObjectId, String> {
         self.media_objects.ready_for_engine()
-    }
-
-    fn update_fixed_instance_state_inner(&mut self,
-                                         result: HashMap<FixedInstanceId, NotifyInstanceState>,
-                                         ctx: &mut <Self as Actor>::Context) {
-        for (id, notify) in result {
-            self.fixed_instances.notify_instance_state_changed(notify);
-        }
-
-        self.update(ctx);
     }
 
     fn notify_task_spec(&mut self) {
