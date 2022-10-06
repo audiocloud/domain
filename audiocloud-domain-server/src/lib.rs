@@ -4,7 +4,7 @@ use derive_more::IsVariant;
 use serde::{Deserialize, Serialize};
 
 use audiocloud_api::domain::DomainError;
-use audiocloud_api::SecureKey;
+use audiocloud_api::{SecureKey, SerializableResult};
 
 pub mod config;
 pub mod db;
@@ -31,3 +31,10 @@ pub enum DomainSecurity {
 }
 
 pub type DomainResult<T = ()> = Result<T, DomainError>;
+
+pub fn to_serializable<T>(result: DomainResult<T>) -> SerializableResult<T, DomainError> {
+    match result {
+        Ok(t) => SerializableResult::Ok(t),
+        Err(err) => SerializableResult::Error(err),
+    }
+}

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use actix::{Actor, Addr, Context, ContextFutureSpawner, WrapFuture};
+use actix::{Actor, Addr, Context, ContextFutureSpawner, Handler, WrapFuture};
 use derive_more::IsVariant;
 use futures::FutureExt;
 use nanoid::nanoid;
@@ -11,7 +11,7 @@ use audiocloud_api::{Codec, MsgPack, SocketId};
 
 use crate::sockets::web_rtc::WebRtcActor;
 use crate::sockets::web_sockets::WebSocketActor;
-use crate::sockets::{SocketSend, SocketsSupervisor};
+use crate::sockets::{SocketReceived, SocketSend, SocketsSupervisor};
 use crate::ResponseMedia;
 
 #[derive(Debug)]
@@ -74,5 +74,13 @@ impl SocketsSupervisor {
         }
 
         Ok(())
+    }
+}
+
+impl Handler<SocketReceived> for SocketsSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SocketReceived, ctx: &mut Self::Context) -> Self::Result {
+        self.on_socket_message_received(msg, ctx);
     }
 }

@@ -24,6 +24,7 @@ mod packets;
 mod sockets;
 mod handle_task_events;
 mod timers;
+mod receive;
 
 pub struct SocketsSupervisor {
     opts:                SocketsOpts,
@@ -54,61 +55,6 @@ impl SocketsSupervisor {
                task_socket_members: { Default::default() },
                security:            { Default::default() },
                packet_cache:        { Default::default() }, }
-    }
-
-    fn socket_received(&mut self, message: SocketReceived, ctx: &mut <Self as Actor>::Context) {
-        let (request, socket_id, use_json) = match message {
-            SocketReceived::Bytes(socket_id, bytes) => match MsgPack.deserialize::<DomainClientMessage>(bytes.as_ref())
-            {
-                Ok(request) => (request, socket_id, false),
-                Err(error) => {
-                    warn!(%error, %socket_id, "Failed to decode message, dropping socket");
-                    self.sockets.remove(&socket_id);
-                    return;
-                }
-            },
-            SocketReceived::Text(socket_id, text) => match serde_json::from_str(&text) {
-                Ok(request) => (request, socket_id, true),
-                Err(error) => {
-                    warn!(%error, %socket_id, "Failed to decode message, dropping socket");
-                    self.sockets.remove(&socket_id);
-                    return;
-                }
-            },
-        };
-
-        let socket = match self.sockets.get_mut(&socket_id) {
-            None => {
-                warn!(%socket_id, "Received message from unknown socket, dropping message");
-                return;
-            }
-            Some(socket) => socket,
-        };
-
-        match request {
-            DomainClientMessage::RequestSetDesiredPlayState { .. } => {}
-            DomainClientMessage::RequestModifyTaskSpec { .. } => {}
-            DomainClientMessage::RequestPeerConnection { request_id,
-                                                         description, } => {
-                let request = SocketContext { socket_id,
-                                              request_id,
-                                              media: ResponseMedia::MsgPack };
-                self.request_peer_connection(request, description, ctx);
-            }
-            DomainClientMessage::SubmitPeerConnectionCandidate { request_id,
-                                                                 socket_id: rtc_socket_id,
-                                                                 candidate, } => {
-                let request = SocketContext { socket_id,
-                                              request_id,
-                                              media: ResponseMedia::Json };
-                self.submit_peer_connection_candidate(request, rtc_socket_id, candidate, ctx);
-            }
-            DomainClientMessage::RequestAttachToTask { .. } => {}
-            DomainClientMessage::RequestDetachFromTask { .. } => {}
-            DomainClientMessage::Pong { challenge, response } => {
-                socket.last_pong_at = Instant::now();
-            }
-        }
     }
 
     fn request_peer_connection(&mut self,
@@ -192,14 +138,6 @@ impl Handler<RegisterWebSocket> for SocketsSupervisor {
         self.sockets.insert(msg.id,
                             Socket { actor_addr:   SocketActorAddr::WebSocket(msg.address),
                                      last_pong_at: Instant::now(), });
-    }
-}
-
-impl Handler<SocketReceived> for SocketsSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: SocketReceived, ctx: &mut Self::Context) -> Self::Result {
-        self.socket_received(msg, ctx);
     }
 }
 

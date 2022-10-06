@@ -22,9 +22,7 @@ impl Handler<RenderTask> for TasksSupervisor {
                 .into_actor(self)
                 .map(move |res, actor, ctx| match res {
                     Ok(result) => result,
-                    Err(err) => {
-                        Err(BadGateway { error: format!("Task actor {task_id} failed to set desired state: {err}"), })
-                    }
+                    Err(err) => Err(BadGateway { error: format!("Task actor {task_id} failed to render: {err}"), }),
                 })
                 .boxed_local()
         } else {

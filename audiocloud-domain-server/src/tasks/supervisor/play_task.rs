@@ -5,6 +5,7 @@ use audiocloud_api::audio_engine::{TaskPlaying, TaskRendering};
 use audiocloud_api::domain::tasks::TaskUpdated;
 use audiocloud_api::domain::DomainError;
 
+use crate::tasks::supervisor::check_security;
 use crate::tasks::{PlayTask, RenderTask};
 use crate::DomainResult;
 
