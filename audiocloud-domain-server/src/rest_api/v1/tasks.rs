@@ -1,9 +1,10 @@
 use std::convert::identity;
+use std::str::FromStr;
 
 use actix::MailboxError;
-use actix_web::web::Json;
+use actix_web::http::header::IfMatch;
+use actix_web::web::{Header, Json};
 use actix_web::{delete, get, post, web};
-use futures::FutureExt;
 use serde::Deserialize;
 use web::Path;
 
@@ -18,6 +19,7 @@ use audiocloud_api::{
 
 use crate::rest_api::{ApiResponder, ApiResponse};
 use crate::tasks::{get_tasks_supervisor, messages, ListTasks};
+use crate::{DomainResult, DomainSecurity};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(list_tasks)
@@ -92,13 +94,17 @@ async fn get_task(responder: ApiResponder, task_id: Path<AppTaskIdPath>) -> ApiR
 #[post("/{app_id}/{task_id}/modify")]
 async fn modify_task(responder: ApiResponder,
                      task_id: Path<AppTaskIdPath>,
-                     modify: Json<ModifyTask>)
+                     modify: Json<ModifyTask>,
+                     if_match: Header<IfMatch>)
                      -> ApiResponse<TaskUpdated> {
     let task_id = task_id.into_inner().into();
-    let modify = messages::ModifyTask { task_id,
-                                        modify_spec: modify.0.modify_spec };
 
     responder.respond(async move {
+                 let modify = messages::ModifyTask { task_id:     { task_id },
+                                                     modify_spec: { modify.into_inner().modify_spec },
+                                                     revision:    { get_revision(if_match)? },
+                                                     security:    { DomainSecurity::Cloud }, };
+
                  get_tasks_supervisor().send(modify)
                                        .await
                                        .map_err(bad_gateway)
@@ -154,4 +160,17 @@ async fn stop_play_task(responder: ApiResponder,
                         -> ApiResponse<TaskPlayStopped> {
     responder.respond(async move { not_implemented_yet("stop_play_task") })
              .await
+}
+
+fn get_revision(header: Header<IfMatch>) -> DomainResult<u64> {
+    use DomainError::TaskRevisionMalformed;
+    match header.into_inner() {
+        IfMatch::Any => Err(TaskRevisionMalformed { error: format!("Task revision must be specified"), }),
+        IfMatch::Items(items) => match items.get(0) {
+            Some(item) if items.len() == 1 => {
+                Ok(u64::from_str(item.tag()).map_err(|err| TaskRevisionMalformed { error: format!("Task revision is not a number: {err}") })?)
+            }
+            _ => Err(TaskRevisionMalformed { error: format!("Exactly one revision must be specified"), }),
+        },
+    }
 }

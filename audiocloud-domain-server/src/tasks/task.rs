@@ -179,7 +179,7 @@ impl Handler<SetTaskDesiredPlayState> for TaskActor {
 
         MessageResult(Ok(TaskUpdated::Updated { app_id:  { self.id.app_id.clone() },
                                                 task_id: { self.id.task_id.clone() },
-                                                version: { version }, }))
+                                                revision: { version }, }))
     }
 }
 

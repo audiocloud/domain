@@ -14,7 +14,7 @@ use audiocloud_api::{
     TaskSecurity,
 };
 
-use crate::DomainResult;
+use crate::{DomainResult, DomainSecurity};
 
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "DomainResult<TaskUpdated>")]
@@ -146,4 +146,6 @@ pub struct GetTaskWithStatusAndSpec {
 pub struct ModifyTask {
     pub task_id:     AppTaskId,
     pub modify_spec: Vec<ModifyTaskSpec>,
+    pub revision:    u64,
+    pub security:    DomainSecurity,
 }

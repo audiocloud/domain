@@ -4,13 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{
-    fut, Actor, ActorFutureExt, ActorTryFutureExt, Addr, AsyncContext, Context, Handler, Supervised, Supervisor,
-    WrapFuture,
-};
+use actix::{fut, Actor, ActorFutureExt, Addr, AsyncContext, Context, Handler, Supervised, Supervisor, WrapFuture};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use clap::Args;
-use futures::FutureExt;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInstanceRoutingMap};
@@ -18,7 +14,7 @@ use audiocloud_api::common::change::TaskState;
 use audiocloud_api::domain::tasks::{TaskCreated, TaskSummary, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec};
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::newtypes::{AppTaskId, EngineId};
-use audiocloud_api::{now, DomainId, FixedInstanceId, TaskReservation, TaskSecurity, TaskSpec};
+use audiocloud_api::{now, DomainId, FixedInstanceId, TaskPermissions, TaskReservation, TaskSecurity, TaskSpec};
 
 use crate::db::Db;
 use crate::fixed_instances::NotifyFixedInstanceReports;
@@ -30,7 +26,10 @@ use crate::tasks::{
     CreateTask, GetTaskWithStatusAndSpec, ListTasks, ModifyTask, NotifyTaskActivated, NotifyTaskDeactivated,
     NotifyTaskDeleted, NotifyTaskReservation, NotifyTaskSecurity,
 };
-use crate::DomainResult;
+use crate::{DomainResult, DomainSecurity};
+
+const ALLOW_MODIFY_STRUCTURE: TaskPermissions = TaskPermissions { structure: true,
+                                                                  ..TaskPermissions::empty() };
 
 #[derive(Args, Clone, Debug, Copy)]
 pub struct TaskOpts {
@@ -66,25 +65,27 @@ struct Engine {
 impl TasksSupervisor {
     pub fn new(db: Db, opts: &TaskOpts, cfg: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<Self> {
         let tasks = cfg.tasks
-                       .iter()
-                       .filter(|(id, task)| {
-                           if &task.domain_id != &cfg.domain_id {
-                               warn!(%id, domain_id = %cfg.domain_id, other_domain_id = %task.domain_id, "Configuration time task is for another domain, skipping");
-                               true
-                           } else {
-                               false
-                           }
-                       })
-                       .map(|(id, task)| {
-                           (id.clone(),
-                            SupervisedTask { domain_id:    { task.domain_id.clone() },
-                                             reservations: { task.reservations.clone() },
-                                             spec:         { task.spec.clone() },
-                                             security:     { task.security.clone() },
-                                             state:        { Default::default() },
-                                             actor:        { None }, })
-                       })
-                       .collect();
+      .iter()
+      .filter(|(id, task)| {
+        if &task.domain_id != &cfg.domain_id {
+          warn!(%id, domain_id = %cfg.domain_id, other_domain_id = %task.domain_id, "Configuration time task is for another domain, skipping");
+          true
+        } else {
+          false
+        }
+      })
+      .map(|(id, task)| {
+        (id.clone(),
+         SupervisedTask {
+           domain_id: { task.domain_id.clone() },
+           reservations: { task.reservations.clone() },
+           spec: { task.spec.clone() },
+           security: { task.security.clone() },
+           state: { Default::default() },
+           actor: { None },
+         })
+      })
+      .collect();
 
         let engines = cfg.engines
                          .iter()
@@ -102,7 +103,7 @@ impl TasksSupervisor {
     }
 
     fn allocate_engine(&self, id: &AppTaskId, spec: &TaskSpec) -> Option<EngineId> {
-        // TODO: allocaet engine
+        // TODO: we know we only have one engine, so we always pick the first
         let engine_id = self.engines.keys().next().cloned();
         info!(?engine_id, %id, "Allocated engine for task");
         engine_id
@@ -397,19 +398,67 @@ impl Handler<ModifyTask> for TasksSupervisor {
     type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;
 
     fn handle(&mut self, msg: ModifyTask, ctx: &mut Self::Context) -> Self::Result {
-        match self.tasks.get(&msg.task_id).and_then(|task| task.actor.as_ref()) {
-            Some(session) => session.send(msg)
-                                    .into_actor(self)
-                                    .map(|result, _, _| match result {
-                                        Ok(result) => result,
-                                        Err(err) => Err(DomainError::BadGateway { error: err.to_string() }),
-                                    })
-                                    .boxed_local(),
+        match self.tasks.get_mut(&msg.task_id) {
+            Some(task) => {
+                if let Err(err) = check_security(&msg.task_id, &task.security, &msg.security, ALLOW_MODIFY_STRUCTURE) {
+                    return fut::err(err).into_actor(self).boxed_local();
+                }
+
+                match task.actor.as_ref() {
+                    Some(actor) => actor.send(msg)
+                                        .into_actor(self)
+                                        .map(|result, _, _| match result {
+                                            Ok(result) => result,
+                                            Err(err) => Err(DomainError::BadGateway { error: err.to_string() }),
+                                        })
+                                        .boxed_local(),
+                    None => fut::ready((|| {
+                                           let mut spec = task.spec.clone();
+
+                                           for modification in msg.modify_spec {
+                                               spec.modify(modification).map_err(|error| {
+                                                                             DomainError::TaskModification { task_id:
+                                                                                                      msg.task_id
+                                                                                                         .clone(),
+                                                                                                  error }
+                                                                         })?;
+                                           }
+
+                                           task.spec = spec;
+
+                                           Ok(TaskUpdated::Updated { task_id:  msg.task_id.task_id.clone(),
+                                                                     app_id:   msg.task_id.app_id.clone(),
+                                                                     revision: task.spec.revision, })
+                                       })()).into_actor(self)
+                                            .boxed_local(),
+                }
+            }
             None => {
-                warn!(task_id = %msg.task_id, "Dropping audio engine event for unknown / inactive session");
+                warn!(task_id = %msg.task_id, "Refusing to modify unknown task");
                 fut::err(DomainError::TaskNotFound { task_id: msg.task_id.clone(), }).into_actor(self)
                                                                                      .boxed_local()
             }
         }
+    }
+}
+
+fn check_security(task_id: &AppTaskId,
+                  task: &TaskSecurity,
+                  security: &DomainSecurity,
+                  permissions: TaskPermissions)
+                  -> DomainResult {
+    match security {
+        DomainSecurity::Cloud => Ok(()),
+        DomainSecurity::SecureKey(secure_key) => match task.security.get(secure_key) {
+            None => Err(DomainError::AuthenticationFailed),
+            Some(security) => {
+                if security.can(permissions) {
+                    Ok(())
+                } else {
+                    Err(DomainError::TaskAuthtorizationFailed { task_id:  task_id.clone(),
+                                                                required: permissions, })
+                }
+            }
+        },
     }
 }

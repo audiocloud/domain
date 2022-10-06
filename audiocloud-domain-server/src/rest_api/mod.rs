@@ -1,18 +1,22 @@
-use actix::fut;
 use std::convert::Infallible;
 use std::future::Future;
+use std::str::FromStr;
 
+use actix::fut;
 use actix::fut::Ready;
 use actix_web::body::{BoxBody, EitherBody};
 use actix_web::dev::Payload;
-use actix_web::{get, web, FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder};
+use actix_web::error::ParseError;
+use actix_web::http::header::{Header, HeaderName, HeaderValue, TryIntoHeaderValue};
+use actix_web::{get, web, FromRequest, HttpMessage, HttpRequest, HttpResponse, HttpResponseBuilder, Responder};
 use reqwest::StatusCode;
 use serde::Serialize;
 use serde_json::json;
 
-use crate::ResponseMedia;
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::{Codec, Json, MsgPack};
+
+use crate::ResponseMedia;
 
 mod v1;
 
@@ -81,7 +85,7 @@ impl<T> Responder for ApiResponse<T> where T: Serialize
                 ResponseMedia::MsgPack => (MsgPack.serialize(&err).unwrap(), mime::APPLICATION_MSGPACK.as_ref()),
             };
 
-            let status = StatusCode::from_u16(err.get_status()).unwrap();
+            let status = StatusCode::from_u16(err.status_code()).unwrap();
             HttpResponseBuilder::new(status).content_type(content_type)
                                             .body(content)
                                             .map_into_right_body()
