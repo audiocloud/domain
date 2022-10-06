@@ -141,6 +141,7 @@ pub struct ListTasks;
 pub struct GetTaskWithStatusAndSpec {
     pub task_id: AppTaskId,
 }
+
 #[derive(Message, Clone, Debug)]
 #[rtype(result = "DomainResult<TaskUpdated>")]
 pub struct ModifyTask {

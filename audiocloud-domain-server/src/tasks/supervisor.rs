@@ -3,33 +3,38 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use actix::fut::LocalBoxActorFuture;
-use actix::{fut, Actor, ActorFutureExt, Addr, AsyncContext, Context, Handler, Supervised, Supervisor, WrapFuture};
+use actix::{Actor, Addr, AsyncContext, Context, Handler, Supervised, Supervisor};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use clap::Args;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInstanceRoutingMap};
 use audiocloud_api::common::change::TaskState;
-use audiocloud_api::domain::tasks::{TaskCreated, TaskSummary, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec};
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::newtypes::{AppTaskId, EngineId};
 use audiocloud_api::{now, DomainId, FixedInstanceId, TaskPermissions, TaskReservation, TaskSecurity, TaskSpec};
 
 use crate::db::Db;
 use crate::fixed_instances::NotifyFixedInstanceReports;
-use crate::tasks::messages::{
-    BecomeOnline, NotifyEngineEvent, NotifyMediaTaskState, NotifyTaskSpec, NotifyTaskState, SetTaskDesiredPlayState,
-};
+use crate::tasks::messages::{BecomeOnline, NotifyTaskSpec, NotifyTaskState};
 use crate::tasks::task::TaskActor;
 use crate::tasks::{
-    CreateTask, GetTaskWithStatusAndSpec, ListTasks, ModifyTask, NotifyTaskActivated, NotifyTaskDeactivated,
-    NotifyTaskDeleted, NotifyTaskReservation, NotifyTaskSecurity,
+    NotifyTaskActivated, NotifyTaskDeactivated, NotifyTaskDeleted, NotifyTaskReservation, NotifyTaskSecurity,
 };
 use crate::{DomainResult, DomainSecurity};
 
 const ALLOW_MODIFY_STRUCTURE: TaskPermissions = TaskPermissions { structure: true,
                                                                   ..TaskPermissions::empty() };
+
+mod create_task;
+mod get_task;
+mod handle_engine_events;
+mod handle_instance_events;
+mod handle_media_events;
+mod handle_task_events;
+mod list_tasks;
+mod modify_task;
+mod set_desired_play_state;
 
 #[derive(Args, Clone, Debug, Copy)]
 pub struct TaskOpts {
@@ -43,7 +48,7 @@ pub struct TasksSupervisor {
     task_opts:                 TaskOpts,
     domain_config:             DomainConfig,
     tasks:                     HashMap<AppTaskId, SupervisedTask>,
-    engines:                   HashMap<EngineId, Engine>,
+    engines:                   HashMap<EngineId, ReferencedEngine>,
     fixed_instance_membership: HashMap<FixedInstanceId, AppTaskId>,
     fixed_instance_routing:    FixedInstanceRoutingMap,
     online:                    bool,
@@ -58,7 +63,7 @@ struct SupervisedTask {
     pub actor:        Option<Addr<TaskActor>>,
 }
 
-struct Engine {
+struct ReferencedEngine {
     config: DomainEngineConfig,
 }
 
@@ -89,7 +94,7 @@ impl TasksSupervisor {
 
         let engines = cfg.engines
                          .iter()
-                         .map(|(id, config)| (id.clone(), Engine { config: config.clone() }))
+                         .map(|(id, config)| (id.clone(), ReferencedEngine { config: config.clone() }))
                          .collect();
 
         Ok(Self { db:                        { db },
@@ -199,49 +204,12 @@ impl Actor for TasksSupervisor {
 
 impl Supervised for TasksSupervisor {
     fn restarting(&mut self, ctx: &mut Self::Context) {
-        self.subscribe_system_async::<NotifyTaskSpec>(ctx);
-        self.subscribe_system_async::<NotifyTaskState>(ctx);
-        self.subscribe_system_async::<NotifyTaskReservation>(ctx);
-        self.subscribe_system_async::<NotifyTaskSecurity>(ctx);
-        self.subscribe_system_async::<NotifyFixedInstanceReports>(ctx);
+        self.subscribe_task_events(ctx);
+        self.subscribe_instance_events(ctx);
+        self.subscribe_media_events(ctx);
+        self.subscribe_engine_events(ctx);
 
         ctx.run_interval(Duration::from_millis(100), Self::update);
-    }
-}
-
-impl Handler<NotifyFixedInstanceReports> for TasksSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyFixedInstanceReports, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(task_id) = self.fixed_instance_membership.get(&msg.instance_id) {
-            if let Some(actor_addr) = self.tasks.get(task_id).and_then(|task| task.actor.as_ref()) {
-                actor_addr.do_send(msg);
-            }
-        }
-    }
-}
-
-impl Handler<SetTaskDesiredPlayState> for TasksSupervisor {
-    type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;
-
-    fn handle(&mut self, msg: SetTaskDesiredPlayState, ctx: &mut Self::Context) -> Self::Result {
-        use DomainError::*;
-
-        if let Some(task) = self.tasks.get(&msg.task_id).and_then(|task| task.actor.as_ref()) {
-            let task_id = msg.task_id.clone();
-            task.send(msg)
-                .into_actor(self)
-                .map(move |res, actor, ctx| match res {
-                    Ok(result) => result,
-                    Err(err) => {
-                        Err(BadGateway { error: format!("Task actor {task_id} failed to set desired state: {err}"), })
-                    }
-                })
-                .boxed_local()
-        } else {
-            fut::err(TaskNotFound { task_id: msg.task_id.clone(), }).into_actor(self)
-                                                                    .boxed_local()
-        }
     }
 }
 
@@ -250,195 +218,6 @@ impl Handler<BecomeOnline> for TasksSupervisor {
 
     fn handle(&mut self, msg: BecomeOnline, ctx: &mut Self::Context) -> Self::Result {
         self.online = true;
-    }
-}
-
-impl Handler<NotifyTaskState> for TasksSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyTaskState, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(task) = self.tasks.get_mut(&msg.task_id) {
-            task.state = msg.state;
-        }
-    }
-}
-
-impl Handler<NotifyTaskSpec> for TasksSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyTaskSpec, ctx: &mut Self::Context) -> Self::Result {
-        // clear all previous associations with the same task ID
-        self.fixed_instance_membership
-            .retain(|_, task_id| task_id != &msg.task_id);
-
-        // associate task ID with all the current fixed instance IDs
-        for fixed_instance_id in msg.spec.get_fixed_instance_ids() {
-            self.fixed_instance_membership
-                .insert(fixed_instance_id.clone(), msg.task_id.clone());
-        }
-
-        if let Some(task) = self.tasks.get_mut(&msg.task_id) {
-            task.spec = msg.spec;
-        }
-    }
-}
-
-impl Handler<NotifyTaskReservation> for TasksSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyTaskReservation, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(task) = self.tasks.get_mut(&msg.task_id) {
-            task.reservations = msg.reservation;
-        }
-    }
-}
-
-impl Handler<NotifyTaskSecurity> for TasksSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyTaskSecurity, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(task) = self.tasks.get_mut(&msg.task_id) {
-            task.security = msg.security;
-        }
-    }
-}
-
-impl Handler<NotifyEngineEvent> for TasksSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyEngineEvent, ctx: &mut Self::Context) -> Self::Result {
-        let task_id = msg.event.task_id();
-        match self.tasks.get(task_id).and_then(|task| task.actor.as_ref()) {
-            Some(session) => {
-                session.do_send(msg);
-            }
-            None => {
-                warn!(%task_id, "Dropping audio engine event for unknown / inactive task");
-            }
-        }
-    }
-}
-
-impl Handler<NotifyMediaTaskState> for TasksSupervisor {
-    type Result = ();
-
-    fn handle(&mut self, msg: NotifyMediaTaskState, ctx: &mut Self::Context) -> Self::Result {
-        let task_id = &msg.task_id;
-        match self.tasks.get(task_id).and_then(|task| task.actor.as_ref()) {
-            Some(task) => {
-                task.do_send(msg);
-            }
-            None => {
-                warn!(%task_id, "Dropping media service event for unknown / inactive task");
-            }
-        }
-    }
-}
-
-impl Handler<ListTasks> for TasksSupervisor {
-    type Result = TaskSummaryList;
-
-    fn handle(&mut self, msg: ListTasks, ctx: &mut Self::Context) -> Self::Result {
-        let mut rv = vec![];
-        for (id, task) in &self.tasks {
-            // TODO: missing `waiting_for_instances` and `waiting_for_media`
-            // TODO: would be nice if TaskSummary included timestamps
-            rv.push(TaskSummary { app_id:                id.app_id.clone(),
-                                  task_id:               id.task_id.clone(),
-                                  play_state:            task.state.play_state.value().clone(),
-                                  waiting_for_instances: Default::default(),
-                                  waiting_for_media:     Default::default(), });
-        }
-
-        rv
-    }
-}
-
-impl Handler<CreateTask> for TasksSupervisor {
-    type Result = DomainResult<TaskCreated>;
-
-    fn handle(&mut self, msg: CreateTask, ctx: &mut Self::Context) -> Self::Result {
-        if self.tasks.contains_key(&msg.task_id) {
-            return Err(DomainError::TaskExists { task_id: msg.task_id });
-        }
-
-        self.tasks.insert(msg.task_id.clone(),
-                          SupervisedTask { domain_id:    { self.domain_config.domain_id.clone() },
-                                           reservations: { msg.reservations.into() },
-                                           spec:         { msg.spec.into() },
-                                           security:     { msg.security.into() },
-                                           state:        { Default::default() },
-                                           actor:        { None }, });
-
-        self.update(ctx);
-
-        Ok(TaskCreated::Created { task_id: msg.task_id.task_id.clone(),
-                                  app_id:  msg.task_id.app_id.clone(), })
-    }
-}
-
-impl Handler<GetTaskWithStatusAndSpec> for TasksSupervisor {
-    type Result = DomainResult<TaskWithStatusAndSpec>;
-
-    fn handle(&mut self, msg: GetTaskWithStatusAndSpec, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(task) = self.tasks.get(&msg.task_id) {
-            Ok(TaskWithStatusAndSpec { app_id:     msg.task_id.app_id.clone(),
-                                       task_id:    msg.task_id.task_id.clone(),
-                                       play_state: task.state.play_state.value().clone(),
-                                       instances:  Default::default(),
-                                       media:      Default::default(),
-                                       spec:       Default::default(), })
-        } else {
-            Err(DomainError::TaskNotFound { task_id: msg.task_id })
-        }
-    }
-}
-
-impl Handler<ModifyTask> for TasksSupervisor {
-    type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;
-
-    fn handle(&mut self, msg: ModifyTask, ctx: &mut Self::Context) -> Self::Result {
-        match self.tasks.get_mut(&msg.task_id) {
-            Some(task) => {
-                if let Err(err) = check_security(&msg.task_id, &task.security, &msg.security, ALLOW_MODIFY_STRUCTURE) {
-                    return fut::err(err).into_actor(self).boxed_local();
-                }
-
-                match task.actor.as_ref() {
-                    Some(actor) => actor.send(msg)
-                                        .into_actor(self)
-                                        .map(|result, _, _| match result {
-                                            Ok(result) => result,
-                                            Err(err) => Err(DomainError::BadGateway { error: err.to_string() }),
-                                        })
-                                        .boxed_local(),
-                    None => fut::ready((|| {
-                                           let mut spec = task.spec.clone();
-
-                                           for modification in msg.modify_spec {
-                                               spec.modify(modification).map_err(|error| {
-                                                                             DomainError::TaskModification { task_id:
-                                                                                                      msg.task_id
-                                                                                                         .clone(),
-                                                                                                  error }
-                                                                         })?;
-                                           }
-
-                                           task.spec = spec;
-
-                                           Ok(TaskUpdated::Updated { task_id:  msg.task_id.task_id.clone(),
-                                                                     app_id:   msg.task_id.app_id.clone(),
-                                                                     revision: task.spec.revision, })
-                                       })()).into_actor(self)
-                                            .boxed_local(),
-                }
-            }
-            None => {
-                warn!(task_id = %msg.task_id, "Refusing to modify unknown task");
-                fut::err(DomainError::TaskNotFound { task_id: msg.task_id.clone(), }).into_actor(self)
-                                                                                     .boxed_local()
-            }
-        }
     }
 }
 

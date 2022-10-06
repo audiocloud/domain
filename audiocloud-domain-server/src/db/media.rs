@@ -96,7 +96,7 @@ impl Db {
         Ok(rv)
     }
 
-    pub async fn fetch_jobs(&self, active: bool, kind: &'static str, limit: usize) -> anyhow::Result<Vec<MediaJobRow>> {
+    async fn fetch_jobs(&self, active: bool, kind: &'static str, limit: usize) -> anyhow::Result<Vec<MediaJobRow>> {
         let query = r#"SELECT * FROM media_job WHERE active = ? AND kind = ? AND media_id IS NOT NULL ORDER BY media_id LIMIT ?"#;
 
         Ok(sqlx::query_as(query).bind(active)

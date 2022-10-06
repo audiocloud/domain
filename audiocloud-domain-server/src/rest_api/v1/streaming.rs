@@ -12,14 +12,14 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
 }
 
 #[derive(Deserialize)]
-struct AppTaskPlayId {
+pub struct AppTaskPlayId {
     app_id:  AppId,
     task_id: TaskId,
     play_id: PlayId,
 }
 
 #[derive(Deserialize)]
-struct AppTaskPlayIdPacket {
+pub struct AppTaskPlayIdPacket {
     app_id:  AppId,
     task_id: TaskId,
     play_id: PlayId,
