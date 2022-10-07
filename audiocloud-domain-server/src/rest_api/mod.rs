@@ -10,6 +10,7 @@ use actix_web::http::header::{Header, AUTHORIZATION};
 use actix_web::{get, web, FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder};
 use anyhow::anyhow;
 use clap::{Args, ValueEnum};
+use derive_more::IsVariant;
 use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
@@ -163,7 +164,7 @@ pub struct RestOpts {
     pub rest_auth_strategy: AuthStrategy,
 }
 
-#[derive(ValueEnum, Copy, Clone)]
+#[derive(ValueEnum, Copy, Clone, IsVariant)]
 pub enum AuthStrategy {
     /// Every unauthenticated request is considered to be coming from a superuser (**dangerous!**)
     Development,

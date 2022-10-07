@@ -102,6 +102,9 @@ async fn main() -> anyhow::Result<()> {
           " ==== AudioCloud Domain server ==== ");
 
     let rest_opts = web::Data::new(opts.rest.clone());
+    if rest_opts.rest_auth_strategy.is_development() {
+        warn!("*** development authentication strategy enabled! ***");
+    }
 
     // create actix
     HttpServer::new(move || {
