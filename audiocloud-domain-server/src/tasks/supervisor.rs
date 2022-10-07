@@ -35,6 +35,7 @@ mod list_tasks;
 mod modify_task;
 mod play_task;
 mod render_task;
+mod seek_task;
 
 pub struct TasksSupervisor {
     db:                        Db,

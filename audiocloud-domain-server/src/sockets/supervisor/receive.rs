@@ -57,26 +57,26 @@ impl SocketsSupervisor {
                                                          revision, } => {
                 // TODO: get security
                 let security = DomainSecurity::Cloud;
-                get_tasks_supervisor().send(messages::ModifyTask { modify_spec,
-                                                                   security,
-                                                                   task_id,
-                                                                   revision })
-                                      .map_err(bad_gateway)
-                                      .and_then(fut::ready)
-                                      .into_actor(self)
-                                      .map(move |res, actor, ctx| {
-                                          let result = to_serializable(res);
-                                          let result =
-                                              DomainServerMessage::ModifyTaskSpecResponse { request_id, result };
-                                          actor.send_to_socket_by_id(&socket_id, result, response_media, ctx);
-                                      })
-                                      .spawn(ctx);
+                let task_fut = get_tasks_supervisor().send(messages::ModifyTask { modify_spec,
+                                                                                  security,
+                                                                                  task_id,
+                                                                                  revision });
+                task_fut.map_err(bad_gateway)
+                        .and_then(fut::ready)
+                        .into_actor(self)
+                        .map(move |res, actor, ctx| {
+                            let result = to_serializable(res);
+                            let result = DomainServerMessage::ModifyTaskSpecResponse { request_id, result };
+                            let _ = actor.send_to_socket_by_id(&socket_id, result, response_media, ctx);
+                        })
+                        .spawn(ctx);
             }
             DomainClientMessage::RequestPeerConnection { request_id,
                                                          description, } => {
                 let request = SocketContext { socket_id,
                                               request_id,
                                               media: ResponseMedia::MsgPack };
+
                 self.request_peer_connection(request, description, ctx);
             }
             DomainClientMessage::SubmitPeerConnectionCandidate { request_id,
@@ -85,6 +85,7 @@ impl SocketsSupervisor {
                 let request = SocketContext { socket_id,
                                               request_id,
                                               media: ResponseMedia::Json };
+
                 self.submit_peer_connection_candidate(request, rtc_socket_id, candidate, ctx);
             }
             DomainClientMessage::RequestAttachToTask { request_id,
@@ -92,7 +93,7 @@ impl SocketsSupervisor {
                                                        secure_key, } => {
                 let secure_key_is_valid = matches!(self.security.get(&task_id), Some(track_security) if track_security.security.contains_key(&secure_key));
 
-                let response = if secure_key_is_valid {
+                let result = if secure_key_is_valid {
                     let socket_id = socket_id.clone();
                     self.task_socket_members
                         .entry(task_id)
@@ -104,17 +105,24 @@ impl SocketsSupervisor {
                     Err(DomainError::AuthenticationFailed)
                 };
 
-                let result = to_serializable(response);
+                let response = DomainServerMessage::AttachToTaskResponse { request_id,
+                                                                           result: to_serializable(result) };
 
-                let _ = self.send_to_socket_by_id(&socket_id,
-                                                  DomainServerMessage::AttachToTaskResponse { request_id, result },
-                                                  response_media,
-                                                  ctx);
+                let _ = self.send_to_socket_by_id(&socket_id, response, response_media, ctx);
             }
             DomainClientMessage::RequestDetachFromTask { request_id, task_id } => {
-                if let Some(sockets) = self.task_socket_members.get_mut(&task_id) {
-                    sockets.retain(|membership| &membership.socket_id != &socket_id);
-                }
+                let result = match self.task_socket_members.get_mut(&task_id) {
+                    Some(sockets) => {
+                        sockets.retain(|membership| &membership.socket_id != &socket_id);
+                        Ok(())
+                    }
+                    None => Err(DomainError::TaskNotFound { task_id }),
+                };
+
+                let response = DomainServerMessage::DetachFromTaskResponse { request_id,
+                                                                             result: to_serializable(result) };
+
+                let _ = self.send_to_socket_by_id(&socket_id, response, response_media, ctx);
             }
             DomainClientMessage::Pong { challenge, response } => {
                 socket.last_pong_at = Instant::now();

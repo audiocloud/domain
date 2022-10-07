@@ -27,9 +27,10 @@ mod handle_engine_events;
 mod handle_instance_events;
 mod handle_media_events;
 mod modify_task;
-mod render_task;
-mod play_task;
 mod packet_handling;
+mod play_task;
+mod render_task;
+mod seek_task;
 
 pub struct TaskActor {
     id:                     AppTaskId,

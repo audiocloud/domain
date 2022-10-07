@@ -185,9 +185,22 @@ async fn play_task(responder: ApiResponder,
 #[post("/{app_id}/{task_id}/transport/seek")]
 async fn seek_task(responder: ApiResponder,
                    task_id: Path<AppTaskIdPath>,
-                   seek: Json<RequestSeek>)
+                   seek: Json<RequestSeek>,
+                   if_match: Header<IfMatch>,
+                   security: DomainSecurity)
                    -> ApiResponse<TaskSought> {
-    responder.respond(async move { not_implemented_yet("seek_task") }).await
+    responder.respond(async move {
+                 let seek = messages::SeekTask { task_id:  { task_id.into_inner().into() },
+                                                 seek:     { seek.into_inner() },
+                                                 security: { security },
+                                                 revision: { get_revision(if_match)? }, };
+
+                 get_tasks_supervisor().send(seek)
+                                       .await
+                                       .map_err(bad_gateway)
+                                       .and_then(identity)
+             })
+             .await
 }
 
 #[post("/{app_id}/{task_id}/transport/cancel")]

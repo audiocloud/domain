@@ -8,11 +8,12 @@ use audiocloud_api::common::media::{MediaObject, RenderId};
 use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::domain::tasks::{
-    TaskCreated, TaskDeleted, TaskPlaying, TaskRendering, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec,
+    TaskCreated, TaskDeleted, TaskPlaying, TaskRendering, TaskSought, TaskSummaryList, TaskUpdated,
+    TaskWithStatusAndSpec,
 };
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
 use audiocloud_api::{
-    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, RequestPlay, RequestRender,
+    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, RequestPlay, RequestRender, RequestSeek,
     StreamingPacket, TaskReservation, TaskSecurity,
 };
 
@@ -155,4 +156,13 @@ pub struct ModifyTask {
     pub modify_spec: Vec<ModifyTaskSpec>,
     pub revision:    u64,
     pub security:    DomainSecurity,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<TaskSought>")]
+pub(crate) struct SeekTask {
+    pub task_id:  AppTaskId,
+    pub seek:     RequestSeek,
+    pub revision: u64,
+    pub security: DomainSecurity,
 }

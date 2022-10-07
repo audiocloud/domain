@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use audiocloud_api::audio_engine::EngineCommand;
 use audiocloud_api::{AppTaskId, DesiredTaskPlayState, FixedInstanceId, PlayId, RenderId, TaskPlayState, Timestamped};
 
@@ -10,6 +12,7 @@ pub struct TaskEngine {
     tracker:             RequestTracker,
     instances_are_ready: Timestamped<bool>,
     media_is_ready:      Timestamped<bool>,
+    commands:            VecDeque<Timestamped<EngineCommand>>,
     version:             u64,
 }
 
@@ -21,7 +24,16 @@ impl TaskEngine {
                tracker:             { Default::default() },
                instances_are_ready: { Default::default() },
                media_is_ready:      { Default::default() },
+               commands:            { Default::default() },
                version:             { 0 }, }
+    }
+
+    pub fn enqueue(&mut self, cmd: EngineCommand) {
+        self.commands.push_back(Timestamped::new(cmd));
+    }
+
+    pub fn get_actual_play_state(&self) -> &TaskPlayState {
+        self.actual_play_state.value()
     }
 
     pub fn set_desired_state(&mut self, desired: DesiredTaskPlayState) -> u64 {
