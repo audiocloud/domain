@@ -35,7 +35,8 @@ impl Handler<SeekTask> for TaskActor {
 
                 Ok(sought)
             }
-            _ => Err(DomainError::TaskIllegalPlayState { task_id: msg.task_id.clone(), }),
+            _ => Err(DomainError::TaskIllegalPlayState { task_id: { msg.task_id.clone() },
+                                                         state:   { self.engine.get_actual_play_state().into() }, }),
         }
     }
 }

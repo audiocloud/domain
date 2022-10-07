@@ -1,8 +1,8 @@
 use std::convert::Infallible;
 use std::future::Future;
 
-use actix::fut;
 use actix::fut::Ready;
+use actix::{fut, MailboxError};
 use actix_web::body::{BoxBody, EitherBody};
 use actix_web::dev::Payload;
 use actix_web::error::{ErrorBadRequest, ErrorInternalServerError, ErrorUnauthorized};
@@ -11,11 +11,12 @@ use actix_web::{get, web, FromRequest, HttpRequest, HttpResponse, HttpResponseBu
 use anyhow::anyhow;
 use clap::{Args, ValueEnum};
 use reqwest::StatusCode;
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
 
 use audiocloud_api::domain::DomainError;
-use audiocloud_api::{Codec, Json, MsgPack, SecureKey};
+use audiocloud_api::{AppId, AppTaskId, Codec, Json, MsgPack, SecureKey, TaskId};
 
 use crate::{DomainSecurity, ResponseMedia};
 
@@ -169,4 +170,21 @@ pub enum AuthStrategy {
 
     /// Secure keys must be provided for all requests
     Production,
+}
+
+pub fn bad_gateway(err: MailboxError) -> DomainError {
+    DomainError::BadGateway { error: err.to_string() }
+}
+
+#[derive(Deserialize)]
+pub struct AppTaskIdPath {
+    app_id:  AppId,
+    task_id: TaskId,
+}
+
+impl Into<AppTaskId> for AppTaskIdPath {
+    fn into(self) -> AppTaskId {
+        let Self { app_id, task_id } = self;
+        AppTaskId { app_id, task_id }
+    }
 }

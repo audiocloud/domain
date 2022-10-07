@@ -7,14 +7,15 @@ use audiocloud_api::common::change::{DesiredTaskPlayState, TaskState};
 use audiocloud_api::common::media::{MediaObject, RenderId};
 use audiocloud_api::common::task::TaskPermissions;
 use audiocloud_api::common::task::TaskSpec;
+use audiocloud_api::domain::streaming::StreamStats;
 use audiocloud_api::domain::tasks::{
-    TaskCreated, TaskDeleted, TaskPlaying, TaskRendering, TaskSought, TaskSummaryList, TaskUpdated,
-    TaskWithStatusAndSpec,
+    TaskCreated, TaskDeleted, TaskPlayStopped, TaskPlaying, TaskRenderCancelled, TaskRendering, TaskSought,
+    TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec,
 };
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
 use audiocloud_api::{
-    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, RequestPlay, RequestRender, RequestSeek,
-    StreamingPacket, TaskReservation, TaskSecurity,
+    CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, PlayId, RequestCancelRender,
+    RequestPlay, RequestRender, RequestSeek, RequestStopPlay, StreamingPacket, TaskReservation, TaskSecurity,
 };
 
 use crate::{DomainResult, DomainSecurity};
@@ -156,6 +157,7 @@ pub struct ModifyTask {
     pub modify_spec: Vec<ModifyTaskSpec>,
     pub revision:    u64,
     pub security:    DomainSecurity,
+    pub optional:    bool,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -164,5 +166,47 @@ pub(crate) struct SeekTask {
     pub task_id:  AppTaskId,
     pub seek:     RequestSeek,
     pub revision: u64,
+    pub security: DomainSecurity,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<TaskRenderCancelled>")]
+pub struct CancelRenderTask {
+    pub task_id:  AppTaskId,
+    pub cancel:   RequestCancelRender,
+    pub security: DomainSecurity,
+    pub revision: u64,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<TaskPlayStopped>")]
+pub struct StopPlayTask {
+    pub task_id:  AppTaskId,
+    pub stop:     RequestStopPlay,
+    pub security: DomainSecurity,
+    pub revision: u64,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "()")]
+pub struct NotifyStreamingPacket {
+    pub task_id: AppTaskId,
+    pub packet:  StreamingPacket,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<StreamStats>")]
+pub struct GenerateStreamStats {
+    pub task_id:  AppTaskId,
+    pub play_id:  PlayId,
+    pub security: DomainSecurity,
+}
+
+#[derive(Message, Clone, Debug)]
+#[rtype(result = "DomainResult<StreamingPacket>")]
+pub struct GetStreamPacket {
+    pub task_id:  AppTaskId,
+    pub play_id:  PlayId,
+    pub serial:   u64,
     pub security: DomainSecurity,
 }

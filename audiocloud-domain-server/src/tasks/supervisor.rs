@@ -11,7 +11,10 @@ use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInst
 use audiocloud_api::common::change::TaskState;
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::newtypes::{AppTaskId, EngineId};
-use audiocloud_api::{now, DomainId, FixedInstanceId, TaskPermissions, TaskReservation, TaskSecurity, TaskSpec};
+use audiocloud_api::{
+    now, DomainId, FixedInstanceId, PlayId, StreamingPacket, Task, TaskPermissions, TaskReservation, TaskSecurity,
+    TaskSpec, Timestamped,
+};
 
 use crate::db::Db;
 use crate::tasks::messages::{BecomeOnline, NotifyTaskSpec, NotifyTaskState};
@@ -24,6 +27,7 @@ use crate::{DomainResult, DomainSecurity};
 const ALLOW_MODIFY_STRUCTURE: TaskPermissions = TaskPermissions { structure: true,
                                                                   ..TaskPermissions::empty() };
 
+mod cancel_render;
 mod create_task;
 mod delete_task;
 mod get_task;
@@ -33,13 +37,16 @@ mod handle_media_events;
 mod handle_task_events;
 mod list_tasks;
 mod modify_task;
+mod packets;
 mod play_task;
 mod render_task;
 mod seek_task;
+mod stop_play;
+mod task_timers;
 
 pub struct TasksSupervisor {
     db:                        Db,
-    task_opts:                 TaskOpts,
+    opts:                      TaskOpts,
     domain_config:             DomainConfig,
     tasks:                     HashMap<AppTaskId, SupervisedTask>,
     engines:                   HashMap<EngineId, ReferencedEngine>,
@@ -55,6 +62,7 @@ struct SupervisedTask {
     pub security:     TaskSecurity,
     pub state:        TaskState,
     pub actor:        Option<Addr<TaskActor>>,
+    pub packet_cache: HashMap<PlayId, HashMap<u64, Timestamped<StreamingPacket>>>,
 }
 
 struct ReferencedEngine {
@@ -64,27 +72,17 @@ struct ReferencedEngine {
 impl TasksSupervisor {
     pub fn new(db: Db, opts: &TaskOpts, cfg: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<Self> {
         let tasks = cfg.tasks
-      .iter()
-      .filter(|(id, task)| {
-        if &task.domain_id != &cfg.domain_id {
-          warn!(%id, domain_id = %cfg.domain_id, other_domain_id = %task.domain_id, "Configuration time task is for another domain, skipping");
-          true
-        } else {
-          false
-        }
-      })
-      .map(|(id, task)| {
-        (id.clone(),
-         SupervisedTask {
-           domain_id: { task.domain_id.clone() },
-           reservations: { task.reservations.clone() },
-           spec: { task.spec.clone() },
-           security: { task.security.clone() },
-           state: { Default::default() },
-           actor: { None },
-         })
-      })
-      .collect();
+            .iter()
+            .filter(|(id, task)| {
+                if &task.domain_id != &cfg.domain_id {
+                    warn!(%id, domain_id = %cfg.domain_id, other_domain_id = %task.domain_id, "Configuration time task is for another domain, skipping");
+                    true
+                } else {
+                    false
+                }
+            })
+            .map(Self::create_task_actor)
+            .collect();
 
         let engines = cfg.engines
                          .iter()
@@ -92,7 +90,7 @@ impl TasksSupervisor {
                          .collect();
 
         Ok(Self { db:                        { db },
-                  task_opts:                 { opts.clone() },
+                  opts:                      { opts.clone() },
                   domain_config:             { cfg.clone() },
                   fixed_instance_membership: { HashMap::new() },
                   fixed_instance_routing:    { routing },
@@ -101,91 +99,22 @@ impl TasksSupervisor {
                   online:                    { false }, })
     }
 
+    fn create_task_actor((id, task): (&AppTaskId, &Task)) -> (AppTaskId, SupervisedTask) {
+        (id.clone(),
+         SupervisedTask { domain_id:    { task.domain_id.clone() },
+                          reservations: { task.reservations.clone() },
+                          spec:         { task.spec.clone() },
+                          security:     { task.security.clone() },
+                          state:        { Default::default() },
+                          actor:        { None },
+                          packet_cache: { Default::default() }, })
+    }
+
     fn allocate_engine(&self, id: &AppTaskId, spec: &TaskSpec) -> Option<EngineId> {
         // TODO: we know we only have one engine, so we always pick the first
         let engine_id = self.engines.keys().next().cloned();
         info!(?engine_id, %id, "Allocated engine for task");
         engine_id
-    }
-
-    fn update(&mut self, ctx: &mut Context<Self>) {
-        if self.online {
-            self.drop_inactive_task_actors();
-            self.drop_old_tasks();
-            self.create_pending_task_actors();
-        }
-    }
-
-    fn drop_inactive_task_actors(&mut self) {
-        let mut deactivated = HashSet::new();
-        for (id, task) in &mut self.tasks {
-            if task.actor.as_ref().map(|actor| !actor.connected()).unwrap_or(false) {
-                debug!(%id, "Dropping task actor due to inactivity");
-                deactivated.insert(id.clone());
-                task.actor = None;
-            }
-        }
-
-        for task_id in deactivated {
-            self.issue_system_async(NotifyTaskDeactivated { task_id });
-        }
-    }
-
-    fn drop_old_tasks(&mut self) {
-        let mut deleted = HashSet::new();
-
-        let cutoff = now() + chrono::Duration::seconds(self.task_opts.task_grace_seconds as i64);
-
-        self.tasks.retain(|id, task| {
-                      if task.reservations.to < cutoff {
-                          deleted.insert(id.clone());
-                          debug!(%id, "Cleaning up task from supervisor completely");
-                          false
-                      } else {
-                          true
-                      }
-                  });
-
-        for task_id in deleted {
-            self.issue_system_async(NotifyTaskDeleted { task_id });
-        }
-    }
-
-    fn create_pending_task_actors(&mut self) {
-        // generate an actor map to later assign
-        let mut actors = HashMap::new();
-
-        for (task_id, task) in self.tasks.iter() {
-            if task.reservations.contains_now() && task.actor.is_none() {
-                if let Some(engine_id) = self.allocate_engine(&task_id, &task.spec) {
-                    match TaskActor::new(task_id.clone(),
-                                         self.task_opts.clone(),
-                                         task.domain_id.clone(),
-                                         engine_id.clone(),
-                                         task.reservations.clone(),
-                                         task.spec.clone(),
-                                         task.security.clone(),
-                                         self.fixed_instance_routing.clone())
-                    {
-                        Ok(actor) => {
-                            self.issue_system_async(NotifyTaskActivated { task_id: task_id.clone(), });
-                            actors.insert(task_id.clone(), Supervisor::start(move |_| actor));
-                        }
-                        Err(error) => {
-                            warn!(%error, "Failed to start task actor");
-                        }
-                    }
-                } else {
-                    warn!(%task_id, "No available audio engines to start task");
-                }
-            }
-        }
-
-        for (id, task) in self.tasks.iter_mut() {
-            if let Some(actor) = actors.remove(&id) {
-                task.actor.replace(actor);
-            }
-        }
     }
 }
 
@@ -204,7 +133,8 @@ impl Supervised for TasksSupervisor {
         self.subscribe_media_events(ctx);
         self.subscribe_engine_events(ctx);
 
-        ctx.run_interval(Duration::from_millis(100), Self::update);
+        self.register_task_timers(ctx);
+        self.register_packet_cache_cleanup(ctx);
     }
 }
 

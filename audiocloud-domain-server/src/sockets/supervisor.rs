@@ -31,7 +31,6 @@ pub struct SocketsSupervisor {
     sockets:             HashMap<SocketId, Socket>,
     task_socket_members: HashMap<AppTaskId, HashSet<SocketMembership>>,
     security:            HashMap<AppTaskId, TaskSecurity>,
-    packet_cache:        HashMap<AppTaskId, HashMap<PlayId, HashMap<u64, Timestamped<StreamingPacket>>>>,
 }
 
 struct SocketContext {
@@ -53,8 +52,7 @@ impl SocketsSupervisor {
         Self { opts:                { opts },
                sockets:             { Default::default() },
                task_socket_members: { Default::default() },
-               security:            { Default::default() },
-               packet_cache:        { Default::default() }, }
+               security:            { Default::default() }, }
     }
 
     fn request_peer_connection(&mut self,

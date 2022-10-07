@@ -33,10 +33,3 @@ pub struct RegisterWebRtcSocket {
     pub address: Addr<WebRtcActor>,
     pub id:      SocketId,
 }
-
-#[derive(Message, Clone, Debug)]
-#[rtype(result = "()")]
-pub struct PublishStreamingPacket {
-    pub task_id: AppTaskId,
-    pub packet:  StreamingPacket,
-}

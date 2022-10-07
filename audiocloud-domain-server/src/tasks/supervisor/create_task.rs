@@ -21,9 +21,10 @@ impl Handler<CreateTask> for TasksSupervisor {
                                            spec:         { msg.spec.into() },
                                            security:     { msg.security.into() },
                                            state:        { Default::default() },
-                                           actor:        { None }, });
+                                           actor:        { None },
+                                           packet_cache: { Default::default() }, });
 
-        self.update(ctx);
+        self.run_task_timers(ctx);
 
         Ok(TaskCreated::Created { task_id: msg.task_id.clone(), })
     }

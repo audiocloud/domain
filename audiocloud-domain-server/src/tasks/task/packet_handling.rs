@@ -1,11 +1,14 @@
 use std::collections::HashMap;
 use std::mem;
 
+use actix_broker::BrokerIssue;
+
 use audiocloud_api::audio_engine::CompressedAudio;
 use audiocloud_api::domain::streaming::DiffStamped;
 use audiocloud_api::{now, DestinationPadId, PadMetering, SourcePadId};
 
-use crate::sockets::{get_sockets_supervisor, PublishStreamingPacket};
+use crate::sockets::get_sockets_supervisor;
+use crate::tasks::messages::NotifyStreamingPacket;
 use crate::tasks::task::TaskActor;
 
 impl TaskActor {
@@ -42,8 +45,8 @@ impl TaskActor {
 
         if packet_age >= max_packet_age || packet_num_audio_frames >= self.opts.max_packet_audio_frames {
             let packet = mem::take(&mut self.packet);
-            get_sockets_supervisor().do_send(PublishStreamingPacket { task_id: { self.id.clone() },
-                                                                      packet:  { packet }, });
+            self.issue_system_async(NotifyStreamingPacket { task_id: { self.id.clone() },
+                                                            packet:  { packet }, });
         }
     }
 }

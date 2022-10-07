@@ -54,13 +54,15 @@ impl SocketsSupervisor {
             DomainClientMessage::RequestModifyTaskSpec { request_id,
                                                          task_id,
                                                          modify_spec,
+                                                         optional,
                                                          revision, } => {
                 // TODO: get security
                 let security = DomainSecurity::Cloud;
                 let task_fut = get_tasks_supervisor().send(messages::ModifyTask { modify_spec,
                                                                                   security,
                                                                                   task_id,
-                                                                                  revision });
+                                                                                  revision,
+                                                                                  optional: false });
                 task_fut.map_err(bad_gateway)
                         .and_then(fut::ready)
                         .into_actor(self)

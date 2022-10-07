@@ -18,9 +18,9 @@ use audiocloud_api::{
     RequestStopPlay, TaskId,
 };
 
-use crate::rest_api::{ApiResponder, ApiResponse};
+use crate::rest_api::{ApiResponder, ApiResponse, AppTaskIdPath};
 use crate::tasks::{get_tasks_supervisor, messages, ListTasks};
-use crate::{DomainResult, DomainSecurity};
+use crate::{rest_api, DomainResult, DomainSecurity};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(list_tasks)
@@ -35,23 +35,6 @@ pub fn configure(cfg: &mut web::ServiceConfig) {
        .service(stop_play_task);
 }
 
-#[derive(Deserialize)]
-struct AppTaskIdPath {
-    app_id:  AppId,
-    task_id: TaskId,
-}
-
-impl Into<AppTaskId> for AppTaskIdPath {
-    fn into(self) -> AppTaskId {
-        let Self { app_id, task_id } = self;
-        AppTaskId { app_id, task_id }
-    }
-}
-
-fn bad_gateway(err: MailboxError) -> DomainError {
-    DomainError::BadGateway { error: err.to_string() }
-}
-
 fn not_implemented_yet<T>(call: &'static str) -> Result<T, DomainError> {
     Err(DomainError::NotImplemented { call:   call.to_string(),
                                       reason: "Not implemented yet".to_string(), })
@@ -59,7 +42,11 @@ fn not_implemented_yet<T>(call: &'static str) -> Result<T, DomainError> {
 
 #[get("/")]
 async fn list_tasks(responder: ApiResponder) -> ApiResponse<TaskSummaryList> {
-    responder.respond(async move { get_tasks_supervisor().send(ListTasks).await.map_err(bad_gateway) })
+    responder.respond(async move {
+                 get_tasks_supervisor().send(ListTasks)
+                                       .await
+                                       .map_err(rest_api::bad_gateway)
+             })
              .await
 }
 
@@ -73,7 +60,7 @@ async fn create_task(responder: ApiResponder, create: Json<CreateTask>) -> ApiRe
     responder.respond(async move {
                  get_tasks_supervisor().send(create)
                                        .await
-                                       .map_err(bad_gateway)
+                                       .map_err(rest_api::bad_gateway)
                                        .and_then(identity)
              })
              .await
@@ -86,7 +73,7 @@ async fn get_task(responder: ApiResponder, task_id: Path<AppTaskIdPath>) -> ApiR
     responder.respond(async move {
                  get_tasks_supervisor().send(get)
                                        .await
-                                       .map_err(bad_gateway)
+                                       .map_err(rest_api::bad_gateway)
                                        .and_then(identity)
              })
              .await
@@ -105,11 +92,12 @@ async fn modify_task(responder: ApiResponder,
                  let modify = messages::ModifyTask { task_id:     { task_id },
                                                      modify_spec: { modify.into_inner().modify_spec },
                                                      revision:    { get_revision(if_match)? },
-                                                     security:    { security }, };
+                                                     security:    { security },
+                                                     optional:    { false }, };
 
                  get_tasks_supervisor().send(modify)
                                        .await
-                                       .map_err(bad_gateway)
+                                       .map_err(rest_api::bad_gateway)
                                        .and_then(identity)
              })
              .await
@@ -130,7 +118,7 @@ async fn delete_task(responder: ApiResponder,
 
                  get_tasks_supervisor().send(delete)
                                        .await
-                                       .map_err(bad_gateway)
+                                       .map_err(rest_api::bad_gateway)
                                        .and_then(identity)
              })
              .await
@@ -153,7 +141,7 @@ async fn render_task(responder: ApiResponder,
 
                  get_tasks_supervisor().send(render)
                                        .await
-                                       .map_err(bad_gateway)
+                                       .map_err(rest_api::bad_gateway)
                                        .and_then(identity)
              })
              .await
@@ -176,7 +164,7 @@ async fn play_task(responder: ApiResponder,
 
                  get_tasks_supervisor().send(render)
                                        .await
-                                       .map_err(bad_gateway)
+                                       .map_err(rest_api::bad_gateway)
                                        .and_then(identity)
              })
              .await
@@ -197,7 +185,7 @@ async fn seek_task(responder: ApiResponder,
 
                  get_tasks_supervisor().send(seek)
                                        .await
-                                       .map_err(bad_gateway)
+                                       .map_err(rest_api::bad_gateway)
                                        .and_then(identity)
              })
              .await
@@ -206,18 +194,42 @@ async fn seek_task(responder: ApiResponder,
 #[post("/{app_id}/{task_id}/transport/cancel")]
 async fn cancel_render_task(responder: ApiResponder,
                             task_id: Path<AppTaskIdPath>,
-                            cancel: Json<RequestCancelRender>)
+                            cancel: Json<RequestCancelRender>,
+                            if_match: Header<IfMatch>,
+                            security: DomainSecurity)
                             -> ApiResponse<TaskRenderCancelled> {
-    responder.respond(async move { not_implemented_yet("cancel_render_task") })
+    responder.respond(async move {
+                 let cancel = messages::CancelRenderTask { task_id:  { task_id.into_inner().into() },
+                                                           cancel:   { cancel.into_inner() },
+                                                           security: { security },
+                                                           revision: { get_revision(if_match)? }, };
+
+                 get_tasks_supervisor().send(cancel)
+                                       .await
+                                       .map_err(rest_api::bad_gateway)
+                                       .and_then(identity)
+             })
              .await
 }
 
 #[post("/{app_id}/{task_id}/transport/stop")]
 async fn stop_play_task(responder: ApiResponder,
                         task_id: Path<AppTaskIdPath>,
-                        stop: Json<RequestStopPlay>)
+                        stop: Json<RequestStopPlay>,
+                        if_match: Header<IfMatch>,
+                        security: DomainSecurity)
                         -> ApiResponse<TaskPlayStopped> {
-    responder.respond(async move { not_implemented_yet("stop_play_task") })
+    responder.respond(async move {
+                 let stop = messages::StopPlayTask { task_id:  { task_id.into_inner().into() },
+                                                     stop:     { stop.into_inner() },
+                                                     security: { security },
+                                                     revision: { get_revision(if_match)? }, };
+
+                 get_tasks_supervisor().send(stop)
+                                       .await
+                                       .map_err(rest_api::bad_gateway)
+                                       .and_then(identity)
+             })
              .await
 }
 

@@ -48,4 +48,8 @@ pub struct TaskOpts {
     /// Send streaming packets to clients as soon as they exceed specified count of compressed audio buffers (even if not old enough)
     #[clap(long, env, default_value = "4")]
     pub max_packet_audio_frames: usize,
+
+    /// Milliseconds to keep streaming packets cached if for redelivery
+    #[clap(long, env, default_value = "60000")]
+    pub packet_cache_max_retention_ms: usize,
 }

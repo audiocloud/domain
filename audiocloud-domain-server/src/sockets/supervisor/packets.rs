@@ -4,20 +4,14 @@ use tracing::*;
 use audiocloud_api::domain::streaming::DomainServerMessage;
 use audiocloud_api::{TaskEvent, Timestamped};
 
-use crate::sockets::{PublishStreamingPacket, SocketsSupervisor};
+use crate::sockets::SocketsSupervisor;
+use crate::tasks::messages::NotifyStreamingPacket;
 use crate::ResponseMedia;
 
-impl Handler<PublishStreamingPacket> for SocketsSupervisor {
+impl Handler<NotifyStreamingPacket> for SocketsSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: PublishStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
-        self.packet_cache
-            .entry(msg.task_id.clone())
-            .or_default()
-            .entry(msg.packet.play_id.clone())
-            .or_default()
-            .insert(msg.packet.serial, Timestamped::new(msg.packet.clone()));
-
+    fn handle(&mut self, msg: NotifyStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
         if let Some(members) = self.task_socket_members.get(&msg.task_id) {
             let mut members =
                 members.iter()
@@ -40,8 +34,8 @@ impl Handler<PublishStreamingPacket> for SocketsSupervisor {
                     }
                 }
             }
+        } else {
+            warn!(task_id = %msg.task_id, "Could not publish packet for task, task does not exist")
         }
     }
 }
-
-impl SocketsSupervisor {}

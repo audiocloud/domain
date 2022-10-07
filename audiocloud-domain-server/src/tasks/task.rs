@@ -23,6 +23,7 @@ use crate::tasks::{NotifyTaskActivated, NotifyTaskReservation, NotifyTaskSecurit
 use super::task_fixed_instance::TaskFixedInstances;
 use super::task_media_objects::TaskMediaObjects;
 
+mod cancel_render;
 mod handle_engine_events;
 mod handle_instance_events;
 mod handle_media_events;
@@ -31,6 +32,7 @@ mod packet_handling;
 mod play_task;
 mod render_task;
 mod seek_task;
+mod stop_play;
 
 pub struct TaskActor {
     id:                     AppTaskId,
