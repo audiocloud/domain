@@ -90,11 +90,26 @@ impl SocketsSupervisor {
             DomainClientMessage::RequestAttachToTask { request_id,
                                                        task_id,
                                                        secure_key, } => {
-                // TODO: validate if secure key is valid
-                self.task_socket_members
-                    .entry(task_id)
-                    .or_default()
-                    .insert(SocketMembership { secure_key, socket_id });
+                let secure_key_is_valid = matches!(self.security.get(&task_id), Some(track_security) if track_security.security.contains_key(&secure_key));
+
+                let response = if secure_key_is_valid {
+                    let socket_id = socket_id.clone();
+                    self.task_socket_members
+                        .entry(task_id)
+                        .or_default()
+                        .insert(SocketMembership { secure_key, socket_id });
+
+                    Ok(())
+                } else {
+                    Err(DomainError::AuthenticationFailed)
+                };
+
+                let result = to_serializable(response);
+
+                let _ = self.send_to_socket_by_id(&socket_id,
+                                                  DomainServerMessage::AttachToTaskResponse { request_id, result },
+                                                  response_media,
+                                                  ctx);
             }
             DomainClientMessage::RequestDetachFromTask { request_id, task_id } => {
                 if let Some(sockets) = self.task_socket_members.get_mut(&task_id) {
