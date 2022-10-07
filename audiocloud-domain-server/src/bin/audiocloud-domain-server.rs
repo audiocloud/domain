@@ -55,45 +55,47 @@ async fn main() -> anyhow::Result<()> {
 
     let opts = Opts::parse();
 
-    info!(source = ?opts.config.config_source, "Loading config");
+    info!(source = %opts.config.describe(), "Loading config");
 
     let cfg = config::init(opts.config).await?;
 
-    info!("Initializing database");
+    info!("Initializing...");
 
     let db = db::init(opts.db).await?;
 
+    info!(" ⚡ Database");
+
     nats::init(&opts.nats_url).await?;
 
-    info!(" ✔ NATS");
+    info!(" ⚡ NATS");
 
     models::init(&cfg, db.clone()).await?;
 
-    info!(" ✔ Models");
+    info!(" ⚡ Models");
 
     media::init(opts.media, db.clone()).await?;
 
-    info!(" ✔ Media");
+    info!(" ⚡ Media");
 
     let routing = fixed_instances::init(&cfg, db.clone()).await?;
 
-    info!(" ✔ Instances");
+    info!(" ⚡ Instances");
 
     tasks::init(db.clone(), &opts.tasks, &cfg, routing)?;
 
-    info!(" ✔ Tasks (Offline)");
+    info!(" ⚡ Tasks (Offline)");
 
     events::init(cfg.command_source.clone(), cfg.event_sink.clone()).await?;
 
-    info!(" ✔ Commands / Events");
+    info!(" ⚡ Cloud Events");
 
     tasks::become_online();
 
-    info!(" ✔ Tasks (Online)");
+    info!(" ⚡ Tasks (Online)");
 
     sockets::init(opts.sockets)?;
 
-    info!(" ✔ Sockets");
+    info!(" ⚡ Sockets");
 
     info!(bind = opts.bind,
           port = opts.port,

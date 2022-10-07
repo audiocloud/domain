@@ -34,6 +34,15 @@ pub struct ConfigOpts {
     pub config_refresh_seconds: usize,
 }
 
+impl ConfigOpts {
+    pub fn describe(&self) -> String {
+        match self.config_source {
+            ConfigSource::File => format!("file:{}", self.config_file.display()),
+            ConfigSource::Cloud => format!("cloud:{}", self.cloud_url),
+        }
+    }
+}
+
 #[derive(ValueEnum, Clone, Copy, Debug)]
 pub enum ConfigSource {
     /// Load the config from an cloud or orchestrator
