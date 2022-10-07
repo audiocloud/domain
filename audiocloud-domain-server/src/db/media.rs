@@ -65,6 +65,7 @@ struct MediaObjectRow {
     id:        String,
     path:      Option<String>,
     metadata:  Option<sqlx::types::Json<MediaMetadata>>,
+    revision:  i64,
     last_used: Timestamp,
 }
 
@@ -114,14 +115,38 @@ impl Db {
 
         Ok(match opt {
             None => None,
-            Some(MediaObjectRow { id, path, metadata, .. }) => {
-                Some(MediaObject { id:       { AppMediaObjectId::from_str(&id)? },
-                                   metadata: { metadata.map(|json| json.0) },
-                                   path:     { path },
-                                   download: { None },
-                                   upload:   { None }, })
-            }
+            Some(MediaObjectRow { id,
+                                  path,
+                                  metadata,
+                                  revision,
+                                  .. }) => Some(MediaObject { id:       { AppMediaObjectId::from_str(&id)? },
+                                                              metadata: { metadata.map(|json| json.0) },
+                                                              path:     { path },
+                                                              download: { None },
+                                                              upload:   { None },
+                                                              revision: { revision } as u64, }),
         })
+    }
+
+    pub async fn save_media(&self, media: MediaObject) -> anyhow::Result<()> {
+        let MediaObject { id,
+                          metadata,
+                          path,
+                          revision,
+                          .. } = media;
+
+        let query =
+            r#"INSERT OR REPLACE INTO media_object (id, path, metadata, revision, last_used) VALUES (?, ?, ?, ?, ?)"#;
+
+        sqlx::query(query).bind(id.to_string())
+                          .bind(path)
+                          .bind(metadata.map(|m| sqlx::types::Json(m)))
+                          .bind(revision as i64)
+                          .bind(now())
+                          .execute(&self.pool)
+                          .await?;
+
+        Ok(())
     }
 
     pub async fn delete_upload(&self, id: &UploadJobId) -> anyhow::Result<()> {
@@ -130,14 +155,14 @@ impl Db {
 
     pub async fn save_download_job(&self, id: &DownloadJobId, download: &MediaDownload) -> anyhow::Result<()> {
         sqlx::query(r#"INSERT OR REPLACE INTO media_job (id, kind, spec, state, last_modified, active, media_id) VALUES(?, ?, ?, ?, ?, ?, ?)"#)
-          .bind(id.to_string())
-          .bind(KIND_DOWNLOAD.to_string())
-          .bind(serde_json::to_string(&download.download)?)
-          .bind(serde_json::to_string(&download.state)?)
-          .bind(now())
-          .bind(download.state.in_progress)
-          .bind(download.media_id.to_string())
-          .execute(&self.pool).await?;
+      .bind(id.to_string())
+      .bind(KIND_DOWNLOAD.to_string())
+      .bind(serde_json::to_string(&download.download)?)
+      .bind(serde_json::to_string(&download.state)?)
+      .bind(now())
+      .bind(download.state.in_progress)
+      .bind(download.media_id.to_string())
+      .execute(&self.pool).await?;
 
         Ok(())
     }

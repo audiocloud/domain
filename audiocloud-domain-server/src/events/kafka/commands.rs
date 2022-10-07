@@ -31,6 +31,7 @@ pub async fn init(topic: String,
 }
 
 struct CustomContext;
+
 type LoggingConsumer = StreamConsumer<CustomContext>;
 
 impl ClientContext for CustomContext {}

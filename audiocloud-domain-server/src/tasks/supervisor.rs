@@ -155,10 +155,10 @@ impl TasksSupervisor {
         // generate an actor map to later assign
         let mut actors = HashMap::new();
 
-        for (id, task) in self.tasks.iter() {
+        for (task_id, task) in self.tasks.iter() {
             if task.reservations.contains_now() && task.actor.is_none() {
-                if let Some(engine_id) = self.allocate_engine(&id, &task.spec) {
-                    match TaskActor::new(id.clone(),
+                if let Some(engine_id) = self.allocate_engine(&task_id, &task.spec) {
+                    match TaskActor::new(task_id.clone(),
                                          self.task_opts.clone(),
                                          task.domain_id.clone(),
                                          engine_id.clone(),
@@ -168,15 +168,15 @@ impl TasksSupervisor {
                                          self.fixed_instance_routing.clone())
                     {
                         Ok(actor) => {
-                            self.issue_system_async(NotifyTaskActivated { task_id: id.clone() });
-                            actors.insert(id.clone(), Supervisor::start(move |_| actor));
+                            self.issue_system_async(NotifyTaskActivated { task_id: task_id.clone(), });
+                            actors.insert(task_id.clone(), Supervisor::start(move |_| actor));
                         }
                         Err(error) => {
-                            warn!(%error, "Failed to start task");
+                            warn!(%error, "Failed to start task actor");
                         }
                     }
                 } else {
-                    warn!(%id, "No available audio engines to start task");
+                    warn!(%task_id, "No available audio engines to start task");
                 }
             }
         }
@@ -213,26 +213,5 @@ impl Handler<BecomeOnline> for TasksSupervisor {
 
     fn handle(&mut self, msg: BecomeOnline, ctx: &mut Self::Context) -> Self::Result {
         self.online = true;
-    }
-}
-
-fn check_security(task_id: &AppTaskId,
-                  task: &TaskSecurity,
-                  security: &DomainSecurity,
-                  permissions: TaskPermissions)
-                  -> DomainResult {
-    match security {
-        DomainSecurity::Cloud => Ok(()),
-        DomainSecurity::SecureKey(secure_key) => match task.security.get(secure_key) {
-            None => Err(DomainError::AuthenticationFailed),
-            Some(security) => {
-                if security.can(permissions) {
-                    Ok(())
-                } else {
-                    Err(DomainError::TaskAuthtorizationFailed { task_id:  task_id.clone(),
-                                                                required: permissions, })
-                }
-            }
-        },
     }
 }

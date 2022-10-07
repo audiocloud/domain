@@ -176,13 +176,13 @@ impl Handler<SetInstanceDesiredPlayState> for FixedInstancesSupervisor {
     fn handle(&mut self, msg: SetInstanceDesiredPlayState, ctx: &mut Self::Context) -> Self::Result {
         if let Some(instance) = self.instances.get(&msg.instance_id) {
             instance.address
-                    .send(msg)
-                    .into_actor(self)
-                    .map(|res, actor, ctx| match res {
-                        Ok(res) => res,
-                        Err(err) => Err(DomainError::BadGateway { error: format!("Failed to set instance desired play state: {err}") }),
-                    })
-                    .boxed_local()
+        .send(msg)
+        .into_actor(self)
+        .map(|res, actor, ctx| match res {
+          Ok(res) => res,
+          Err(err) => Err(DomainError::BadGateway { error: format!("Failed to set instance desired play state: {err}") }),
+        })
+        .boxed_local()
         } else {
             fut::err(DomainError::InstanceNotFound { instance_id: msg.instance_id, }).boxed_local()
         }

@@ -1,4 +1,4 @@
-use actix::{Handler, Context};
+use actix::{Context, Handler};
 use actix_broker::BrokerSubscribe;
 
 use crate::fixed_instances::NotifyFixedInstanceReports;

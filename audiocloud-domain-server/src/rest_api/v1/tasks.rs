@@ -224,12 +224,12 @@ async fn stop_play_task(responder: ApiResponder,
 fn get_revision(header: Header<IfMatch>) -> DomainResult<u64> {
     use DomainError::TaskRevisionMalformed;
     match header.into_inner() {
-        IfMatch::Any => Err(TaskRevisionMalformed { error: format!("Task revision must be specified"), }),
-        IfMatch::Items(items) => match items.get(0) {
-            Some(item) if items.len() == 1 => {
-                Ok(u64::from_str(item.tag()).map_err(|err| TaskRevisionMalformed { error: format!("Task revision is not a number: {err}") })?)
-            }
-            _ => Err(TaskRevisionMalformed { error: format!("Exactly one revision must be specified"), }),
-        },
-    }
+    IfMatch::Any => Err(TaskRevisionMalformed { error: format!("Task revision must be specified") }),
+    IfMatch::Items(items) => match items.get(0) {
+      Some(item) if items.len() == 1 => {
+        Ok(u64::from_str(item.tag()).map_err(|err| TaskRevisionMalformed { error: format!("Task revision is not a number: {err}") })?)
+      }
+      _ => Err(TaskRevisionMalformed { error: format!("Exactly one revision must be specified") }),
+    },
+  }
 }

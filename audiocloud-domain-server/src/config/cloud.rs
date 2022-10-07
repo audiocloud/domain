@@ -18,8 +18,8 @@ pub async fn get_config(url: Url, api_key: String, refresh_seconds: usize) -> an
     let url = url.join("/v1/domains/config")?;
 
     CLOUD_REFRESH_CONFIG
-      .set(CloudRefreshConfig::new(client.clone(), url.clone(), api_key.clone(), refresh_seconds).start())
-      .map_err(|_| anyhow!("CLOUD_REFRESH_CONFIG already initialized"))?;
+    .set(CloudRefreshConfig::new(client.clone(), url.clone(), api_key.clone(), refresh_seconds).start())
+    .map_err(|_| anyhow!("CLOUD_REFRESH_CONFIG already initialized"))?;
 
     Ok(client.get(url)
              .bearer_auth(api_key)

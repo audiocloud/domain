@@ -20,11 +20,11 @@ use crate::ResponseMedia;
 
 use super::messages::*;
 
-mod packets;
-mod sockets;
 mod handle_task_events;
-mod timers;
+mod packets;
 mod receive;
+mod sockets;
+mod timers;
 
 pub struct SocketsSupervisor {
     opts:                SocketsOpts,

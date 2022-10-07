@@ -9,7 +9,7 @@ use crate::tasks::supervisor::SupervisedTask;
 use crate::tasks::ModifyTask;
 use crate::DomainResult;
 
-use super::{check_security, TasksSupervisor, ALLOW_MODIFY_STRUCTURE};
+use super::{TasksSupervisor, ALLOW_MODIFY_STRUCTURE};
 
 impl Handler<ModifyTask> for TasksSupervisor {
     type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;
@@ -18,23 +18,17 @@ impl Handler<ModifyTask> for TasksSupervisor {
         use DomainError::*;
 
         match self.tasks.get_mut(&msg.task_id) {
-            Some(task) => {
-                if let Err(err) = check_security(&msg.task_id, &task.security, &msg.security, ALLOW_MODIFY_STRUCTURE) {
-                    return fut::err(err).into_actor(self).boxed_local();
-                }
-
-                match task.actor.as_ref() {
-                    Some(actor) => actor.send(msg)
-                                        .into_actor(self)
-                                        .map(|result, _, _| match result {
-                                            Ok(result) => result,
-                                            Err(err) => Err(BadGateway { error: err.to_string() }),
-                                        })
-                                        .boxed_local(),
-                    None => fut::ready(Self::modify_task_spec(task, msg)).into_actor(self)
-                                                                         .boxed_local(),
-                }
-            }
+            Some(task) => match task.actor.as_ref() {
+                Some(actor) => actor.send(msg)
+                                    .into_actor(self)
+                                    .map(|result, _, _| match result {
+                                        Ok(result) => result,
+                                        Err(err) => Err(BadGateway { error: err.to_string() }),
+                                    })
+                                    .boxed_local(),
+                None => fut::ready(Self::modify_task_spec(task, msg)).into_actor(self)
+                                                                     .boxed_local(),
+            },
             None => {
                 warn!(task_id = %msg.task_id, "Refusing to modify unknown task");
                 fut::err(TaskNotFound { task_id: msg.task_id.clone(), }).into_actor(self)
