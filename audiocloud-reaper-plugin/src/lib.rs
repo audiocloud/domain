@@ -1,3 +1,5 @@
+extern crate core;
+
 pub mod audio_engine;
 pub mod audiocloud_plugin;
 pub mod events;

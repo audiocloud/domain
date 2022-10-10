@@ -3,6 +3,7 @@ use std::ffi::c_void;
 use std::ptr::slice_from_raw_parts;
 
 use anyhow::anyhow;
+use bytes::Bytes;
 use libflac_sys::{
     FLAC__StreamEncoder, FLAC__StreamEncoderWriteStatus, FLAC__byte, FLAC__stream_encoder_delete,
     FLAC__stream_encoder_finish, FLAC__stream_encoder_init_stream, FLAC__stream_encoder_new,
@@ -202,11 +203,12 @@ impl FlacEncoder {
             self.queued_len += len;
 
             if !self.internals.buffer.is_empty() {
-                output.push_back(CompressedAudio { play_id:      self.play_id,
-                                                   timeline_pos: self.timeline_pos + self.timeline_offset,
-                                                   stream_pos:   self.stream_pos,
-                                                   buffer:       self.internals.buffer.clone(),
-                                                   last:         false, });
+                output.push_back(CompressedAudio { play_id:      { self.play_id },
+                                                   timeline_pos: { self.timeline_pos + self.timeline_offset },
+                                                   stream_pos:   { self.stream_pos },
+                                                   buffer:       { Bytes::from(self.internals.buffer.clone()) },
+                                                   num_samples:  { 0 },
+                                                   last:         { false }, });
                 self.stream_pos += self.queued_len as u64;
                 self.timeline_offset += (self.queued_len as f64) / self.sample_rate as f64;
 
@@ -225,11 +227,12 @@ impl FlacEncoder {
             }
         }
 
-        output.push_back(CompressedAudio { play_id:      self.play_id,
-                                           timeline_pos: self.timeline_pos + self.timeline_offset,
-                                           stream_pos:   self.stream_pos,
-                                           buffer:       self.internals.buffer.clone(),
-                                           last:         true, });
+        output.push_back(CompressedAudio { play_id:      { self.play_id },
+                                           timeline_pos: { self.timeline_pos + self.timeline_offset },
+                                           stream_pos:   { self.stream_pos },
+                                           buffer:       { Bytes::from(self.internals.buffer.clone()) },
+                                           num_samples:  { 0 },
+                                           last:         { true }, });
 
         self.internals.buffer.clear();
 

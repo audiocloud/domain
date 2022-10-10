@@ -257,6 +257,7 @@ fn init_audio_engine(host: &HostCallback) -> ReaperSession {
     thread::spawn({
         let tx_cmd = tx_cmd.clone();
         move || {
+            // crossbeam channels that are compatible with nats crate
             while let Some(msg) = subscription.next() {
                 if let Ok(cmd) = MsgPack.deserialize(&msg.data[..]) {
                     let (tx, rx) = flume::unbounded::<anyhow::Result<()>>();

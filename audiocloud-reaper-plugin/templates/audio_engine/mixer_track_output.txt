@@ -1,5 +1,5 @@
 <TRACK
-    NAME "{{ mixer.output_flow_id.to_string() }}"
+    NAME "{{ mixer.output_pad_id.to_string() }}"
     NCHAN {{ mixer.spec.output_channels }}
     VOLPAN 1.0 0.0 -1.0
     MUTESOLO 0 0 0

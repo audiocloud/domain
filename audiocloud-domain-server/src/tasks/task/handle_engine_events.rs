@@ -4,7 +4,7 @@ use actix::Handler;
 
 use audiocloud_api::audio_engine::{CompressedAudio, EngineEvent};
 use audiocloud_api::domain::streaming::DiffStamped;
-use audiocloud_api::{DesiredTaskPlayState, DestinationPadId, PadMetering, SourcePadId};
+use audiocloud_api::{DesiredTaskPlayState, InputPadId, PadMetering, OutputPadId};
 
 use crate::tasks::task::TaskActor;
 use crate::tasks::NotifyEngineEvent;

@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -6,6 +8,7 @@ use std::thread;
 
 use anyhow::anyhow;
 use askama::Template;
+use dasp::sample::ToSample;
 use flume::{Receiver, Sender};
 use once_cell::sync::OnceCell;
 use reaper_medium::{ChunkCacheHint, ControlSurface, MediaTrack, ProjectContext, Reaper, TrackDefaultsBehavior};
@@ -18,9 +21,9 @@ use audiocloud_api::audio_engine::event::EngineEvent;
 use audiocloud_api::audio_engine::CompressedAudio;
 use audiocloud_api::cloud::domains::FixedInstanceRouting;
 use audiocloud_api::common::media::{PlayId, RenderId, RequestPlay};
-use audiocloud_api::common::model::MultiChannelValue;
-use audiocloud_api::common::task::{MixerChannels, NodeConnection, NodePadId, TaskSpec};
+use audiocloud_api::common::task::{MixerChannels, NodeConnection, TaskSpec};
 use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, FixedInstanceId, NodeConnectionId};
+use audiocloud_api::{ChannelMask, InputPadId, NodePadId, OutputPadId, PadMetering};
 use project::EngineProject;
 
 use crate::audio_engine::project::EngineProjectTemplateSnapshot;
@@ -299,13 +302,13 @@ impl ReaperEngine {
                                     session_id: AppTaskId,
                                     play_id: PlayId,
                                     audio: CompressedAudio,
-                                    peak_meters: HashMap<NodePadId, MultiChannelValue>)
+                                    peak_metering: HashMap<NodePadId, PadMetering>)
                                     -> anyhow::Result<()> {
         let dynamic_reports = Default::default();
         let event = EngineEvent::Playing { task_id: session_id,
                                            play_id,
                                            audio,
-                                           peak_meters,
+                                           peak_metering,
                                            dynamic_reports };
         debug!(?event);
 
@@ -322,7 +325,8 @@ impl ControlSurface for ReaperEngine {
             match cmd {
                 ReaperEngineCommand::Audio(session_id, play_id, audio) => {
                     if let Some(session) = self.sessions.get(&session_id) {
-                        let _ = self.send_playing_audio_event(session_id, play_id, audio, session.get_peak_meters());
+                        let peaks = session.get_peak_meters();
+                        let _ = self.send_playing_audio_event(session_id, play_id, audio, peaks);
                     } else {
                         warn!(%session_id, "Session not found");
                     }
@@ -403,15 +407,15 @@ impl<'a> ConnectionTemplate<'a> {
 
     fn source_reaper_channel(&self) -> i32 {
         match self.connection.from_channels {
-            MixerChannels::Mono(start) => (start | 1024) as i32,
-            MixerChannels::Stereo(start) => start as i32,
+            ChannelMask::Mono(start) => (start | 1024) as i32,
+            ChannelMask::Stereo(start) => start as i32,
         }
     }
 
     fn dest_reaper_channel(&self) -> i32 {
         match self.connection.to_channels {
-            MixerChannels::Mono(start) => (start | 1024) as i32,
-            MixerChannels::Stereo(start) => start as i32,
+            ChannelMask::Mono(start) => (start | 1024) as i32,
+            ChannelMask::Stereo(start) => start as i32,
         }
     }
 }
@@ -424,7 +428,7 @@ pub(crate) fn get_track_uuid(track: MediaTrack) -> Uuid {
     Uuid::try_parse(&s[1..s.len() - 1]).unwrap_or_else(|_| Uuid::new_v4())
 }
 
-pub(crate) fn append_track(flow_id: &NodePadId, context: ProjectContext) -> anyhow::Result<(MediaTrack, Uuid)> {
+fn append_track(pad_id: &NodePadId, context: ProjectContext) -> anyhow::Result<(MediaTrack, Uuid)> {
     let reaper = Reaper::get();
 
     let index = reaper.count_tracks(context);
@@ -434,8 +438,10 @@ pub(crate) fn append_track(flow_id: &NodePadId, context: ProjectContext) -> anyh
     let track = reaper.get_track(context, index)
                       .ok_or_else(|| anyhow!("failed to get track we just created"))?;
 
+    let pad_id = pad_id.to_string();
+
     unsafe {
-        reaper.get_set_media_track_info_set_name(track, flow_id.to_string().as_str());
+        reaper.get_set_media_track_info_set_name(track, pad_id.as_str());
     }
 
     let track_id = get_track_uuid(track);

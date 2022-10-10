@@ -6,25 +6,26 @@ use reaper_medium::{MediaTrack, ProjectContext};
 use tracing::*;
 use uuid::Uuid;
 
-use crate::audio_engine::project::{get_track_peak_meters, EngineProject, EngineProjectTemplateSnapshot};
-use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk, ConnectionTemplate};
 use audiocloud_api::cloud::domains::FixedInstanceRouting;
-use audiocloud_api::common::model::MultiChannelValue;
 use audiocloud_api::common::task::{FixedInstanceNode, NodePadId};
 use audiocloud_api::newtypes::{FixedInstanceId, FixedInstanceNodeId};
+use audiocloud_api::{InputPadId, PadMetering, OutputPadId};
+
+use crate::audio_engine::project::{get_track_peak_meters, EngineProject, EngineProjectTemplateSnapshot};
+use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk, ConnectionTemplate};
 
 #[derive(Debug)]
 pub struct EngineFixedInstance {
-    fixed_id:       FixedInstanceNodeId,
-    send_flow_id:   NodePadId,
-    return_flow_id: NodePadId,
-    send_id:        Uuid,
-    return_id:      Uuid,
-    reainsert_id:   Uuid,
-    send_track:     MediaTrack,
-    return_track:   MediaTrack,
-    spec:           FixedInstanceNode,
-    routing:        Option<FixedInstanceRouting>,
+    fixed_id:      FixedInstanceNodeId,
+    send_pad_id: InputPadId,
+    return_pad_id: OutputPadId,
+    send_id:       Uuid,
+    return_id:     Uuid,
+    reainsert_id:  Uuid,
+    send_track:    MediaTrack,
+    return_track:  MediaTrack,
+    spec:          FixedInstanceNode,
+    routing:       Option<FixedInstanceRouting>,
 }
 
 impl EngineFixedInstance {
@@ -34,25 +35,26 @@ impl EngineFixedInstance {
                spec: FixedInstanceNode,
                routing: Option<FixedInstanceRouting>)
                -> anyhow::Result<Self> {
-        let send_flow_id = NodePadId::FixedInstanceInput(fixed_id.clone());
-        let return_flow_id = NodePadId::FixedInstanceOutput(fixed_id.clone());
+        let send_flow_id = InputPadId::FixedInstanceInput(fixed_id.clone());
+        let return_flow_id = OutputPadId::FixedInstanceOutput(fixed_id.clone());
+
         let reainsert_id = Uuid::new_v4();
 
         project.focus()?;
 
-        let (send_track, send_id) = append_track(&send_flow_id, project.context())?;
-        let (return_track, return_id) = append_track(&return_flow_id, project.context())?;
+        let (send_track, send_id) = append_track(&send_flow_id.clone().into(), project.context())?;
+        let (return_track, return_id) = append_track(&return_flow_id.clone().into(), project.context())?;
 
-        Ok(Self { fixed_id,
-                  send_flow_id,
-                  return_flow_id,
-                  send_id,
-                  return_id,
-                  reainsert_id,
-                  spec,
-                  send_track,
-                  return_track,
-                  routing })
+        Ok(Self { fixed_id:      { fixed_id },
+                  send_pad_id:   { send_flow_id },
+                  return_pad_id: { return_flow_id },
+                  send_id:       { send_id },
+                  return_id:     { return_id },
+                  reainsert_id:  { reainsert_id },
+                  spec:          { spec },
+                  send_track:    { send_track },
+                  return_track:  { return_track },
+                  routing:       { routing }, })
     }
 
     pub(crate) fn delete(&self, context: ProjectContext) {
@@ -70,12 +72,12 @@ impl EngineFixedInstance {
         }
     }
 
-    pub fn get_input_flow_id(&self) -> &NodePadId {
-        &self.send_flow_id
+    pub fn get_input_flow_id(&self) -> &InputPadId {
+        &self.send_pad_id
     }
 
-    pub fn get_output_flow_id(&self) -> &NodePadId {
-        &self.return_flow_id
+    pub fn get_output_flow_id(&self) -> &OutputPadId {
+        &self.return_pad_id
     }
 
     pub fn get_input_track(&self) -> MediaTrack {
@@ -134,12 +136,12 @@ impl EngineFixedInstance {
         Ok(())
     }
 
-    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, MultiChannelValue>) {
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, PadMetering>) {
         if let Some(routing) = self.routing {
-            peaks.insert(self.send_flow_id.clone(),
+            peaks.insert(self.send_pad_id.clone().into(),
                          get_track_peak_meters(self.send_track, routing.send_count));
 
-            peaks.insert(self.return_flow_id.clone(),
+            peaks.insert(self.return_pad_id.clone().into(),
                          get_track_peak_meters(self.return_track, routing.return_count));
         }
     }

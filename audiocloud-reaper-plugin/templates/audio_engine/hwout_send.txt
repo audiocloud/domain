@@ -1,5 +1,5 @@
 <TRACK
-    NAME "{{ instance.send_flow_id.to_string() }}"
+    NAME "{{ instance.send_pad_id.to_string() }}"
     NCHAN {{ instance.send_count() }}
     VOLPAN 1.0 0.0 -1.0
     MUTESOLO 0 0 0
@@ -9,7 +9,7 @@
     {% for (send_channel, track_channel) in self.reaper_channel_pairs() %}
     HWOUT {{ send_channel }} 0 1.000 0.000 0 0 {{ track_channel }} -1:U -1
     {% endfor %}
-    {% for (id, connection) in project.flows_to(instance.send_flow_id) %}
+    {% for (id, connection) in project.flows_to(instance.send_pad_id) %}
     {{ ConnectionTemplate::new(project, id, connection) }}
     {% endfor %}
 >

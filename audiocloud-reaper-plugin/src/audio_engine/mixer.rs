@@ -1,30 +1,32 @@
-use askama::Template;
-use reaper_medium::{MediaTrack, ProjectContext, Reaper, TrackAttributeKey};
 use std::collections::HashMap;
 use std::ffi::CStr;
+
+use askama::Template;
+use reaper_medium::{MediaTrack, ProjectContext, Reaper, TrackAttributeKey};
 use tracing::*;
 use uuid::Uuid;
+
+use audiocloud_api::common::media::RequestRender;
+use audiocloud_api::common::task::{MixerNode, NodePadId};
+use audiocloud_api::newtypes::MixerNodeId;
+use audiocloud_api::{InputPadId, OutputPadId, PadMetering};
 
 use crate::audio_engine::project::{
     get_track_peak_meters, set_track_master_send, EngineProject, EngineProjectTemplateSnapshot,
 };
 use crate::audio_engine::ConnectionTemplate;
 use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk};
-use audiocloud_api::common::media::RequestRender;
-use audiocloud_api::common::model::MultiChannelValue;
-use audiocloud_api::common::task::{MixerNode, NodePadId};
-use audiocloud_api::newtypes::MixerNodeId;
 
 #[derive(Debug)]
 pub struct AudioMixer {
-    mixer_id:       MixerNodeId,
-    input_flow_id:  NodePadId,
-    output_flow_id: NodePadId,
-    input_id:       Uuid,
-    output_id:      Uuid,
-    input_track:    MediaTrack,
-    output_track:   MediaTrack,
-    spec:           MixerNode,
+    mixer_id:      MixerNodeId,
+    input_pad_id:  InputPadId,
+    output_pad_id: OutputPadId,
+    input_id:      Uuid,
+    output_id:     Uuid,
+    input_track:   MediaTrack,
+    output_track:  MediaTrack,
+    spec:          MixerNode,
 }
 
 impl AudioMixer {
@@ -37,22 +39,22 @@ impl AudioMixer {
 impl AudioMixer {
     #[instrument(skip_all, err)]
     pub fn new(project: &EngineProject, mixer_id: MixerNodeId, spec: MixerNode) -> anyhow::Result<Self> {
-        let input_flow_id = NodePadId::MixerInput(mixer_id.clone());
-        let output_flow_id = NodePadId::MixerOutput(mixer_id.clone());
+        let input_pad_id = InputPadId::MixerInput(mixer_id.clone());
+        let output_pad_id = OutputPadId::MixerOutput(mixer_id.clone());
 
         project.focus()?;
 
-        let (input_track, input_id) = append_track(&input_flow_id, project.context())?;
-        let (output_track, output_id) = append_track(&output_flow_id, project.context())?;
+        let (input_track, input_id) = append_track(&input_pad_id.clone().into(), project.context())?;
+        let (output_track, output_id) = append_track(&output_pad_id.clone().into(), project.context())?;
 
-        Ok(Self { mixer_id,
-                  input_flow_id,
-                  output_flow_id,
-                  input_id,
-                  output_id,
-                  input_track,
-                  output_track,
-                  spec })
+        Ok(Self { mixer_id:      { mixer_id },
+                  input_pad_id:  { input_pad_id },
+                  output_pad_id: { output_pad_id },
+                  input_id:      { input_id },
+                  output_id:     { output_id },
+                  input_track:   { input_track },
+                  output_track:  { output_track },
+                  spec:          { spec }, })
     }
 
     pub fn get_input_track(&self) -> MediaTrack {
@@ -80,12 +82,12 @@ impl AudioMixer {
         Ok(())
     }
 
-    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, MultiChannelValue>) {
-        peaks.insert(self.input_flow_id.clone(),
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, PadMetering>) {
+        peaks.insert(self.input_pad_id.clone().into(),
                      get_track_peak_meters(self.input_track, self.spec.input_channels));
 
-        peaks.insert(self.output_flow_id.clone(),
-                     get_track_peak_meters(self.input_track, self.spec.input_channels));
+        peaks.insert(self.output_pad_id.clone().into(),
+                     get_track_peak_meters(self.output_track, self.spec.output_channels));
     }
 
     pub fn set_master_send(&mut self, master_send: bool) {

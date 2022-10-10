@@ -5,14 +5,14 @@ use actix_broker::BrokerIssue;
 
 use audiocloud_api::audio_engine::CompressedAudio;
 use audiocloud_api::domain::streaming::DiffStamped;
-use audiocloud_api::{now, DestinationPadId, PadMetering, SourcePadId};
+use audiocloud_api::{now, InputPadId, PadMetering, OutputPadId};
 
 use crate::sockets::get_sockets_supervisor;
 use crate::tasks::messages::NotifyStreamingPacket;
 use crate::tasks::task::TaskActor;
 
 impl TaskActor {
-    pub(crate) fn merge_input_peak_meters(&mut self, input_peak_meters: HashMap<DestinationPadId, PadMetering>) {
+    pub(crate) fn merge_input_peak_meters(&mut self, input_peak_meters: HashMap<InputPadId, PadMetering>) {
         for (pad_id, metering) in input_peak_meters {
             self.packet
                 .node_inputs
@@ -22,7 +22,7 @@ impl TaskActor {
         }
     }
 
-    pub(crate) fn merge_output_peak_meters(&mut self, output_peak_meters: HashMap<SourcePadId, PadMetering>) {
+    pub(crate) fn merge_output_peak_meters(&mut self, output_peak_meters: HashMap<OutputPadId, PadMetering>) {
         for (pad_id, metering) in output_peak_meters {
             self.packet
                 .node_outputs

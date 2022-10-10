@@ -1,5 +1,5 @@
 <TRACK
-    NAME "{{ instance.return_flow_id.to_string() }}"
+    NAME "{{ instance.return_pad_id.to_string() }}"
     NCHAN 2
     VOLPAN 1.0 0.0 -1.0
     MUTESOLO 0 0 0

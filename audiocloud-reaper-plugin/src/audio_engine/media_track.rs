@@ -6,24 +6,25 @@ use reaper_medium::{MediaTrack, ProjectContext};
 use tracing::*;
 use uuid::Uuid;
 
+use audiocloud_api::common::task::{TrackMedia, TrackNode, UpdateTaskTrackMedia};
+use audiocloud_api::newtypes::{AppId, AppMediaObjectId, TrackMediaId, TrackNodeId};
+use audiocloud_api::{NodePadId, OutputPadId, PadMetering};
+
 use crate::audio_engine;
 use crate::audio_engine::media_item::{EngineMediaItem, EngineMediaItemTemplate};
 use crate::audio_engine::project::{get_track_peak_meters, EngineProject, EngineProjectTemplateSnapshot};
 use crate::audio_engine::{append_track, delete_track, set_track_chunk};
-use audiocloud_api::common::model::MultiChannelValue;
-use audiocloud_api::common::task::{NodePadId, TrackMedia, TrackNode, UpdateTaskTrackMedia};
-use audiocloud_api::newtypes::{AppId, AppMediaObjectId, TrackMediaId, TrackNodeId};
 
 #[derive(Debug)]
 pub struct EngineMediaTrack {
-    id:       TrackNodeId,
-    track_id: Uuid,
-    app_id:   AppId,
-    flow_id:  NodePadId,
-    track:    MediaTrack,
-    media:    HashMap<TrackMediaId, EngineMediaItem>,
-    spec:     TrackNode,
-    root_dir: PathBuf,
+    id:            TrackNodeId,
+    track_id:      Uuid,
+    app_id:        AppId,
+    output_pad_id: OutputPadId,
+    track:         MediaTrack,
+    media:         HashMap<TrackMediaId, EngineMediaItem>,
+    spec:          TrackNode,
+    root_dir:      PathBuf,
 }
 
 impl EngineMediaTrack {
@@ -38,9 +39,9 @@ impl EngineMediaTrack {
 
         let root_dir = project.shared_media_root_dir();
 
-        let flow_id = NodePadId::TrackOutput(track_id.clone());
+        let output_pad_id = OutputPadId::TrackOutput(track_id.clone());
 
-        let (track, id) = append_track(&flow_id, project.context())?;
+        let (track, id) = append_track(&output_pad_id.clone().into(), project.context())?;
 
         let mut media = HashMap::new();
 
@@ -49,14 +50,14 @@ impl EngineMediaTrack {
                          EngineMediaItem::new(track, &root_dir, &app_id, media_id, media_spec, existing_media)?);
         }
 
-        let rv = Self { track_id: id,
-                        app_id,
-                        id: track_id,
-                        flow_id,
-                        track,
-                        media,
-                        spec,
-                        root_dir };
+        let rv = Self { track_id:      { id },
+                        app_id:        { app_id },
+                        id:            { track_id },
+                        output_pad_id: { output_pad_id },
+                        track:         { track },
+                        media:         { media },
+                        spec:          { spec },
+                        root_dir:      { root_dir }, };
 
         Ok(rv)
     }
@@ -66,8 +67,8 @@ impl EngineMediaTrack {
         delete_track(context, self.track);
     }
 
-    pub fn get_flow_id(&self) -> &NodePadId {
-        &self.flow_id
+    pub fn get_output_pad_id(&self) -> &OutputPadId {
+        &self.output_pad_id
     }
 
     pub fn get_state_chunk(&self, project: &EngineProjectTemplateSnapshot) -> anyhow::Result<String> {
@@ -99,7 +100,7 @@ impl EngineMediaTrack {
             media_item.update(update);
             Ok(media_item.on_media_updated(&self.root_dir, media))
         } else {
-            Err(anyhow::anyhow!("No media item found for {}", media_id))
+            Err(anyhow::anyhow!("No media item found for {media_id}"))
         }
     }
 
@@ -134,8 +135,8 @@ impl EngineMediaTrack {
         Ok(())
     }
 
-    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, MultiChannelValue>) {
-        peaks.insert(self.flow_id.clone(),
+    pub fn fill_peak_meters(&self, peaks: &mut HashMap<NodePadId, PadMetering>) {
+        peaks.insert(self.output_pad_id.clone().into(),
                      get_track_peak_meters(self.track, self.spec.channels.num_channels()));
     }
 }
