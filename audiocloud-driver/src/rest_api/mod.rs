@@ -1,4 +1,5 @@
 use actix_web::web;
+
 mod v1;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {

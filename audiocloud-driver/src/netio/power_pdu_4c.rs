@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use actix::{
-    Actor, ActorFutureExt, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running, spawn, Supervised,
+    spawn, Actor, ActorFutureExt, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running, Supervised,
     WrapFuture,
 };
 use futures::TryFutureExt;
@@ -19,10 +19,10 @@ use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_models::netio::PowerPdu4CReports;
 
-use crate::{Command, emit_event, InstanceConfig};
-use crate::driver::{Driver, DriverActor};
 use crate::driver::Result;
+use crate::driver::{Driver, DriverActor};
 use crate::http_client::get_http_client;
+use crate::{emit_event, Command, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Config {
@@ -37,8 +37,8 @@ impl InstanceConfig for Config {
         let base_url = Url::parse(&self.address)?;
 
         Ok(DriverActor::start_supervised_recipient(PowerPdu4c { id,
-                                                      config: self,
-                                                      base_url }))
+                                                                config: self,
+                                                                base_url }))
     }
 }
 
@@ -55,6 +55,8 @@ impl Driver for PowerPdu4c {
     fn set_power_channel(&mut self, channel: usize, value: bool) -> Result {
         let id = self.id.clone();
         let url = self.base_url.clone();
+
+        // TODO: wtf we don't actually update it ?!
 
         spawn(async move {
                   let url = url.join("/netio.json")?;
@@ -115,14 +117,14 @@ struct NetioPowerOutputAction {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct NetioPowerResponse {
+pub struct NetioPowerResponse {
     global_measure: NetioGlobalMeasure,
     outputs:        Vec<NetioPowerOutput>,
 }
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct NetioGlobalMeasure {
+pub struct NetioGlobalMeasure {
     voltage:              f64,
     frequency:            f64,
     total_current:        u32,
@@ -134,7 +136,7 @@ struct NetioGlobalMeasure {
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "PascalCase")]
-struct NetioPowerOutput {
+pub struct NetioPowerOutput {
     #[serde(rename = "ID")]
     id:           u32,
     name:         String,
@@ -148,7 +150,7 @@ struct NetioPowerOutput {
 
 #[derive(Serialize_repr, Deserialize_repr, Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
-enum PowerAction {
+pub enum PowerAction {
     Off = 0,
     On = 1,
     ShortOff = 2,
@@ -160,7 +162,7 @@ enum PowerAction {
 
 #[derive(Serialize_repr, Deserialize_repr, Clone, Copy, Debug, PartialEq)]
 #[repr(u32)]
-enum PowerState {
+pub enum PowerState {
     Off = 0,
     On = 1,
 }

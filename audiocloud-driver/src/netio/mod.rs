@@ -1,10 +1,15 @@
-use crate::{Command, InstanceConfig};
 use actix::{Actor, Recipient};
-use audiocloud_api::newtypes::FixedInstanceId;
 use serde::{Deserialize, Serialize};
+
+use audiocloud_api::newtypes::FixedInstanceId;
+
+use crate::{Command, InstanceConfig};
 
 pub mod power_pdu_4c;
 pub mod power_pdu_4c_mocked;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Config {

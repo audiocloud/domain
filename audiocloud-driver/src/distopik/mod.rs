@@ -1,7 +1,9 @@
-use crate::{Command, InstanceConfig};
 use actix::Recipient;
-use audiocloud_api::newtypes::FixedInstanceId;
 use serde::{Deserialize, Serialize};
+
+use audiocloud_api::newtypes::FixedInstanceId;
+
+use crate::{Command, InstanceConfig};
 
 #[cfg(unix)]
 pub mod dual_1084;

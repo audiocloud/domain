@@ -1,10 +1,8 @@
-use std::path::PathBuf;
-
-use clap::{Args, ValueEnum};
-use reqwest::Url;
-
 use audiocloud_api::cloud::domains::DomainConfig;
+use clap::{Args, ValueEnum};
 pub use messages::*;
+use reqwest::Url;
+use std::path::PathBuf;
 
 mod cloud;
 mod file;
