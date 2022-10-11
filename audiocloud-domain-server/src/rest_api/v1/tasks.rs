@@ -40,7 +40,7 @@ fn not_implemented_yet<T>(call: &'static str) -> Result<T, DomainError> {
                                       reason: "Not implemented yet".to_string(), })
 }
 
-#[get("/")]
+#[get("")]
 async fn list_tasks(responder: ApiResponder) -> ApiResponse<TaskSummaryList> {
     responder.respond(async move {
                  get_tasks_supervisor().send(ListTasks)
@@ -50,7 +50,7 @@ async fn list_tasks(responder: ApiResponder) -> ApiResponse<TaskSummaryList> {
              .await
 }
 
-#[post("/")]
+#[post("")]
 async fn create_task(responder: ApiResponder, create: Json<CreateTask>) -> ApiResponse<TaskCreated> {
     let create = messages::CreateTask { task_id:      create.0.task_id,
                                         reservations: create.0.reservations,
