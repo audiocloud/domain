@@ -5,7 +5,6 @@ use actix_web::{get, post, web, Error, Responder};
 use maplit::hashmap;
 
 use audiocloud_api::common::media::{PlayId, RenderId};
-use audiocloud_api::common::model::MultiChannelValue;
 use audiocloud_api::instance_driver::InstanceDriverCommand;
 use audiocloud_api::newtypes::{FixedInstanceId, ParameterId};
 
@@ -49,7 +48,7 @@ async fn get_parameters(path: web::Path<(String, String, String)>) -> impl Respo
 
 #[post("/{manufacturer}/{name}/{instance}/parameters")]
 async fn set_parameters(path: web::Path<(String, String, String)>,
-                        params: web::Json<HashMap<ParameterId, MultiChannelValue>>)
+                        params: web::Json<serde_json::Value>)
                         -> impl Responder {
     let instance_id = get_instance_id(path.into_inner());
 
@@ -64,13 +63,16 @@ async fn set_parameters(path: web::Path<(String, String, String)>,
 }
 
 #[post("/{manufacturer}/{name}/{instance}/parameters/{parameter_id}")]
-async fn set_parameter(path: web::Path<(String, String, String, ParameterId)>,
-                       value: web::Json<MultiChannelValue>)
+async fn set_parameter(path: web::Path<(String, String, String, String)>,
+                       value: web::Json<serde_json::Value>)
                        -> impl Responder {
     let (manufacturer, name, instance, parameter_id) = path.into_inner();
     let instance_id = get_instance_id((manufacturer, name, instance));
 
-    let command = InstanceDriverCommand::SetParameters(hashmap! { parameter_id => value.into_inner() });
+    let mut values = serde_json::Map::new();
+    values.insert(parameter_id, value.into_inner());
+
+    let command = InstanceDriverCommand::SetParameters(serde_json::Value::Object(values));
     let command = Command { instance_id, command };
 
     let rv = get_driver_supervisor().send(command)

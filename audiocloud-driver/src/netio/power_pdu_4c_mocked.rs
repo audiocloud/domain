@@ -7,12 +7,13 @@ use maplit::hashmap;
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-use audiocloud_api::common::model::{enumerate_multi_channel_value_bool, ModelValue};
+use audiocloud_api::common::model::ModelValue;
 use audiocloud_api::common::time::Timestamped;
 use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::newtypes::FixedInstanceId;
-use audiocloud_models::netio::netio_4c::*;
+use audiocloud_models::netio::PowerPdu4CReports;
 
+use crate::driver::{Driver, DriverActor, Result};
 use crate::{emit_event, Command, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -22,71 +23,32 @@ impl InstanceConfig for Config {
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
         info!(%id, config = ?self, "Creating instance");
 
-        Ok(Netio4cMocked { id, state: [false; 4] }.start().recipient())
+        let driver = Netio4cMocked { id,
+                                     state: vec![false; 4] };
+
+        Ok(DriverActor::start_supervised_recipient(driver))
     }
 }
 
 struct Netio4cMocked {
     id:    FixedInstanceId,
-    state: [bool; 4],
+    state: Vec<bool>,
 }
 
-impl Netio4cMocked {
-    pub fn emit(&self, evt: InstanceDriverEvent) {
-        emit_event(self.id.clone(), evt);
-    }
-}
+impl Driver for Netio4cMocked {
+    type Params = ();
+    type Reports = PowerPdu4CReports;
 
-impl Actor for Netio4cMocked {
-    type Context = Context<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for Netio4cMocked {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        ctx.run_interval(Duration::from_secs(60), Self::update);
-        self.update(ctx);
-    }
-}
-
-impl Netio4cMocked {
-    fn update(&mut self, ctx: &mut Context<Self>) {
-        let power_values = self.state
-                               .iter()
-                               .cloned()
-                               .map(ModelValue::Bool)
-                               .map(Timestamped::from)
-                               .map(Some)
-                               .collect();
-
-        self.emit(InstanceDriverEvent::Reports { reports: hashmap! { reports::POWER.clone() => power_values }, });
-    }
-}
-
-impl Handler<Command> for Netio4cMocked {
-    type Result = Result<(), InstanceDriverError>;
-
-    fn handle(&mut self, msg: Command, ctx: &mut Context<Self>) -> Self::Result {
-        match msg.command {
-            InstanceDriverCommand::CheckConnection => self.emit(InstanceDriverEvent::Connected),
-            InstanceDriverCommand::Stop
-            | InstanceDriverCommand::Play { .. }
-            | InstanceDriverCommand::Render { .. }
-            | InstanceDriverCommand::Rewind { .. } => return Err(InstanceDriverError::MediaNotPresent),
-            InstanceDriverCommand::SetParameters(mut p) => {
-                if let Some(power) = p.remove(&params::POWER) {
-                    for (i, value) in enumerate_multi_channel_value_bool(power) {
-                        self.state[i] = value;
-                    }
-                }
-
-                self.update(ctx);
-            }
-        }
-
+    fn set_power_channel(&mut self, channel: usize, value: bool) -> Result {
+        self.state[channel] = value;
         Ok(())
+    }
+
+    fn poll(&mut self) -> Option<Duration> {
+        Self::emit_reports(self.id.clone(),
+                           PowerPdu4CReports { power: Some(self.state.clone()),
+                                               ..Default::default() });
+
+        Some(Duration::from_secs(5))
     }
 }

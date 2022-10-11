@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use actix::{
-    spawn, Actor, ActorFutureExt, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running, Supervised,
+    Actor, ActorFutureExt, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running, spawn, Supervised,
     WrapFuture,
 };
 use futures::TryFutureExt;
@@ -17,10 +17,12 @@ use audiocloud_api::common::model::ModelValue;
 use audiocloud_api::common::time::{Timestamp, Timestamped};
 use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::newtypes::FixedInstanceId;
-use audiocloud_models::netio::netio_4c::*;
+use audiocloud_models::netio::PowerPdu4CReports;
 
+use crate::{Command, emit_event, InstanceConfig};
+use crate::driver::{Driver, DriverActor};
+use crate::driver::Result;
 use crate::http_client::get_http_client;
-use crate::{emit_event, Command, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Config {
@@ -34,10 +36,9 @@ impl InstanceConfig for Config {
         info!(%id, config = ?self, "Creating instance");
         let base_url = Url::parse(&self.address)?;
 
-        Ok(PowerPdu4c { id,
-                        config: self,
-                        base_url }.start()
-                                  .recipient())
+        Ok(DriverActor::start_supervised_recipient(PowerPdu4c { id,
+                                                      config: self,
+                                                      base_url }))
     }
 }
 
@@ -47,83 +48,14 @@ pub struct PowerPdu4c {
     base_url: Url,
 }
 
-impl Actor for PowerPdu4c {
-    type Context = Context<Self>;
+impl Driver for PowerPdu4c {
+    type Params = ();
+    type Reports = ();
 
-    fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for PowerPdu4c {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        ctx.run_interval(Duration::from_secs(60), Self::update);
-        self.update(ctx);
-    }
-}
-
-impl Handler<Command> for PowerPdu4c {
-    type Result = Result<(), InstanceDriverError>;
-
-    fn handle(&mut self, msg: Command, ctx: &mut Self::Context) -> Self::Result {
-        match msg.command {
-            InstanceDriverCommand::CheckConnection => { /* makes no sense to check connection */ }
-            InstanceDriverCommand::Stop
-            | InstanceDriverCommand::Play { .. }
-            | InstanceDriverCommand::Render { .. }
-            | InstanceDriverCommand::Rewind { .. } => {
-                return Err(InstanceDriverError::MediaNotPresent);
-            }
-            InstanceDriverCommand::SetParameters(mut params) => {
-                if let Some(power) = params.remove(&params::POWER) {
-                    let mut outputs = vec![];
-
-                    for (i, desired_state) in power.into_iter().enumerate() {
-                        if let Some(desired_state) = desired_state.and_then(ModelValue::into_bool) {
-                            let desired_state = if desired_state {
-                                PowerAction::On
-                            } else {
-                                PowerAction::Off
-                            };
-
-                            outputs.push(NetioPowerOutputAction { id:     (i + 1) as u32,
-                                                                  action: desired_state, });
-                        }
-                    }
-
-                    let netio_request = NetioPowerRequest { outputs };
-                    let url = self.base_url.clone();
-                    ctx.spawn(async move {
-                                  let url = url.join("/netio.json")?;
-                                  let response = get_http_client().post(url)
-                                                                  .json(&netio_request)
-                                                                  .send()
-                                                                  .await?
-                                                                  .json::<NetioPowerResponse>()
-                                                                  .await?;
-
-                                  anyhow::Result::<_>::Ok(response)
-                              }.into_actor(self)
-                               .map(|result, actor, _| match result {
-                                   Err(err) => {
-                                       emit_event(actor.id.clone(),
-                                                  InstanceDriverEvent::IOError { error: err.to_string() });
-                                   }
-                                   Ok(response) => {
-                                       Self::handle_response(actor.id.clone(), response);
-                                   }
-                               }));
-                }
-            }
-        }
-        Ok(())
-    }
-}
-
-impl PowerPdu4c {
-    fn update(&mut self, ctx: &mut Context<Self>) {
+    fn set_power_channel(&mut self, channel: usize, value: bool) -> Result {
         let id = self.id.clone();
         let url = self.base_url.clone();
+
         spawn(async move {
                   let url = url.join("/netio.json")?;
                   let response = get_http_client().get(url)
@@ -138,27 +70,32 @@ impl PowerPdu4c {
               }.map_err(|err| {
                    info!(?err, "Update failed");
                }));
-    }
 
+        Ok(())
+    }
+}
+
+impl PowerPdu4c {
     fn handle_response(id: FixedInstanceId, response: NetioPowerResponse) {
-        let mut power_values = Vec::new();
-        let mut current_values = Vec::new();
+        let mut power_values = vec![false; 4];
+        let mut current_values = vec![0.0; 4];
+        let mut reports = PowerPdu4CReports::default();
 
         for channel in response.outputs {
-            let power_value = Timestamped::from(ModelValue::Bool(channel.state == PowerState::On));
-            let current_value = Timestamped::from(ModelValue::Number(channel.current as f64 / 1000.0));
+            let power_value = channel.state == PowerState::On;
+            let current_value = channel.current as f64 / 1000.0;
             let channel_id = (channel.id as usize) - 1;
 
-            power_values.push(Some(power_value));
-            current_values.push(Some(current_value));
+            power_values[channel_id] = power_value;
+            current_values[channel_id] = current_value;
         }
 
-        let reports = hashmap! {
-            reports::POWER.clone() => power_values,
-            reports::CURRENT.clone() => current_values,
-        };
+        reports.power = Some(power_values);
+        reports.current = Some(current_values);
 
-        emit_event(id, InstanceDriverEvent::Reports { reports });
+        if let Ok(reports) = serde_json::to_value(&reports) {
+            emit_event(id, InstanceDriverEvent::Reports { reports });
+        }
     }
 }
 

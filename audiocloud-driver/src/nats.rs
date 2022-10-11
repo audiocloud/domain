@@ -69,8 +69,7 @@ async fn handle_commands(subscription: nats_aflowt::Subscription, instance_id: F
                     Ok(response) => {
                         let response = match response {
                             Ok(ok) => SerializableResult::Ok(ok),
-                            Err(err) => SerializableResult::Err { message: err.to_string(),
-                                                                  code:    500, },
+                            Err(err) => SerializableResult::Error(err),
                         };
 
                         debug!("Got response: {response:?}");

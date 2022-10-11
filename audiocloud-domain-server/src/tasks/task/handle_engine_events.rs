@@ -4,7 +4,7 @@ use actix::Handler;
 
 use audiocloud_api::audio_engine::{CompressedAudio, EngineEvent};
 use audiocloud_api::domain::streaming::DiffStamped;
-use audiocloud_api::{DesiredTaskPlayState, InputPadId, PadMetering, OutputPadId};
+use audiocloud_api::{DesiredTaskPlayState, InputPadId, OutputPadId, PadMetering};
 
 use crate::tasks::task::TaskActor;
 use crate::tasks::NotifyEngineEvent;
@@ -28,13 +28,11 @@ impl Handler<NotifyEngineEvent> for TaskActor {
             Playing { task_id,
                       play_id,
                       audio,
-                      output_peak_meters,
-                      input_peak_meters,
+                      peak_metering,
                       dynamic_reports, } => {
                 if &self.id == &task_id && self.engine.should_be_playing(&play_id) {
                     self.engine.set_actual_playing(play_id);
-                    self.merge_input_peak_meters(input_peak_meters);
-                    self.merge_output_peak_meters(output_peak_meters);
+                    self.merge_peak_meters(peak_metering);
                     self.push_compressed_audio(audio);
                     self.maybe_send_packet();
                 }

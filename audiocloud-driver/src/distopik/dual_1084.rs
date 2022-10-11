@@ -15,7 +15,9 @@ use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_api::{toggle_off, toggle_value, Stereo, ToggleOr};
 use audiocloud_models::distopik::{
-    Dual1084Parameters, Dual1084Preset, HIGH_PASS_FILTER_VALUES, INPUT_GAIN_VALUES, LOW_FREQ_VALUES, LOW_GAIN_VALUES,
+    Dual1084Parameters, Dual1084Preset, HIGH_FREQ_VALUES, HIGH_GAIN_VALUES, HIGH_MID_FREQ_VALUES, HIGH_MID_GAIN_VALUES,
+    HIGH_PASS_FILTER_VALUES, INPUT_GAIN_VALUES, LOW_FREQ_VALUES, LOW_GAIN_VALUES, LOW_MID_FREQ_VALUES,
+    LOW_MID_GAIN_VALUES, OUTPUT_PAD_VALUES,
 };
 
 use crate::utils::*;
@@ -191,6 +193,141 @@ impl Dual1084 {
                       output_pad: [UnirelRegion::new(7, 0..=2), UnirelRegion::new(7, 3..=5)],
                       eql_toggle: [UnirelRegion::new(3, 52..=52), UnirelRegion::new(1, 52..=52)] })
     }
+
+    fn set_input_gain(&mut self, left: ToggleOr<i64>, right: ToggleOr<i64>) {
+        self.input_gain[0].write_nrot_switch(&mut self.io_exp_data, repoint(left.to_f64(), &INPUT_GAIN_VALUES) as u16);
+        self.input_gain[1].write_nrot_switch(&mut self.io_exp_data,
+                                             repoint(right.to_f64(), &INPUT_GAIN_VALUES) as u16);
+
+        self.values.input_gain = Stereo { left, right };
+    }
+
+    fn set_high_pass_filter(&mut self, left: ToggleOr<u64>, right: ToggleOr<u64>) {
+        let rescaled = repoint(left.to_f64(), &HIGH_PASS_FILTER_VALUES);
+        self.high_pass_filter[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+        self.high_pass_filter[2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = repoint(right.to_f64(), &HIGH_PASS_FILTER_VALUES);
+        self.high_pass_filter[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+        self.high_pass_filter[3].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.high_pass_filter = Stereo { left, right };
+    }
+
+    fn set_low_gain(&mut self, left: f64, right: f64) {
+        let rescaled = rescale(left, &LOW_GAIN_VALUES, 128_f64);
+        self.low_gain[0].write(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = rescale(right, &LOW_GAIN_VALUES, 128_f64);
+        self.low_gain[1].write(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.low_gain = Stereo { left, right };
+    }
+
+    fn set_low_freq(&mut self, left: ToggleOr<u64>, right: ToggleOr<u64>) {
+        let rescaled = repoint(left.to_f64(), &LOW_FREQ_VALUES);
+        self.low_freq[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+        self.low_freq[2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = repoint(right.to_f64(), &LOW_FREQ_VALUES);
+        self.low_freq[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+        self.low_freq[3].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.low_freq = Stereo { left, right };
+    }
+
+    fn set_low_mid_gain(&mut self, left: f64, right: f64) {
+        let rescaled = rescale(left, &LOW_MID_GAIN_VALUES, 128.0);
+        self.low_mid_gain[0].write(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = rescale(right, &LOW_MID_GAIN_VALUES, 128.0);
+        self.low_mid_gain[1].write(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.low_mid_gain = Stereo { left, right };
+    }
+
+    fn set_low_mid_freq(&mut self, left: ToggleOr<u64>, right: ToggleOr<u64>) {
+        let rescaled = repoint(left.to_f64(), &LOW_MID_FREQ_VALUES);
+        self.low_mid_freq[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = repoint(right.to_f64(), &LOW_MID_FREQ_VALUES);
+        self.low_mid_freq[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.low_mid_freq = Stereo { left, right };
+    }
+
+    fn set_low_mid_width(&mut self, left: bool, right: bool) {
+        self.low_mid_width[0].write_switch(&mut self.io_exp_data, left as u16);
+        self.low_mid_width[1].write_switch(&mut self.io_exp_data, right as u16);
+
+        self.values.low_mid_width = Stereo { left, right };
+    }
+
+    fn set_high_mid_gain(&mut self, left: f64, right: f64) {
+        let rescaled = rescale(left, &HIGH_MID_GAIN_VALUES, 128.0);
+        self.high_mid_gain[0].write(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = rescale(right, &HIGH_MID_GAIN_VALUES, 128.0);
+        self.high_mid_gain[1].write(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.high_mid_gain = Stereo { left, right };
+    }
+
+    fn set_high_mid_freq(&mut self, left: ToggleOr<u64>, right: ToggleOr<u64>) {
+        let rescaled = repoint(left.to_f64(), &HIGH_MID_FREQ_VALUES);
+        self.high_mid_freq[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = repoint(right.to_f64(), &HIGH_MID_FREQ_VALUES);
+        self.high_mid_freq[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.high_mid_freq = Stereo { left, right };
+    }
+
+    fn set_high_mid_width(&mut self, left: bool, right: bool) {
+        self.high_mid_width[0].write_switch(&mut self.io_exp_data, left as u16);
+        self.high_mid_width[1].write_switch(&mut self.io_exp_data, right as u16);
+
+        self.values.high_mid_width = Stereo { left, right };
+    }
+
+    fn set_high_gain(&mut self, left: f64, right: f64) {
+        let rescaled = rescale(left, &HIGH_GAIN_VALUES, 128.0);
+        self.high_gain[0].write(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = rescale(right, &HIGH_GAIN_VALUES, 128.0);
+        self.high_gain[1].write(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.high_gain = Stereo { left, right };
+    }
+
+    fn set_high_freq(&mut self, left: ToggleOr<u64>, right: ToggleOr<u64>) {
+        let rescaled = repoint(left.to_f64(), &HIGH_FREQ_VALUES);
+        self.high_freq[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+        self.high_freq[2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = repoint(right.to_f64(), &HIGH_FREQ_VALUES);
+        self.high_freq[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+        self.high_freq[3].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.high_freq = Stereo { left, right };
+    }
+
+    fn set_output_pad(&mut self, left: ToggleOr<i64>, right: ToggleOr<i64>) {
+        let rescaled = repoint(left.to_f64(), &OUTPUT_PAD_VALUES);
+        self.output_pad[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        let rescaled = repoint(right.to_f64(), &OUTPUT_PAD_VALUES);
+        self.output_pad[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
+
+        self.values.output_pad = Stereo { left, right };
+    }
+
+    fn set_eql_toggle(&mut self, left: bool, right: bool) {
+        self.eql_toggle[0].write_switch(&mut self.io_exp_data, left as u16);
+        self.eql_toggle[1].write_switch(&mut self.io_exp_data, right as u16);
+
+        self.values.eql_toggle = Stereo { left, right };
+    }
 }
 
 impl Actor for Dual1084 {
@@ -212,119 +349,57 @@ impl Handler<Command> for Dual1084 {
                 let mut params = serde_json::from_value::<Dual1084Parameters>(params).map_err(|err| InstanceDriverError::ParameterDoesNotExist { error: err.to_string() })?;
 
                 if let Some(Stereo { left, right }) = params.input_gain.take() {
-                    self.input_gain[0].write_nrot_switch(&mut self.io_exp_data,
-                                                         repoint(left.to_f64(), &INPUT_GAIN_VALUES) as u16);
-                    self.input_gain[1].write_nrot_switch(&mut self.io_exp_data,
-                                                         repoint(right.to_f64(), &INPUT_GAIN_VALUES) as u16);
-
-                    self.values.input_gain = Stereo { left, right };
+                    self.set_input_gain(left, right);
                 }
                 if let Some(Stereo { left, right }) = params.high_pass_filter.take() {
-                    let rescaled = repoint(left.to_f64(), &HIGH_PASS_FILTER_VALUES);
-                    self.high_pass_filter[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    self.high_pass_filter[2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-
-                    let rescaled = repoint(right.to_f64(), &HIGH_PASS_FILTER_VALUES);
-                    self.high_pass_filter[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    self.high_pass_filter[3].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-
-                    self.values.high_pass_filter = Stereo { left, right };
+                    self.set_high_pass_filter(left, right);
                 }
                 if let Some(Stereo { left, right }) = params.low_gain.take() {
-                    let rescaled = rescale(left, &LOW_GAIN_VALUES, 128_f64);
-                    self.low_gain[0].write(&mut self.io_exp_data, rescaled as u16);
-
-                    let rescaled = rescale(right, &LOW_GAIN_VALUES, 128_f64);
-                    self.low_gain[1].write(&mut self.io_exp_data, rescaled as u16);
-
-                    self.values.low_gain = Stereo { left, right };
+                    self.set_low_gain(left, right);
                 }
                 if let Some(Stereo { left, right }) = params.low_freq.take() {
-                    let rescaled = repoint(left.to_f64(), &LOW_FREQ_VALUES);
-                    self.low_freq[0].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    self.low_freq[2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-
-                    let rescaled = repoint(right.to_f64(), &LOW_FREQ_VALUES);
-                    self.low_freq[1].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    self.low_freq[3].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-
-                    self.values.low_freq = Stereo { left, right };
+                    self.set_low_freq(left, right);
                 }
-                if let Some(low_mid_gain) = params.remove(&dual_1084::LOW_MID_GAIN) {
-                    for (ch, value) in low_mid_gain.into_iter().enumerate() {
-                        let rescaled = rescale_param(value, &self.low_mid_gain_param, ch, 128.0);
-                        self.low_mid_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-                    }
+                if let Some(Stereo { left, right }) = params.low_mid_gain.take() {
+                    self.set_low_mid_gain(left, right);
                 }
-                if let Some(low_mid_freq) = params.remove(&dual_1084::LOW_MID_FREQ) {
-                    for (ch, value) in low_mid_freq.into_iter().enumerate() {
-                        let rescaled = repoint_param(value, &self.low_mid_freq_param, ch);
-                        self.low_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    }
+                if let Some(Stereo { left, right }) = params.low_mid_freq.take() {
+                    self.set_low_mid_freq(left, right);
                 }
-                if let Some(low_mid_width) = params.remove(&dual_1084::LOW_MID_WIDTH) {
-                    for (ch, value) in low_mid_width.into_iter().enumerate() {
-                        //let rescaled = rescale_param(value, &self.low_mid_width_param,  , 128.0);
-                        if let Some(ModelValue::Bool(value)) = value {
-                            self.low_mid_width[ch].write_switch(&mut self.io_exp_data, value as u16);
-                        }
-                    }
+                if let Some(Stereo { left, right }) = params.low_mid_width.take() {
+                    self.set_low_mid_width(left, right);
                 }
-                if let Some(high_mid_gain) = params.remove(&dual_1084::HIGH_MID_GAIN) {
-                    for (ch, value) in high_mid_gain.into_iter().enumerate() {
-                        let rescaled = rescale_param(value, &self.high_mid_gain_param, ch, 128.0);
-                        self.high_mid_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-                    }
+                if let Some(Stereo { left, right }) = params.high_mid_gain.take() {
+                    self.set_high_mid_gain(left, right);
                 }
-                if let Some(high_mid_freq) = params.remove(&dual_1084::HIGH_MID_FREQ) {
-                    for (ch, value) in high_mid_freq.into_iter().enumerate() {
-                        let rescaled = repoint_param(value, &self.high_mid_freq_param, ch);
-                        self.high_mid_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    }
+                if let Some(Stereo { left, right }) = params.high_mid_freq.take() {
+                    self.set_high_mid_freq(left, right);
                 }
-                if let Some(high_mid_width) = params.remove(&dual_1084::HIGH_MID_WIDTH) {
-                    for (ch, value) in high_mid_width.into_iter().enumerate() {
-                        if let Some(ModelValue::Bool(value)) = value {
-                            self.high_mid_width[ch].write_switch(&mut self.io_exp_data, value as u16);
-                        }
-                    }
+                if let Some(Stereo { left, right }) = params.high_mid_width.take() {
+                    self.set_high_mid_width(left, right);
                 }
-                if let Some(high_gain) = params.remove(&dual_1084::HIGH_GAIN) {
-                    for (ch, value) in high_gain.into_iter().enumerate() {
-                        let rescaled = rescale_param(value, &self.high_gain_param, ch, 128.0);
-                        self.high_gain[ch].write(&mut self.io_exp_data, rescaled as u16);
-                    }
+                if let Some(Stereo { left, right }) = params.high_gain.take() {
+                    self.set_high_gain(left, right);
                 }
-                if let Some(high_freq) = params.remove(&dual_1084::HIGH_FREQ) {
-                    for (ch, value) in high_freq.into_iter().enumerate() {
-                        let rescaled = repoint_param(value, &self.high_freq_param, ch);
-                        self.high_freq[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                        self.high_freq[ch + 2].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    }
+                if let Some(Stereo { left, right }) = params.high_freq.take() {
+                    self.set_high_freq(left, right);
                 }
-                if let Some(output_pad) = params.remove(&dual_1084::OUTPUT_PAD) {
-                    for (ch, value) in output_pad.into_iter().enumerate() {
-                        let rescaled = repoint_param(value, &self.output_pad_param, ch);
-                        info!("repiont: {rescaled}");
-                        self.output_pad[ch].write_nrot_switch(&mut self.io_exp_data, rescaled as u16);
-                    }
+                if let Some(Stereo { left, right }) = params.output_pad.take() {
+                    self.set_output_pad(left, right);
                 }
-                if let Some(eql_toggle) = params.remove(&dual_1084::EQL_TOGGLE) {
-                    for (ch, value) in eql_toggle.into_iter().enumerate() {
-                        if let Some(ModelValue::Bool(value)) = value {
-                            self.eql_toggle[ch].write_switch(&mut self.io_exp_data, value as u16);
-                        }
-                    }
+                if let Some(Stereo { left, right }) = params.eql_toggle {
+                    self.set_eql_toggle(left, right);
                 }
 
                 // TODO: implement
                 // self.write_io_expanders();
                 Dual1084::set_io_expanders(&self);
 
-                self.issue_system_async(self.values.clone());
+                // self.issue_system_async(self.values.clone());
 
                 Ok(())
             }
+            InstanceDriverCommand::SetPowerChannel { .. } => Ok(()),
         }
     }
 }
