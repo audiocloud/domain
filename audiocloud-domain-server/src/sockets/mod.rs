@@ -20,6 +20,14 @@ static SOCKETS_SUPERVISOR: OnceCell<Addr<SocketsSupervisor>> = OnceCell::new();
 pub struct SocketsOpts {
     #[clap(flatten)]
     web_rtc: web_rtc::WebRtcOpts,
+
+    /// Number of milliseconds to wait between pinging sockets (RTC or WebSockets)
+    #[clap(long, env, default_value = "2500")]
+    socket_ping_interval: u64,
+
+    /// If no ping reply is received after this many milliseconds, the socket is considered dead and will be dropped
+    #[clap(long, env, default_value = "10000")]
+    socket_drop_timeout: u64,
 }
 
 fn get_next_socket_id() -> SocketId {

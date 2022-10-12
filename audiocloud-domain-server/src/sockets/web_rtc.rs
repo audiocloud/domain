@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use actix::{
     Actor, ActorContext, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, Message, WrapFuture,
@@ -22,8 +23,9 @@ use webrtc::peer_connection::RTCPeerConnection;
 
 use audiocloud_api::SocketId;
 
-use crate::sockets::get_sockets_supervisor;
 use crate::sockets::messages::{SocketReceived, SocketSend};
+use crate::sockets::web_sockets::WebSocketActor;
+use crate::sockets::{get_sockets_supervisor, Disconnect};
 
 static WEB_RTC_API: OnceCell<API> = OnceCell::new();
 
@@ -191,6 +193,14 @@ impl Handler<AddIceCandidate> for WebRtcActor {
                 Err(error.into())
             }
         }
+    }
+}
+
+impl Handler<Disconnect> for WebRtcActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: Disconnect, ctx: &mut Self::Context) -> Self::Result {
+        ctx.run_later(Duration::default(), |_, ctx| ctx.stop());
     }
 }
 

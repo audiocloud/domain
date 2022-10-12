@@ -7,7 +7,6 @@ use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use tracing::debug;
 
-mod instance;
 mod media;
 mod models;
 mod sys_props;

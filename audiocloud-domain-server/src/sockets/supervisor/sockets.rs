@@ -4,20 +4,29 @@ use actix::{Actor, Addr, Context, ContextFutureSpawner, Handler, WrapFuture};
 use derive_more::IsVariant;
 use futures::FutureExt;
 use nanoid::nanoid;
-use tracing::warn;
+use tracing::*;
 
 use audiocloud_api::domain::streaming::DomainServerMessage;
 use audiocloud_api::{Codec, MsgPack, SocketId};
 
 use crate::sockets::web_rtc::WebRtcActor;
 use crate::sockets::web_sockets::WebSocketActor;
-use crate::sockets::{SocketReceived, SocketSend, SocketsSupervisor};
+use crate::sockets::{Disconnect, SocketReceived, SocketSend, SocketsSupervisor};
 use crate::ResponseMedia;
 
 #[derive(Debug)]
 pub struct Socket {
     pub actor_addr:   SocketActorAddr,
     pub last_pong_at: Instant,
+}
+
+impl Drop for Socket {
+    fn drop(&mut self) {
+        match &self.actor_addr {
+            SocketActorAddr::WebRtc(socket) => socket.do_send(Disconnect),
+            SocketActorAddr::WebSocket(socket) => socket.do_send(Disconnect),
+        };
+    }
 }
 
 #[derive(Clone, Debug, IsVariant)]
@@ -27,8 +36,8 @@ pub enum SocketActorAddr {
 }
 
 impl Socket {
-    pub fn is_valid(&self) -> bool {
-        self.last_pong_at.elapsed() < Duration::from_secs(5)
+    pub fn is_valid(&self, socket_drop_timeout: u64) -> bool {
+        self.last_pong_at.elapsed() < Duration::from_millis(socket_drop_timeout)
         && match &self.actor_addr {
             SocketActorAddr::WebRtc(addr) => addr.connected(),
             SocketActorAddr::WebSocket(addr) => addr.connected(),
@@ -60,8 +69,8 @@ impl SocketsSupervisor {
                                  ctx: &mut Context<SocketsSupervisor>)
                                  -> anyhow::Result<()> {
         let cmd = match media {
-            ResponseMedia::MsgPack => SocketSend::Text(serde_json::to_string(&message)?),
-            ResponseMedia::Json => SocketSend::Bytes(MsgPack.serialize(&message)?.into()),
+            ResponseMedia::MsgPack => SocketSend::Bytes(MsgPack.serialize(&message)?.into()),
+            ResponseMedia::Json => SocketSend::Text(serde_json::to_string(&message)?),
         };
 
         match &socket.actor_addr {

@@ -26,14 +26,15 @@ use crate::fixed_instances::{
 use crate::DomainResult;
 
 pub struct FixedInstancesSupervisor {
-    instances: HashMap<FixedInstanceId, Instance>,
+    instances: HashMap<FixedInstanceId, SupervisedInstance>,
     db:        Db,
 }
 
-struct Instance {
+struct SupervisedInstance {
     address: Addr<InstanceActor>,
     config:  DomainFixedInstanceConfig,
     state:   Option<NotifyInstanceState>,
+    // TODO: current parameters and last known reports should go here
 }
 
 impl FixedInstancesSupervisor {
@@ -60,9 +61,9 @@ impl FixedInstancesSupervisor {
             }
 
             instances.insert(id.clone(),
-                             Instance { address: { Supervisor::start(move |_| actor) },
-                                        config:  { config.clone() },
-                                        state:   None, });
+                             SupervisedInstance { address: { Supervisor::start(move |_| actor) },
+                                                  config:  { config.clone() },
+                                                  state:   None, });
         }
 
         Ok((routing, Self { db, instances }))
@@ -108,9 +109,9 @@ impl Handler<NotifyDomainConfiguration> for FixedInstancesSupervisor {
                         let address = Supervisor::start(move |_| actor);
 
                         self.instances.insert(id.clone(),
-                                              Instance { address: { address },
-                                                         config:  { config },
-                                                         state:   { None }, });
+                                              SupervisedInstance { address: { address },
+                                                                   config:  { config },
+                                                                   state:   { None }, });
                     }
                     Err(error) => {
                         warn!(%id, %error, "Could not create instance actor");
