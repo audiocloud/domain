@@ -1,7 +1,9 @@
 #![allow(unused_variables)]
 
+use std::time::Duration;
 use actix::{
-    Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, StreamHandler, WrapFuture,
+    Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, Running, StreamHandler,
+    WrapFuture,
 };
 use actix_web::{get, web, HttpRequest, Responder};
 use actix_web_actors::ws;
@@ -13,7 +15,7 @@ use tracing::*;
 use audiocloud_api::newtypes::SecureKey;
 
 use crate::sockets::messages::{RegisterWebSocket, SocketReceived, SocketSend};
-use crate::sockets::{get_next_socket_id, get_sockets_supervisor, SocketId};
+use crate::sockets::{Disconnect, get_next_socket_id, get_sockets_supervisor, SocketId};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(ws_handler);
@@ -26,7 +28,10 @@ struct AuthParams {
 
 #[get("/ws")]
 async fn ws_handler(req: HttpRequest, stream: web::Payload) -> impl Responder {
-    let resp = ws::start(WebSocketActor { id: get_next_socket_id(), }, &req, stream);
+    let id = get_next_socket_id();
+    debug!(%id, "connected web_socket with");
+
+    let resp = ws::start(WebSocketActor { id }, &req, stream);
     resp
 }
 
@@ -39,6 +44,8 @@ impl Actor for WebSocketActor {
     type Context = WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
+        debug!(id = %self.id, "WebSocket started");
+
         let register_cmd = RegisterWebSocket { address: ctx.address(),
                                                id:      self.id.clone(), };
 
@@ -52,12 +59,19 @@ impl Actor for WebSocketActor {
                                 })
                                 .wait(ctx);
     }
+
+    fn stopped(&mut self, ctx: &mut Self::Context) {
+        debug!(id = %self.id, "WebSocket stopped");
+    }
 }
 
 impl StreamHandler<Result<ws::Message, ws::ProtocolError>> for WebSocketActor {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         match msg {
-            Ok(ws::Message::Ping(msg)) => ctx.pong(&msg),
+            Ok(ws::Message::Ping(msg)) => {
+                debug!(id = ?self.id, "PING");
+                ctx.pong(&msg)
+            }
             Ok(ws::Message::Text(text)) => {
                 get_sockets_supervisor().send(SocketReceived::Text(self.id.clone(), text.to_string()))
                                         .map(drop)
@@ -91,5 +105,13 @@ impl Handler<SocketSend> for WebSocketActor {
                 ctx.text(text);
             }
         }
+    }
+}
+
+impl Handler<Disconnect> for WebSocketActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: Disconnect, ctx: &mut Self::Context) -> Self::Result {
+        ctx.run_later(Duration::default(), |_, ctx| ctx.stop());
     }
 }

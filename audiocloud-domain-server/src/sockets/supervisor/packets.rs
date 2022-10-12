@@ -13,10 +13,13 @@ impl Handler<NotifyStreamingPacket> for SocketsSupervisor {
 
     fn handle(&mut self, msg: NotifyStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
         if let Some(members) = self.task_socket_members.get(&msg.task_id) {
-            let mut members =
-                members.iter()
-                       .filter_map(|socket| self.sockets.get(&socket.socket_id).filter(|socket| socket.is_valid()))
-                       .collect::<Vec<_>>();
+            let mut members = members.iter()
+                                     .filter_map(|socket| {
+                                         self.sockets
+                                             .get(&socket.socket_id)
+                                             .filter(|socket| socket.is_valid(self.opts.socket_drop_timeout))
+                                     })
+                                     .collect::<Vec<_>>();
 
             members.sort_by_key(|socket| if socket.actor_addr.is_web_rtc() { 1 } else { 0 });
 
