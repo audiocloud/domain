@@ -3,6 +3,7 @@ use clap::{Args, ValueEnum};
 pub use messages::*;
 use reqwest::Url;
 use std::path::PathBuf;
+use tracing::*;
 
 mod cloud;
 mod file;
@@ -49,6 +50,7 @@ pub enum ConfigSource {
     File,
 }
 
+#[instrument(skip_all, err)]
 pub async fn init(cfg: ConfigOpts) -> anyhow::Result<DomainConfig> {
     match cfg.config_source {
         ConfigSource::Cloud => Ok(cloud::get_config(cfg.cloud_url,

@@ -7,20 +7,31 @@ use nanoid::nanoid;
 use tracing::*;
 
 use audiocloud_api::domain::streaming::DomainServerMessage;
-use audiocloud_api::{Codec, MsgPack, SocketId};
+use audiocloud_api::{ClientSocketId, Codec, MsgPack, SocketId, Timestamped};
 
+use crate::sockets::supervisor::SupervisedClient;
 use crate::sockets::web_rtc::WebRtcActor;
 use crate::sockets::web_sockets::WebSocketActor;
-use crate::sockets::{Disconnect, SocketReceived, SocketSend, SocketsSupervisor};
+use crate::sockets::{Disconnect, SendToClient, SocketReceived, SocketSend, SocketsSupervisor};
 use crate::ResponseMedia;
 
 #[derive(Debug)]
-pub struct Socket {
-    pub actor_addr:   SocketActorAddr,
-    pub last_pong_at: Instant,
+pub struct SupervisedSocket {
+    pub actor_addr:    SocketActorAddr,
+    pub last_pong_at:  Instant,
+    pub init_complete: Timestamped<bool>,
 }
 
-impl Drop for Socket {
+impl SupervisedSocket {
+    pub(crate) fn score(&self) -> usize {
+        match self.actor_addr {
+            SocketActorAddr::WebRtc(_) => 10,
+            SocketActorAddr::WebSocket(_) => 1,
+        }
+    }
+}
+
+impl Drop for SupervisedSocket {
     fn drop(&mut self) {
         match &self.actor_addr {
             SocketActorAddr::WebRtc(socket) => socket.do_send(Disconnect),
@@ -35,7 +46,7 @@ pub enum SocketActorAddr {
     WebSocket(Addr<WebSocketActor>),
 }
 
-impl Socket {
+impl SupervisedSocket {
     pub fn is_valid(&self, socket_drop_timeout: u64) -> bool {
         self.last_pong_at.elapsed() < Duration::from_millis(socket_drop_timeout)
         && match &self.actor_addr {
@@ -47,23 +58,26 @@ impl Socket {
 
 impl SocketsSupervisor {
     pub(crate) fn send_to_socket_by_id(&mut self,
-                                       socket_id: &SocketId,
+                                       id: &ClientSocketId,
                                        message: DomainServerMessage,
                                        media: ResponseMedia,
                                        ctx: &mut <Self as Actor>::Context)
                                        -> anyhow::Result<()> {
-        match self.sockets.get(socket_id) {
-            None => {
-                warn!(?message, "Socket not found, dropping message");
-            }
-            Some(socket) => self.send_to_socket(socket, message, media, ctx)?,
+        debug!(?message, %id, "send");
+
+        match self.clients.get(&id.client_id) {
+            None => {}
+            Some(client) => match client.sockets.get(&id.socket_id) {
+                None => warn!(%id, ?message, "Socket not found, dropping message"),
+                Some(socket) => self.send_to_socket(socket, message, media, ctx)?,
+            },
         }
 
         Ok(())
     }
 
     pub(crate) fn send_to_socket(&self,
-                                 socket: &Socket,
+                                 socket: &SupervisedSocket,
                                  message: DomainServerMessage,
                                  media: ResponseMedia,
                                  ctx: &mut Context<SocketsSupervisor>)
@@ -84,6 +98,12 @@ impl SocketsSupervisor {
 
         Ok(())
     }
+
+    pub(crate) fn remove_socket(&mut self, id: &ClientSocketId) {
+        for client in self.clients.get_mut(&id.client_id) {
+            client.sockets.remove(&id.socket_id);
+        }
+    }
 }
 
 impl Handler<SocketReceived> for SocketsSupervisor {
@@ -91,5 +111,17 @@ impl Handler<SocketReceived> for SocketsSupervisor {
 
     fn handle(&mut self, msg: SocketReceived, ctx: &mut Self::Context) -> Self::Result {
         self.on_socket_message_received(msg, ctx);
+    }
+}
+
+impl Handler<SendToClient> for SocketsSupervisor {
+    type Result = ();
+
+    fn handle(&mut self, msg: SendToClient, ctx: &mut Self::Context) -> Self::Result {
+        let SendToClient { client_id: socket_id,
+                           message,
+                           media, } = msg;
+        // TODO: !!! implement me !!!
+        // let _ = self.send_to_socket_by_id(&socket_id, message, media, ctx);
     }
 }

@@ -3,6 +3,7 @@ use anyhow::anyhow;
 use clap::Args;
 use nanoid::nanoid;
 use once_cell::sync::OnceCell;
+use tracing::*;
 
 use audiocloud_api::{SecureKey, SocketId};
 pub use messages::*;
@@ -26,8 +27,12 @@ pub struct SocketsOpts {
     socket_ping_interval: u64,
 
     /// If no ping reply is received after this many milliseconds, the socket is considered dead and will be dropped
-    #[clap(long, env, default_value = "10000")]
+    #[clap(long, env, default_value = "15000")]
     socket_drop_timeout: u64,
+
+    /// If the socket fails to initialize (fully connect) in this many milliseconds, the socket is considered dead and will be dropped
+    #[clap(long, env, default_value = "15000")]
+    socket_init_timeout: u64,
 }
 
 fn get_next_socket_id() -> SocketId {
@@ -40,6 +45,7 @@ struct SocketMembership {
     socket_id:  SocketId,
 }
 
+#[instrument(skip_all, err)]
 pub fn init(cfg: SocketsOpts) -> anyhow::Result<()> {
     let web_rtc_cfg = cfg.web_rtc.clone();
     let supervisor = SocketsSupervisor::new(cfg);

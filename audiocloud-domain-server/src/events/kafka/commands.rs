@@ -15,6 +15,7 @@ use crate::events::messages::NotifyDomainSessionCommand;
 
 static KAFKA_DOMAIN_COMMANDS_LISTENER: OnceCell<Addr<KafkaDomainCommandsListener>> = OnceCell::new();
 
+#[instrument(skip_all, err)]
 pub async fn init(topic: String,
                   brokers: String,
                   username: String,

@@ -9,12 +9,14 @@ use audiocloud_api::domain::streaming::{DomainClientMessage, DomainServerMessage
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::{Codec, MsgPack};
 
-use crate::sockets::supervisor::SocketContext;
+use crate::sockets::supervisor::sockets::SupervisedSocket;
+use crate::sockets::supervisor::{SocketContext, SupervisedClient};
 use crate::sockets::{SocketMembership, SocketReceived, SocketsSupervisor};
 use crate::tasks::{get_tasks_supervisor, messages};
 use crate::{to_serializable, DomainSecurity, ResponseMedia};
 
 impl SocketsSupervisor {
+    #[instrument(skip_all)]
     pub fn on_socket_message_received(&mut self, message: SocketReceived, ctx: &mut <Self as Actor>::Context) {
         let (request, socket_id, use_json) = match message {
             SocketReceived::Bytes(socket_id, bytes) => match MsgPack.deserialize::<DomainClientMessage>(bytes.as_ref())
@@ -22,7 +24,7 @@ impl SocketsSupervisor {
                 Ok(request) => (request, socket_id, false),
                 Err(error) => {
                     warn!(%error, %socket_id, "Failed to decode message, dropping socket");
-                    self.sockets.remove(&socket_id);
+                    self.remove_socket(&socket_id);
                     return;
                 }
             },
@@ -30,18 +32,26 @@ impl SocketsSupervisor {
                 Ok(request) => (request, socket_id, true),
                 Err(error) => {
                     warn!(%error, %socket_id, "Failed to decode message, dropping socket");
-                    self.sockets.remove(&socket_id);
+                    self.remove_socket(&socket_id);
                     return;
                 }
             },
         };
 
-        let socket = match self.sockets.get_mut(&socket_id) {
+        debug!(?request, %socket_id, use_json, "Received");
+
+        let socket = match self.clients.get_mut(&socket_id.client_id) {
             None => {
-                warn!(%socket_id, "Received message from unknown socket, dropping message");
+                warn!(%socket_id, "Received message from unknown client, dropping message");
                 return;
             }
-            Some(socket) => socket,
+            Some(client) => match client.sockets.get_mut(&socket_id.socket_id) {
+                None => {
+                    warn!(%socket_id, "Received message from unknown socket, dropping message");
+                    return;
+                }
+                Some(socket) => socket,
+            },
         };
 
         let response_media = if use_json {
@@ -73,13 +83,21 @@ impl SocketsSupervisor {
                         })
                         .spawn(ctx);
             }
-            DomainClientMessage::RequestPeerConnection { request_id,
-                                                         description, } => {
+            DomainClientMessage::RequestPeerConnection { request_id } => {
                 let request = SocketContext { socket_id,
                                               request_id,
                                               media: ResponseMedia::MsgPack };
 
-                self.request_peer_connection(request, description, ctx);
+                self.request_peer_connection(request, ctx);
+            }
+            DomainClientMessage::AnswerPeerConnection { socket_id: rtc_socket_id,
+                                                        request_id,
+                                                        answer, } => {
+                let request = SocketContext { socket_id,
+                                              request_id,
+                                              media: ResponseMedia::MsgPack };
+
+                self.on_peer_connection_remote_answer(request, rtc_socket_id, answer, ctx);
             }
             DomainClientMessage::SubmitPeerConnectionCandidate { request_id,
                                                                  socket_id: rtc_socket_id,
@@ -97,10 +115,11 @@ impl SocketsSupervisor {
 
                 let result = if secure_key_is_valid {
                     let socket_id = socket_id.clone();
-                    self.task_socket_members
-                        .entry(task_id)
+                    self.clients
+                        .entry(socket_id.client_id.clone())
                         .or_default()
-                        .insert(SocketMembership { secure_key, socket_id });
+                        .memberships
+                        .insert(task_id, secure_key);
 
                     Ok(())
                 } else {
@@ -113,11 +132,11 @@ impl SocketsSupervisor {
                 let _ = self.send_to_socket_by_id(&socket_id, response, response_media, ctx);
             }
             DomainClientMessage::RequestDetachFromTask { request_id, task_id } => {
-                let result = match self.task_socket_members.get_mut(&task_id) {
-                    Some(sockets) => {
-                        sockets.retain(|membership| &membership.socket_id != &socket_id);
-                        Ok(())
-                    }
+                let result = match self.clients
+                                       .get_mut(&socket_id.client_id)
+                                       .and_then(|client| client.memberships.remove(&task_id))
+                {
+                    Some(_) => Ok(()),
                     None => Err(DomainError::TaskNotFound { task_id }),
                 };
 

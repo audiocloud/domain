@@ -28,7 +28,6 @@ nats-aflowt = "0.16"
 regex = "1"
 askama = "0.11"
 bytes = "1"
-webrtc = "0.5"
 itertools = "0.10"
 tokio-util = "0.7"
 stream_throttle = "0.4"
@@ -37,6 +36,11 @@ derive_more = "0.99"
 mime = "0.3"
 nanoid = "0.4"
 globwalk = "0.8"
+
+[dependencies.datachannel]
+version = "0.7.9"
+default_features = false
+features = ["tracing", "static"]
 
 [dependencies.sqlx]
 version = "0.6"

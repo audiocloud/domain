@@ -8,11 +8,13 @@ use once_cell::sync::OnceCell;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use stream_throttle::{ThrottlePool, ThrottleRate, ThrottledStream};
+use tracing::*;
 
 use audiocloud_api::{Codec, Json, MsgPack, Request};
 
 static NATS_CONNECTION: OnceCell<Connection> = OnceCell::new();
 
+#[instrument(skip_all, err)]
 pub async fn init(nats_url: &str) -> anyhow::Result<()> {
     let conn = connect(nats_url).await?;
     NATS_CONNECTION.set(conn)

@@ -1,33 +1,32 @@
+use std::default::Default;
 use std::sync::Arc;
 use std::time::Duration;
 
 use actix::{
-    Actor, ActorContext, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, Message, WrapFuture,
+    Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Message,
+    WrapFuture,
 };
+use actix_web::web::block;
 use anyhow::anyhow;
 use clap::Args;
+use datachannel::{
+    ConnectionState, DataChannelHandler, DataChannelInit, GatheringState, IceCandidate, PeerConnectionHandler,
+    Reliability, RtcConfig, RtcDataChannel, RtcPeerConnection, SessionDescription,
+};
 use futures::executor::block_on;
 use futures::FutureExt;
+use nanoid::nanoid;
 use once_cell::sync::OnceCell;
 use tracing::*;
-use webrtc::api::setting_engine::SettingEngine;
-use webrtc::api::{APIBuilder, API};
-use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
-use webrtc::data_channel::data_channel_message::DataChannelMessage;
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::ice::udp_network::{EphemeralUDP, UDPNetwork};
-use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-use webrtc::ice_transport::ice_server::RTCIceServer;
-use webrtc::peer_connection::configuration::RTCConfiguration;
-use webrtc::peer_connection::RTCPeerConnection;
 
-use audiocloud_api::SocketId;
+use audiocloud_api::domain::streaming::DomainServerMessage;
+use audiocloud_api::{ClientSocketId, Codec, MsgPack};
+use audiocloud_api::{RequestId, SocketId};
 
 use crate::sockets::messages::{SocketReceived, SocketSend};
 use crate::sockets::web_sockets::WebSocketActor;
-use crate::sockets::{get_sockets_supervisor, Disconnect};
-
-static WEB_RTC_API: OnceCell<API> = OnceCell::new();
+use crate::sockets::{get_sockets_supervisor, Disconnect, SendToClient, SocketConnected};
+use crate::ResponseMedia;
 
 #[derive(Args, Clone, Debug)]
 pub struct WebRtcOpts {
@@ -36,7 +35,7 @@ pub struct WebRtcOpts {
     enable_web_rtc: bool,
 
     /// List of ICE servers to use for WebRTC connections
-    #[clap(long, env, default_value = "stun:stun.google.com:19302")]
+    #[clap(long, env, default_value = "stun:stun.l.google.com:19302")]
     ice_servers: Vec<String>,
 
     /// Beginning of UDP port range to use for WebRTC (inclusive)
@@ -56,102 +55,163 @@ pub struct WebRtcOpts {
     web_rtc_use_native_ordering: bool,
 }
 
-impl WebRtcOpts {
-    pub fn get_ice_servers(&self) -> Vec<RTCIceServer> {
-        self.ice_servers
-            .iter()
-            .map(|ice_server| RTCIceServer { urls: vec![ice_server.clone()],
-                                             ..Default::default() })
-            .collect()
+struct ActorConnectionHandler {
+    actor: Addr<WebRtcActor>,
+}
+
+impl PeerConnectionHandler for ActorConnectionHandler {
+    type DCH = ActorDataChannelHandler;
+
+    fn data_channel_handler(&mut self) -> Self::DCH {
+        ActorDataChannelHandler { actor: self.actor.clone(), }
+    }
+
+    #[instrument(skip_all)]
+    fn on_candidate(&mut self, cand: IceCandidate) {
+        if let Ok(encoded) = serde_json::to_string(&cand) {
+            self.actor.do_send(OnLocalIceCandidate(Some(encoded)))
+        }
+    }
+
+    #[instrument(skip_all)]
+    fn on_gathering_state_change(&mut self, state: GatheringState) {
+        match state {
+            GatheringState::Complete => {
+                debug!("Tracing complete");
+                self.actor.do_send(OnLocalIceCandidate(None));
+            }
+            GatheringState::New => {
+                debug!("Tracing started");
+            }
+            GatheringState::InProgress => {
+                debug!("Tracing in progress");
+            }
+        }
+    }
+
+    fn on_connection_state_change(&mut self, state: ConnectionState) {
+        match state {
+            ConnectionState::Disconnected | ConnectionState::Failed | ConnectionState::Closed => {
+                self.actor.do_send(Closed);
+            }
+            _ => {}
+        }
+    }
+}
+
+struct ActorDataChannelHandler {
+    actor: Addr<WebRtcActor>,
+}
+
+impl DataChannelHandler for ActorDataChannelHandler {
+    fn on_open(&mut self) {
+        self.actor.do_send(Opened);
+    }
+
+    fn on_message(&mut self, msg: &[u8]) {
+        self.actor
+            .do_send(OnDataChannelMessage(bytes::Bytes::copy_from_slice(msg)));
+    }
+
+    fn on_closed(&mut self) {
+        self.actor.do_send(Closed);
     }
 }
 
 pub struct WebRtcActor {
-    peer_connection: RTCPeerConnection,
-    data_channel:    Arc<RTCDataChannel>,
-    id:              SocketId,
+    id:                  ClientSocketId,
+    initiator_socket_id: ClientSocketId,
+    peer_connection:     Box<RtcPeerConnection<ActorConnectionHandler>>,
+    data_channel:        Box<RtcDataChannel<ActorDataChannelHandler>>,
+    connected:           bool,
 }
 
 impl WebRtcActor {
-    pub async fn new(id: SocketId, remote_description: String, opts: &WebRtcOpts) -> anyhow::Result<(Self, String)> {
-        let api = WEB_RTC_API.get()
-                             .ok_or_else(|| anyhow!("WebRTC engine not initialized"))?;
+    pub fn new(id: ClientSocketId,
+               initiator_socket_id: ClientSocketId,
+               opts: &WebRtcOpts)
+               -> anyhow::Result<(Addr<Self>, String)> {
+        let config = RtcConfig::new(&opts.ice_servers).enable_ice_tcp()
+                                                      .enable_ice_udp_mux()
+                                                      .port_range_begin(opts.web_rtc_port_min)
+                                                      .port_range_end(opts.web_rtc_port_max);
 
-        let rtc_config = RTCConfiguration { ice_servers: opts.get_ice_servers(),
-                                            ..Default::default() };
+        let mut reliability = Reliability::default().max_retransmits(opts.web_rtc_max_retransmits);
 
-        let dc_config = RTCDataChannelInit { ordered: Some(opts.web_rtc_use_native_ordering),
-                                             max_retransmits: Some(opts.web_rtc_max_retransmits),
-                                             protocol: Some("audiocloud-events".to_owned()),
-                                             ..Default::default() };
+        if !opts.web_rtc_use_native_ordering {
+            reliability = reliability.unordered()
+        }
 
-        let peer_connection = api.new_peer_connection(rtc_config).await?;
-        let data_channel = peer_connection.create_data_channel("data", Some(dc_config)).await?;
+        let data_channel_init = DataChannelInit::default().reliability(reliability);
 
-        let local_description = peer_connection.create_offer(None).await?;
-        peer_connection.set_local_description(local_description.clone()).await?;
+        let mut local_description = String::new();
 
-        peer_connection.set_remote_description(serde_json::from_str(&remote_description)?)
-                       .await?;
+        let actor = Self::create({
+            let local_description = &mut local_description;
+            move |ctx| {
+                let mut peer_connection =
+                    RtcPeerConnection::new(&config, ActorConnectionHandler { actor: ctx.address() }).expect("Create peer connection");
 
-        let local_description = serde_json::to_string(&local_description)?;
+                let mut data_channel =
+                    peer_connection.create_data_channel_ex("data",
+                                                           ActorDataChannelHandler { actor: ctx.address() },
+                                                           &data_channel_init)
+                                   .expect("Create data channel");
 
-        Ok((Self { peer_connection,
-                   data_channel,
-                   id },
-            local_description))
+                *local_description = serde_json::to_string(&peer_connection.local_description().expect("Create local description")).expect("Local description to JSON");
+
+                let connected = false;
+
+                Self { peer_connection,
+                       data_channel,
+                       id,
+                       initiator_socket_id,
+                       connected }
+            }
+        });
+
+        Ok((actor, local_description))
     }
 }
 
 impl Actor for WebRtcActor {
     type Context = Context<Self>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {
-        debug!(ice_state = ?self.peer_connection.ice_connection_state(),
-               data_channel_state = ?self.data_channel.ready_state(),
-               "WebRTC connection started");
-
-        let addr = ctx.address();
-        block_on(self.data_channel.on_close({
-                                      let addr = addr.clone();
-                                      Box::new(move || {
-                                          let addr = addr.clone();
-                                          Box::pin(async move {
-                                              let _ = addr.send(Closed).await;
-                                          })
-                                      })
-                                  }));
-
-        block_on(self.data_channel.on_message({
-                                      let addr = addr.clone();
-                                      Box::new(move |data| {
-                                          let addr = addr.clone();
-                                          Box::pin(async move {
-                                              let _ = addr.send(OnMessage(data)).await;
-                                          })
-                                      })
-                                  }));
-    }
+    fn started(&mut self, ctx: &mut Self::Context) {}
 }
 
 impl Handler<Closed> for WebRtcActor {
     type Result = ();
 
     fn handle(&mut self, _: Closed, ctx: &mut Self::Context) {
-        debug!("DataChannel closed, Closing WebRTC connection");
-        let _ = block_on(self.peer_connection.close());
+        debug!("Closing WebRTC connection");
         ctx.stop();
     }
 }
 
-impl Handler<OnMessage> for WebRtcActor {
+impl Handler<OnDataChannelMessage> for WebRtcActor {
     type Result = ();
 
-    fn handle(&mut self, msg: OnMessage, ctx: &mut Self::Context) -> Self::Result {
-        get_sockets_supervisor().send(SocketReceived::Bytes(self.id.clone(), msg.0.data))
+    fn handle(&mut self, msg: OnDataChannelMessage, ctx: &mut Self::Context) -> Self::Result {
+        get_sockets_supervisor().send(SocketReceived::Bytes(self.id.clone(), msg.0))
                                 .map(drop)
                                 .into_actor(self)
                                 .spawn(ctx);
+    }
+}
+
+impl Handler<OnLocalIceCandidate> for WebRtcActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: OnLocalIceCandidate, ctx: &mut Self::Context) -> Self::Result {
+        get_sockets_supervisor().do_send(SendToClient {
+            client_id: self.id.client_id.clone(),
+            message: DomainServerMessage::SubmitPeerConnectionCandidate {
+                socket_id: { self.id.socket_id.clone() },
+                candidate: { msg.0 },
+            },
+            media: ResponseMedia::MsgPack,
+        });
     }
 }
 
@@ -159,38 +219,59 @@ impl Handler<SocketSend> for WebRtcActor {
     type Result = ();
 
     fn handle(&mut self, msg: SocketSend, ctx: &mut Self::Context) -> Self::Result {
-        match msg {
-            SocketSend::Bytes(bytes) => {
-                let data_channel = self.data_channel.clone();
-                let fut = async move { data_channel.send(&bytes).await };
-                fut.into_actor(self)
-                   .map(|res, actor, ctx| {
-                       if let Err(error) = res {
-                           error!(?error, "Failed to send data to WebRTC peer");
-                           ctx.stop();
-                       }
-                   })
-                   .spawn(ctx);
+        match (msg, self.connected) {
+            (SocketSend::Bytes(bytes), true) => {
+                if let Err(error) = self.data_channel.send(&bytes[..]) {
+                    warn!(%error, "Failed to send");
+                }
             }
-            SocketSend::Text(text) => {
-                error!(%text, "WebRTC actor  does not (yet) support sending text messages");
-            }
+            _ => {}
         }
     }
 }
 
-impl Handler<AddIceCandidate> for WebRtcActor {
+impl Handler<SetPeerAnswer> for WebRtcActor {
     type Result = anyhow::Result<()>;
 
-    fn handle(&mut self, msg: AddIceCandidate, ctx: &mut Self::Context) -> Self::Result {
-        match serde_json::from_str::<RTCIceCandidateInit>(&msg.candidate) {
-            Ok(candidate) => {
-                block_on(self.peer_connection.add_ice_candidate(candidate))?;
+    fn handle(&mut self, msg: SetPeerAnswer, ctx: &mut Self::Context) -> Self::Result {
+        let answer: SessionDescription = serde_json::from_str(&msg.answer)?;
+        debug!(id = %self.id, answer = ?answer.sdp, "Received Peer Answer");
+
+        self.peer_connection.set_remote_description(&answer)?;
+
+        Ok(())
+    }
+}
+
+impl Handler<Opened> for WebRtcActor {
+    type Result = ();
+
+    fn handle(&mut self, msg: Opened, ctx: &mut Self::Context) -> Self::Result {
+        self.connected = true;
+        get_sockets_supervisor().do_send(SocketConnected { socket_id: self.id.clone(), });
+    }
+}
+
+impl Handler<AddRemoteIceCandidate> for WebRtcActor {
+    type Result = anyhow::Result<()>;
+
+    fn handle(&mut self, msg: AddRemoteIceCandidate, ctx: &mut Self::Context) -> Self::Result {
+        match msg.candidate {
+            Some(candidate) => match serde_json::from_str::<IceCandidate>(&candidate) {
+                Ok(candidate) => {
+                    debug!(id = %self.id, ?candidate, "Add ICE candidate");
+                    self.peer_connection.add_remote_candidate(&candidate)?;
+
+                    Ok(())
+                }
+                Err(error) => {
+                    warn!(id = %self.id, %error, "Failed to parse ICE candidate");
+                    Err(error.into())
+                }
+            },
+            None => {
+                // end of gathering, but libdatachannel can't be informed of that
                 Ok(())
-            }
-            Err(error) => {
-                warn!(%error, id = %self.id, "Failed to parse ICE candidate");
-                Err(error.into())
             }
         }
     }
@@ -200,31 +281,41 @@ impl Handler<Disconnect> for WebRtcActor {
     type Result = ();
 
     fn handle(&mut self, msg: Disconnect, ctx: &mut Self::Context) -> Self::Result {
+        debug!(id = %self.id, "Asked to disconnect");
         ctx.run_later(Duration::default(), |_, ctx| ctx.stop());
     }
 }
 
 #[derive(Message)]
 #[rtype(result = "()")]
-struct OnMessage(DataChannelMessage);
+pub struct OnDataChannelMessage(bytes::Bytes);
 
 #[derive(Message)]
 #[rtype(result = "()")]
-struct Closed;
+pub struct OnLocalIceCandidate(Option<String>);
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Closed;
+
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct Opened;
 
 #[derive(Message)]
 #[rtype(result = "anyhow::Result<()>")]
-pub struct AddIceCandidate {
-    pub candidate: String,
+pub struct AddRemoteIceCandidate {
+    pub candidate: Option<String>,
+}
+
+#[derive(Message)]
+#[rtype(result = "anyhow::Result<()>")]
+pub struct SetPeerAnswer {
+    pub answer: String,
 }
 
 pub fn init(opts: &WebRtcOpts) -> anyhow::Result<()> {
-    let mut settings = SettingEngine::default();
-    settings.set_udp_network(UDPNetwork::Ephemeral(EphemeralUDP::new(opts.web_rtc_port_min, opts.web_rtc_port_max)?));
-    let api = APIBuilder::default().with_setting_engine(settings).build();
-
-    WEB_RTC_API.set(api)
-               .map_err(|_| anyhow!("WebRTC API already initialized"))?;
+    // datachannel::configure_logging();
 
     Ok(())
 }

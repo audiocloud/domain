@@ -2,6 +2,7 @@ use actix::{Actor, Addr, Handler, Supervised, Supervisor, SystemService};
 use anyhow::anyhow;
 use clap::Args;
 use once_cell::sync::OnceCell;
+use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, FixedInstanceRoutingMap};
 pub use messages::*;
@@ -22,6 +23,7 @@ pub fn get_tasks_supervisor() -> &'static Addr<TasksSupervisor> {
     TASKS_SUPERVISOR.get().expect("Tasks supervisor not initialized")
 }
 
+#[instrument(skip_all, err)]
 pub fn init(db: Db, opts: &TaskOpts, config: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<()> {
     let supervisor = TasksSupervisor::new(db, opts, config, routing)?;
 
@@ -31,8 +33,10 @@ pub fn init(db: Db, opts: &TaskOpts, config: &DomainConfig, routing: FixedInstan
     Ok(())
 }
 
-pub fn become_online() {
-    get_tasks_supervisor().do_send(BecomeOnline);
+#[instrument(skip_all, err)]
+pub async fn become_online() -> anyhow::Result<()> {
+    get_tasks_supervisor().send(BecomeOnline).await?;
+    Ok(())
 }
 
 #[derive(Args, Clone, Debug, Copy)]

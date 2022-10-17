@@ -7,6 +7,7 @@ use actix::{Addr, Handler, Supervised, Supervisor};
 use clap::Args;
 use derive_more::{Display, From, FromStr};
 use once_cell::sync::OnceCell;
+use tracing::*;
 use uuid::Uuid;
 
 pub use messages::*;
@@ -70,6 +71,7 @@ pub struct MediaOpts {
     pub max_downloads_batch: usize,
 }
 
+#[instrument(skip_all, err)]
 pub async fn init(cfg: MediaOpts, db: Db) -> anyhow::Result<Addr<MediaSupervisor>> {
     let service = MediaSupervisor::new(cfg, db)?;
 

@@ -7,11 +7,10 @@ impl Handler<NotifyTaskDeleted> for SocketsSupervisor {
     type Result = ();
 
     fn handle(&mut self, msg: NotifyTaskDeleted, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(accesses) = self.task_socket_members.remove(&msg.task_id) {
-            for access in accesses {
-                self.sockets.remove(&access.socket_id);
-            }
+        for clients in self.clients.values_mut() {
+            clients.memberships.remove(&msg.task_id);
         }
+
         self.prune_unlinked_access();
     }
 }

@@ -1,6 +1,7 @@
 #![allow(unused_variables)]
 
 use std::time::Duration;
+
 use actix::{
     Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, Running, StreamHandler,
     WrapFuture,
@@ -13,9 +14,10 @@ use serde::Deserialize;
 use tracing::*;
 
 use audiocloud_api::newtypes::SecureKey;
+use audiocloud_api::{ClientId, ClientSocketId};
 
 use crate::sockets::messages::{RegisterWebSocket, SocketReceived, SocketSend};
-use crate::sockets::{Disconnect, get_next_socket_id, get_sockets_supervisor, SocketId};
+use crate::sockets::{get_next_socket_id, get_sockets_supervisor, Disconnect, SocketId};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(ws_handler);
@@ -26,9 +28,9 @@ struct AuthParams {
     secure_key: SecureKey,
 }
 
-#[get("/ws")]
-async fn ws_handler(req: HttpRequest, stream: web::Payload) -> impl Responder {
-    let id = get_next_socket_id();
+#[get("/ws/{client_id}/{socket_id}")]
+async fn ws_handler(req: HttpRequest, id: web::Path<ClientSocketId>, stream: web::Payload) -> impl Responder {
+    let id = id.into_inner();
     debug!(%id, "connected web_socket with");
 
     let resp = ws::start(WebSocketActor { id }, &req, stream);
@@ -37,7 +39,7 @@ async fn ws_handler(req: HttpRequest, stream: web::Payload) -> impl Responder {
 
 #[derive(Debug)]
 pub struct WebSocketActor {
-    id: SocketId,
+    id: ClientSocketId,
 }
 
 impl Actor for WebSocketActor {
@@ -46,8 +48,8 @@ impl Actor for WebSocketActor {
     fn started(&mut self, ctx: &mut Self::Context) {
         debug!(id = %self.id, "WebSocket started");
 
-        let register_cmd = RegisterWebSocket { address: ctx.address(),
-                                               id:      self.id.clone(), };
+        let register_cmd = RegisterWebSocket { address:   ctx.address(),
+                                               socket_id: self.id.clone(), };
 
         get_sockets_supervisor().send(register_cmd)
                                 .into_actor(self)

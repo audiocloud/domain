@@ -1,3 +1,5 @@
+use tracing::*;
+
 use audiocloud_api::cloud::domains::{DomainCommandSource, DomainEventSink};
 pub use messages::*;
 
@@ -7,6 +9,7 @@ mod noop_events;
 mod kafka;
 mod messages;
 
+#[instrument(skip_all, err)]
 pub async fn init(commands: DomainCommandSource, events: DomainEventSink) -> anyhow::Result<()> {
     match commands {
         DomainCommandSource::Disabled => {

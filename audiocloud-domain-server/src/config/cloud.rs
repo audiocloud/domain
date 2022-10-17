@@ -13,6 +13,7 @@ use crate::config::NotifyDomainConfiguration;
 
 static CLOUD_REFRESH_CONFIG: OnceCell<Addr<CloudRefreshConfig>> = OnceCell::new();
 
+#[instrument(skip_all, err)]
 pub async fn get_config(url: Url, api_key: String, refresh_seconds: usize) -> anyhow::Result<DomainConfig> {
     let client = Client::new();
     let url = url.join("/v1/domains/config")?;

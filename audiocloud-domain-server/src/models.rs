@@ -8,6 +8,7 @@ use audiocloud_api::{Model, ModelId};
 
 use crate::db::Db;
 
+#[instrument(skip_all, err)]
 pub async fn init(cfg: &DomainConfig, db: Db) -> anyhow::Result<()> {
     let models = match &cfg.models {
         DomainModelSource::Inline { models } => models.clone(),

@@ -5,7 +5,7 @@ use clap::Args;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
-use tracing::debug;
+use tracing::*;
 
 mod media;
 mod models;
@@ -33,6 +33,7 @@ pub struct DataOpts {
     pub database_url: String,
 }
 
+#[instrument(skip_all, err)]
 pub async fn init(cfg: DataOpts) -> anyhow::Result<Db> {
     let database_url = &cfg.database_url;
     debug!(?database_url, "Initializing database");
