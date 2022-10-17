@@ -105,7 +105,7 @@ impl Uploader {
              Err(err) => {
                  warn!(%err, "upload failed");
 
-                 actor.restarting(ctx);
+                 actor.started(ctx);
              }
          })
          .spawn(ctx);
@@ -122,13 +122,6 @@ impl Actor for Uploader {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for Uploader {
-    #[instrument(skip(ctx))]
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         if self.state.retry > 5 {
             debug!("final failure");
 

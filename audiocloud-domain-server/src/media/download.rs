@@ -83,7 +83,7 @@ impl Downloader {
 
                  block_on(actor.save_and_notify());
 
-                 actor.restarting(ctx);
+                 actor.started(ctx);
              }
          })
          .spawn(ctx);
@@ -100,14 +100,8 @@ impl Downloader {
 impl Actor for Downloader {
     type Context = Context<Self>;
 
+    #[instrument(skip(self, ctx))]
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for Downloader {
-    #[instrument(skip(ctx))]
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         self.download.state.progress = 0.0;
 
         if self.download.state.retry > 5 {

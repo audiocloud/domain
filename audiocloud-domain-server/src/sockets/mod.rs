@@ -1,4 +1,4 @@
-use actix::{Addr, Supervisor};
+use actix::{Actor, Addr, Supervisor};
 use anyhow::anyhow;
 use clap::Args;
 use nanoid::nanoid;
@@ -52,7 +52,7 @@ pub fn init(cfg: SocketsOpts) -> anyhow::Result<()> {
 
     web_rtc::init(&web_rtc_cfg)?;
 
-    SOCKETS_SUPERVISOR.set(Supervisor::start(move |_| supervisor))
+    SOCKETS_SUPERVISOR.set(supervisor.start())
                       .map_err(|_| anyhow!("Sockets supervisor already initialized"))?;
 
     Ok(())

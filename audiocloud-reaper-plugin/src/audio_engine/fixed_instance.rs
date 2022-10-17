@@ -9,7 +9,7 @@ use uuid::Uuid;
 use audiocloud_api::cloud::domains::FixedInstanceRouting;
 use audiocloud_api::common::task::{FixedInstanceNode, NodePadId};
 use audiocloud_api::newtypes::{FixedInstanceId, FixedInstanceNodeId};
-use audiocloud_api::{InputPadId, PadMetering, OutputPadId};
+use audiocloud_api::{InputPadId, OutputPadId, PadMetering};
 
 use crate::audio_engine::project::{get_track_peak_meters, EngineProject, EngineProjectTemplateSnapshot};
 use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_chunk, ConnectionTemplate};
@@ -17,7 +17,7 @@ use crate::audio_engine::{append_track, beautify_chunk, delete_track, set_track_
 #[derive(Debug)]
 pub struct EngineFixedInstance {
     fixed_id:      FixedInstanceNodeId,
-    send_pad_id: InputPadId,
+    send_pad_id:   InputPadId,
     return_pad_id: OutputPadId,
     send_id:       Uuid,
     return_id:     Uuid,

@@ -122,12 +122,6 @@ impl Actor for TasksSupervisor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for TasksSupervisor {
-    fn restarting(&mut self, ctx: &mut Self::Context) {
         self.subscribe_task_events(ctx);
         self.subscribe_instance_events(ctx);
         self.subscribe_media_events(ctx);

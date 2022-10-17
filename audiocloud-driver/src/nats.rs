@@ -100,17 +100,9 @@ impl Actor for NatsService {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for NatsService {
-    fn restarting(&mut self, ctx: &mut Self::Context) {
         self.subscribe_system_async::<Event>(ctx);
     }
 }
-
-impl SystemService for NatsService {}
 
 impl<S: Serialize + Send, C: Codec + Send> Handler<Publish<S, C>> for NatsService {
     type Result = ();

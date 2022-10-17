@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use actix::{AsyncContext, Context, Supervisor};
+use actix::{Actor, AsyncContext, Context, Supervisor};
 use actix_broker::BrokerIssue;
 use tracing::*;
 
@@ -77,7 +77,7 @@ impl TasksSupervisor {
                     {
                         Ok(actor) => {
                             self.issue_system_async(NotifyTaskActivated { task_id: task_id.clone(), });
-                            actors.insert(task_id.clone(), Supervisor::start(move |_| actor));
+                            actors.insert(task_id.clone(), actor.start());
                         }
                         Err(error) => {
                             warn!(%error, "Failed to start task actor");

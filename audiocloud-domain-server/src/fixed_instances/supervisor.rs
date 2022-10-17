@@ -8,7 +8,7 @@ use actix::{
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
 use futures::executor::block_on;
-use tracing::warn;
+use tracing::*;
 
 use audiocloud_api::cloud::domains::{
     DomainConfig, DomainFixedInstanceConfig, FixedInstanceRouting, FixedInstanceRoutingMap,
@@ -61,7 +61,7 @@ impl FixedInstancesSupervisor {
             }
 
             instances.insert(id.clone(),
-                             SupervisedInstance { address: { Supervisor::start(move |_| actor) },
+                             SupervisedInstance { address: { actor.start() },
                                                   config:  { config.clone() },
                                                   state:   None, });
         }
@@ -73,13 +73,8 @@ impl FixedInstancesSupervisor {
 impl Actor for FixedInstancesSupervisor {
     type Context = Context<Self>;
 
+    #[instrument(skip_all)]
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for FixedInstancesSupervisor {
-    fn restarting(&mut self, ctx: &mut Self::Context) {
         self.subscribe_system_async::<NotifyDomainConfiguration>(ctx);
         self.subscribe_system_async::<NotifyInstancePowerChannelsChanged>(ctx);
     }
@@ -88,6 +83,7 @@ impl Supervised for FixedInstancesSupervisor {
 impl Handler<NotifyDomainConfiguration> for FixedInstancesSupervisor {
     type Result = ();
 
+    #[instrument(skip_all, name = "handle_notify_domain_configuration")]
     fn handle(&mut self, msg: NotifyDomainConfiguration, ctx: &mut Self::Context) -> Self::Result {
         let existing = self.instances
                            .iter()
@@ -106,7 +102,7 @@ impl Handler<NotifyDomainConfiguration> for FixedInstancesSupervisor {
             if let Ok(Some(model)) = block_on(self.db.get_model(&id.model_id())) {
                 match InstanceActor::new(id.clone(), config.clone(), model) {
                     Ok(actor) => {
-                        let address = Supervisor::start(move |_| actor);
+                        let address = actor.start();
 
                         self.instances.insert(id.clone(),
                                               SupervisedInstance { address: { address },

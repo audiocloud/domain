@@ -11,13 +11,13 @@ use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError
 use audiocloud_api::newtypes::{FixedInstanceId, ParameterId, ReportId};
 
 pub mod distopik;
+pub mod driver;
 pub mod http_client;
 pub mod nats;
 pub mod netio;
 pub mod rest_api;
 pub mod supervisor;
 pub mod utils;
-pub mod driver;
 
 pub type ConfigFile = HashMap<FixedInstanceId, DriverConfig>;
 

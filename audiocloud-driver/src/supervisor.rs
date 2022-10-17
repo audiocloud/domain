@@ -107,10 +107,8 @@ impl DriverSupervisor {
 
 impl Actor for DriverSupervisor {
     type Context = Context<Self>;
-}
 
-impl Supervised for DriverSupervisor {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
+    fn started(&mut self, ctx: &mut Self::Context) {
         warn!("Restarting instance_driver supervisor");
         self.subscribe_system_async::<NotifyInstanceValues>(ctx);
     }
