@@ -162,7 +162,9 @@ impl SocketsSupervisor {
                                     .next();
 
             if let Some(socket) = best_socket {
-                self.send_to_socket(socket, msg, ResponseMedia::MsgPack, ctx);
+                if let Err(error) = self.send_to_socket(socket, msg, ResponseMedia::MsgPack, ctx) {
+                    warn!(%error, "Failed to send to client's best socket");
+                }
 
                 Ok(())
             } else {

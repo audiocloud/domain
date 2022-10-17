@@ -18,6 +18,9 @@ pub mod sockets;
 pub mod tasks;
 pub mod tracker;
 
+#[cfg(test)]
+mod tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, PartialOrd, IsVariant)]
 pub enum ResponseMedia {
     MsgPack,
