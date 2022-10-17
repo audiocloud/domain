@@ -1,12 +1,9 @@
-use std::collections::HashMap;
-
 use actix_web::error::ErrorInternalServerError;
 use actix_web::{get, post, web, Error, Responder};
-use maplit::hashmap;
 
 use audiocloud_api::common::media::{PlayId, RenderId};
 use audiocloud_api::instance_driver::InstanceDriverCommand;
-use audiocloud_api::newtypes::{FixedInstanceId, ParameterId};
+use audiocloud_api::newtypes::FixedInstanceId;
 
 use crate::supervisor::get_driver_supervisor;
 use crate::{Command, GetInstances, GetValues};

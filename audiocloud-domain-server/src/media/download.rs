@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 
-use actix::{Actor, ActorContext, ActorFutureExt, Context, ContextFutureSpawner, Supervised, WrapFuture};
+use actix::{Actor, ActorContext, ActorFutureExt, Context, ContextFutureSpawner, WrapFuture};
 use actix_broker::BrokerIssue;
 use futures::executor::block_on;
 use reqwest::Client;
 use serde_json::json;
 use tokio::fs::File;
-use tokio::task::block_in_place;
+
 use tracing::*;
 
 use audiocloud_api::common::time::now;

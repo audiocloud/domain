@@ -6,7 +6,7 @@ use actix::{fut, MailboxError};
 use actix_web::body::{BoxBody, EitherBody};
 use actix_web::dev::Payload;
 use actix_web::error::{ErrorBadRequest, ErrorInternalServerError, ErrorUnauthorized};
-use actix_web::http::header::{Header, AUTHORIZATION};
+use actix_web::http::header::AUTHORIZATION;
 use actix_web::{get, web, FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder};
 use anyhow::anyhow;
 use clap::{Args, ValueEnum};
@@ -127,7 +127,7 @@ impl FromRequest for DomainSecurity {
     type Error = actix_web::Error;
     type Future = Ready<Result<Self, actix_web::Error>>;
 
-    fn from_request(req: &HttpRequest, payload: &mut Payload) -> Self::Future {
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let func = move || -> Result<Self, actix_web::Error> {
             let auth_opts =
                 req.app_data::<web::Data<RestOpts>>()

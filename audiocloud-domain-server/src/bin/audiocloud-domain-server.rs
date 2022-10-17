@@ -1,11 +1,11 @@
-use std::env;
-
 use actix_web::middleware::Logger;
 use actix_web::{web, App, HttpServer};
 use clap::Parser;
 use tracing::*;
 
-use audiocloud_domain_server::{config, db, events, fixed_instances, media, models, nats, rest_api, sockets, tasks};
+use audiocloud_domain_server::{
+    config, db, events, fixed_instances, media, models, nats, o11y, rest_api, sockets, tasks,
+};
 
 #[derive(Parser)]
 struct Opts {
@@ -38,6 +38,9 @@ struct Opts {
 
     #[clap(flatten)]
     rest: rest_api::RestOpts,
+
+    #[clap(flatten)]
+    o11y: o11y::O11yOpts,
 }
 
 #[actix_web::main]
@@ -46,14 +49,9 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = dotenv::dotenv();
 
-    if env::var("RUST_LOG").is_err() {
-        env::set_var("RUST_LOG",
-                     "info,audiocloud_domain_server=debug,audiocloud_api=debug,actix_server=warn,rdkafka=debug");
-    }
-
-    tracing_subscriber::fmt::init();
-
     let opts = Opts::parse();
+
+    let _o11y_guard = o11y::init(&opts.o11y)?;
 
     info!(source = %opts.config.describe(), "Loading config");
 
@@ -65,7 +63,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!(" ⚡ Database");
 
-    nats::init(&opts.nats_url).await?;
+    let _nats_guard = nats::init(&opts.nats_url).await?;
 
     info!(" ⚡ NATS");
 
@@ -89,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!(" ⚡ Cloud Events");
 
-    tasks::become_online();
+    tasks::become_online().await?;
 
     info!(" ⚡ Tasks (Online)");
 

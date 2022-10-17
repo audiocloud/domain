@@ -2,7 +2,7 @@ use actix::fut::LocalBoxActorFuture;
 use actix::{fut, ActorFutureExt, Handler, WrapFuture};
 
 use audiocloud_api::audio_engine::TaskRenderCancelled;
-use audiocloud_api::domain::tasks::TaskUpdated;
+
 use audiocloud_api::domain::DomainError;
 
 use crate::tasks::CancelRenderTask;

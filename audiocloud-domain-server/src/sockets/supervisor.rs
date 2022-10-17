@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use actix::{Actor, ActorFutureExt, Context, ContextFutureSpawner, Handler, Supervised, WrapFuture};
+use actix::{Actor, ActorFutureExt, Context, ContextFutureSpawner, Handler, WrapFuture};
 use tracing::*;
 
 use audiocloud_api::domain::streaming::DomainServerMessage::{AnswerPeerConnectionResponse, PeerConnectionResponse};

@@ -4,11 +4,11 @@ use actix_web::{get, web};
 use serde::Deserialize;
 
 use audiocloud_api::domain::streaming::StreamStats;
-use audiocloud_api::domain::DomainError;
+
 use audiocloud_api::{AppId, AppTaskId, PlayId, StreamingPacket, TaskId};
 
-use crate::rest_api::{bad_gateway, ApiResponder, ApiResponse, AppTaskIdPath};
-use crate::sockets::get_sockets_supervisor;
+use crate::rest_api::{bad_gateway, ApiResponder, ApiResponse};
+
 use crate::tasks::{get_tasks_supervisor, GenerateStreamStats, GetStreamPacket};
 use crate::DomainSecurity;
 

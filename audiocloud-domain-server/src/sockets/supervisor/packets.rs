@@ -1,15 +1,13 @@
 use actix::Handler;
-use itertools::Itertools;
-use tracing::*;
+
 use tracing::*;
 
 use audiocloud_api::domain::streaming::DomainServerMessage;
-use audiocloud_api::{AppTaskId, TaskEvent, TaskPermissions, Timestamped};
+use audiocloud_api::{AppTaskId, TaskEvent, TaskPermissions};
 
 use crate::sockets::supervisor::SupervisedClient;
 use crate::sockets::SocketsSupervisor;
 use crate::tasks::messages::NotifyStreamingPacket;
-use crate::ResponseMedia;
 
 impl Handler<NotifyStreamingPacket> for SocketsSupervisor {
     type Result = ();
@@ -23,7 +21,9 @@ impl Handler<NotifyStreamingPacket> for SocketsSupervisor {
                 let event = TaskEvent::StreamingPacket { packet: msg.packet.clone(), };
                 let msg = DomainServerMessage::TaskEvent { task_id: { msg.task_id.clone() },
                                                            event:   { event }, };
-                self.send_to_client(client_id, msg, ctx);
+                if let Err(error) = self.send_to_client(client_id, msg, ctx) {
+                    warn!(%error, %client_id, "Failed to send streaming packet to client");
+                }
             }
         }
     }

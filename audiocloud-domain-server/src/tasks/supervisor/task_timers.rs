@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use actix::{Actor, AsyncContext, Context, Supervisor};
+use actix::{Actor, AsyncContext, Context};
 use actix_broker::BrokerIssue;
 use tracing::*;
 

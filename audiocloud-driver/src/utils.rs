@@ -13,7 +13,7 @@ pub fn rescale_range(value: f64, from: Range<f64>, to: Range<f64>) -> f64 {
     (value_from / from_len) * to_len + to.start
 }
 
-pub fn rescale_param(value: Option<ModelValue>, range: &ModelParameter, ch: usize, to: f64) -> f64 {
+pub fn rescale_param(value: Option<ModelValue>, range: &ModelParameter, _ch: usize, to: f64) -> f64 {
     if let Some(ModelValue::Number(value)) = value {
         if let ModelValueOption::Range(ModelValue::Number(from_start), ModelValue::Number(from_end)) = range.values[0] {
             let value_from = value.max(from_start) - from_start;
@@ -55,7 +55,7 @@ pub fn rescale(value: f64, options: &[ModelValueOption], scale: f64) -> f64 {
     0_f64
 }
 
-pub fn repoint_param(value: Option<ModelValue>, ladder: &ModelParameter, ch: usize) -> f64 {
+pub fn repoint_param(value: Option<ModelValue>, ladder: &ModelParameter, _ch: usize) -> f64 {
     if let Some(ModelValue::Number(value)) = value {
         ladder.values
               .iter()

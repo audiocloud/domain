@@ -1,4 +1,3 @@
-use std::convert::identity;
 use std::time::Instant;
 
 use actix::{fut, Actor, ActorFutureExt, ContextFutureSpawner, MailboxError, WrapFuture};
@@ -9,9 +8,8 @@ use audiocloud_api::domain::streaming::{DomainClientMessage, DomainServerMessage
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::{Codec, MsgPack};
 
-use crate::sockets::supervisor::sockets::SupervisedSocket;
-use crate::sockets::supervisor::{SocketContext, SupervisedClient};
-use crate::sockets::{SocketMembership, SocketReceived, SocketsSupervisor};
+use crate::sockets::supervisor::SocketContext;
+use crate::sockets::{SocketReceived, SocketsSupervisor};
 use crate::tasks::{get_tasks_supervisor, messages};
 use crate::{to_serializable, DomainSecurity, ResponseMedia};
 

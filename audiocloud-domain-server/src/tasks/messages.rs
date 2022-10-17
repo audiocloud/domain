@@ -3,16 +3,16 @@ use std::collections::HashMap;
 use actix::Message;
 
 use audiocloud_api::audio_engine::event::EngineEvent;
-use audiocloud_api::common::change::{DesiredTaskPlayState, TaskState};
+use audiocloud_api::common::change::TaskState;
 use audiocloud_api::common::media::{MediaObject, RenderId};
-use audiocloud_api::common::task::TaskPermissions;
+
 use audiocloud_api::common::task::TaskSpec;
 use audiocloud_api::domain::streaming::StreamStats;
 use audiocloud_api::domain::tasks::{
     TaskCreated, TaskDeleted, TaskPlayStopped, TaskPlaying, TaskRenderCancelled, TaskRendering, TaskSought,
     TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec,
 };
-use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId, SecureKey};
+use audiocloud_api::newtypes::{AppMediaObjectId, AppTaskId, EngineId};
 use audiocloud_api::{
     CreateTaskReservation, CreateTaskSecurity, CreateTaskSpec, ModifyTaskSpec, PlayId, RequestCancelRender,
     RequestPlay, RequestRender, RequestSeek, RequestStopPlay, StreamingPacket, TaskReservation, TaskSecurity,

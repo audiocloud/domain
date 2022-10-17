@@ -1,6 +1,6 @@
 use actix::Handler;
 
-use audiocloud_api::audio_engine::{EngineCommand, TaskPlayStopped, TaskRenderCancelled};
+use audiocloud_api::audio_engine::{EngineCommand, TaskPlayStopped};
 use audiocloud_api::domain::DomainError;
 
 use crate::tasks::task::TaskActor;

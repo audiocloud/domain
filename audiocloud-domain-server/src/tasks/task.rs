@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use actix::{Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Supervised, WrapFuture};
+use actix::{Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, WrapFuture};
 use actix_broker::{BrokerIssue, BrokerSubscribe};
 use tracing::*;
 

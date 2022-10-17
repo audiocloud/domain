@@ -70,7 +70,7 @@ fn deserialize_captured_response() {
                       |}"#.trim_margin()
                           .expect("Failed to trim margin from captured JSON");
 
-    let netio_response =
+    let _netio_response =
         serde_json::from_str::<NetioPowerResponse>(raw_json.as_str()).expect("Captured response should deserialize");
 
     // TODO: assert values

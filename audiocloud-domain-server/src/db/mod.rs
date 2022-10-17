@@ -1,9 +1,8 @@
-use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 
 use clap::Args;
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqlitePoolOptions;
+
 use sqlx::SqlitePool;
 use tracing::*;
 

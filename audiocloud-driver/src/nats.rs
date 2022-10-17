@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use actix::{Actor, AsyncContext, Context, Handler, Message, Supervised, SystemService};
+use actix::{Actor, AsyncContext, Context, Handler, Message};
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
 use clap::Args;

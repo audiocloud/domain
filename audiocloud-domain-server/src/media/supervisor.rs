@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use actix::{
-    Actor, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Supervised, Supervisor, WrapFuture,
-};
+use actix::{Actor, Addr, AsyncContext, Context};
 use futures::executor::block_on;
 use reqwest::Client;
 use tracing::*;
 
-use audiocloud_api::{AppMediaObjectId, MediaDownload, MediaUpload};
+use audiocloud_api::{AppMediaObjectId, MediaUpload};
 
 use crate::db::Db;
 use crate::media::download::Downloader;
@@ -84,7 +82,7 @@ impl MediaSupervisor {
                                ctx: &mut Context<Self>) {
         match uploads {
             Ok(uploads) => {
-                let mut created = 0;
+                let created = 0;
                 for (id, upload) in uploads {
                     if actor.uploads.contains_key(&id) {
                         continue;

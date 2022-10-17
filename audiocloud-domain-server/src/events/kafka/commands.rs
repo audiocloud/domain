@@ -1,4 +1,4 @@
-use actix::{Actor, ActorContext, Addr, AsyncContext, Context, StreamHandler, Supervised, Supervisor};
+use actix::{Actor, ActorContext, Addr, AsyncContext, Context, StreamHandler};
 use actix_broker::BrokerIssue;
 use anyhow::anyhow;
 use once_cell::sync::OnceCell;

@@ -9,7 +9,7 @@ use crate::{Command, InstanceConfig};
 pub struct Config {}
 
 impl InstanceConfig for Config {
-    fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
+    fn create(self, _id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
         todo!()
     }
 }

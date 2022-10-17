@@ -1,11 +1,11 @@
 use actix::fut::LocalBoxActorFuture;
 use actix::{fut, ActorFutureExt, Handler, WrapFuture};
 
-use audiocloud_api::audio_engine::{TaskPlaying, TaskRendering, TaskSought};
-use audiocloud_api::domain::tasks::TaskUpdated;
+use audiocloud_api::audio_engine::TaskSought;
+
 use audiocloud_api::domain::DomainError;
 
-use crate::tasks::{PlayTask, RenderTask, SeekTask};
+use crate::tasks::SeekTask;
 use crate::DomainResult;
 
 use super::TasksSupervisor;

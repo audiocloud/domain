@@ -2,7 +2,7 @@ use actix::{Context, Handler};
 use actix_broker::BrokerSubscribe;
 
 use crate::tasks::supervisor::TasksSupervisor;
-use crate::tasks::{NotifyEngineEvent, NotifyTaskReservation, NotifyTaskSecurity, NotifyTaskSpec, NotifyTaskState};
+use crate::tasks::{NotifyTaskReservation, NotifyTaskSecurity, NotifyTaskSpec, NotifyTaskState};
 
 impl Handler<NotifyTaskState> for TasksSupervisor {
     type Result = ();

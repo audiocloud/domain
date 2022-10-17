@@ -4,12 +4,11 @@ use std::os::unix::prelude::*;
 use std::time::Duration;
 
 use actix::{Actor, Context, Handler, Recipient};
-use actix_broker::BrokerIssue;
+
 use nix::{ioctl_none, ioctl_write_ptr};
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-use audiocloud_api::common::model::{Model, ModelParameter, ModelValue};
 use audiocloud_api::common::time::{now, Timestamp};
 use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError};
 use audiocloud_api::newtypes::FixedInstanceId;
@@ -21,7 +20,7 @@ use audiocloud_models::distopik::{
 };
 
 use crate::utils::*;
-use crate::{Command, InstanceConfig, NotifyInstanceValues};
+use crate::{Command, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Config {
@@ -103,7 +102,7 @@ impl UnirelRegion {
 
     pub fn write_switch(&self, memory: &mut [[u16; 6]; 8], value: u16) {
         //writes a bit to a correct location in memory
-        for (i, bit) in self.bits.iter().copied().enumerate() {
+        for (_i, bit) in self.bits.iter().copied().enumerate() {
             write_bit_16(&mut memory[self.pot_id][(bit / 16) + 1], (bit % 16) as u16, value);
         }
         memory[self.pot_id][0] = 1;
@@ -337,7 +336,7 @@ impl Actor for Dual1084 {
 impl Handler<Command> for Dual1084 {
     type Result = Result<(), InstanceDriverError>;
 
-    fn handle(&mut self, msg: Command, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: Command, _ctx: &mut Self::Context) -> Self::Result {
         info!("in da loop");
         match msg.command {
             InstanceDriverCommand::CheckConnection => Ok(()),
@@ -345,7 +344,7 @@ impl Handler<Command> for Dual1084 {
             | InstanceDriverCommand::Play { .. }
             | InstanceDriverCommand::Render { .. }
             | InstanceDriverCommand::Rewind { .. } => Err(InstanceDriverError::MediaNotPresent),
-            InstanceDriverCommand::SetParameters(mut params) => {
+            InstanceDriverCommand::SetParameters(params) => {
                 let mut params = serde_json::from_value::<Dual1084Parameters>(params).map_err(|err| InstanceDriverError::ParameterDoesNotExist { error: err.to_string() })?;
 
                 if let Some(Stereo { left, right }) = params.input_gain.take() {
@@ -414,13 +413,13 @@ impl Dual1084 {
             //spi_data = [0; 9];
             for i in 0..4 {
                 if self.io_exp_data[io_boards[i] as usize][0] == 1 {
-                    if (j < 5 && (io_boards[i] != 7)) {
+                    if j < 5 && (io_boards[i] != 7) {
                         spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x12) << 16)
                                                           | swap_u16(self.io_exp_data[io_boards[i] as usize][j + 1])
                                                             as u32;
                         spi_data[8] |= 1 << io_boards[i];
                     }
-                    if (j == 0 && (io_boards[i] == 7)) {
+                    if j == 0 && (io_boards[i] == 7) {
                         spi_data[io_boards[i] as usize] = ((io_output_address[j] as u32 | 0x9) << 16)
                                                           | self.io_exp_data[io_boards[i] as usize][j + 1] as u32;
                         spi_data[8] |= 1 << io_boards[i];
