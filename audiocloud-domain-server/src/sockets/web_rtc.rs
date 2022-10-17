@@ -105,15 +105,18 @@ struct ActorDataChannelHandler {
 
 impl DataChannelHandler for ActorDataChannelHandler {
     fn on_open(&mut self) {
+        debug!("DataChannel opened");
         self.actor.do_send(Opened);
     }
 
     fn on_message(&mut self, msg: &[u8]) {
+        debug!("DataChannel received message");
         self.actor
             .do_send(OnDataChannelMessage(bytes::Bytes::copy_from_slice(msg)));
     }
 
     fn on_closed(&mut self) {
+        debug!("DataChannel closed");
         self.actor.do_send(Closed);
     }
 }

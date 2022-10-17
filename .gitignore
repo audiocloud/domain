@@ -278,3 +278,6 @@ dist
 .media
 *.sqlite
 *.sqlite-*
+/.cargo/config.toml
+/fleet.toml
+/installer.bin

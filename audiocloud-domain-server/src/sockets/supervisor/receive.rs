@@ -38,7 +38,7 @@ impl SocketsSupervisor {
             },
         };
 
-        debug!(?request, %socket_id, use_json, "Received");
+        trace!(?request, %socket_id, use_json, "Received");
 
         let socket = match self.clients.get_mut(&socket_id.client_id) {
             None => {

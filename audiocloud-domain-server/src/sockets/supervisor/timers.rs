@@ -16,11 +16,11 @@ impl SocketsSupervisor {
 
         for client in self.clients.values_mut() {
             client.sockets.retain(|id, socket| {
-                              if !*socket.init_complete.value() && socket.init_complete.elapsed() > max_init_wait_time {
+                              if socket.is_init_timed_out(self.opts.socket_init_timeout) {
                                   debug!(%id, "Supervisor cleaning up un-initialized socket");
                                   false
                               } else if !socket.is_valid(self.opts.socket_drop_timeout) {
-                                  debug!(%id, "Supervisor cleaning up disconnected socket");
+                                  debug!(%id, "Supervisor cleaning up timed-out or disconnected socket");
                                   false
                               } else {
                                   true
@@ -31,10 +31,12 @@ impl SocketsSupervisor {
         self.prune_unlinked_access();
     }
 
+    #[instrument(skip_all)]
     pub(crate) fn ping_active_sockets(&mut self, ctx: &mut Context<Self>) {
-        for client in self.clients.values() {
+        for (client_id, client) in &self.clients {
             for (socket_id, socket) in &client.sockets {
                 if !socket.is_valid(self.opts.socket_drop_timeout) {
+                    debug!(%client_id, %socket_id, "skipping");
                     continue;
                 }
 

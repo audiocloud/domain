@@ -1,6 +1,7 @@
 use actix::Handler;
 use itertools::Itertools;
 use tracing::*;
+use tracing::*;
 
 use audiocloud_api::domain::streaming::DomainServerMessage;
 use audiocloud_api::{AppTaskId, TaskEvent, TaskPermissions, Timestamped};
@@ -13,24 +14,16 @@ use crate::ResponseMedia;
 impl Handler<NotifyStreamingPacket> for SocketsSupervisor {
     type Result = ();
 
+    #[instrument(name = "handle_streaming_packet", skip(self, ctx))]
     fn handle(&mut self, msg: NotifyStreamingPacket, ctx: &mut Self::Context) -> Self::Result {
         // TODO: at some point we may want a lookup from app tasks to clients
-        for client in self.clients.values() {
+
+        for (client_id, client) in &self.clients {
             if self.client_can_on_task(client, &msg.task_id, TaskPermissions::can_audio) {
-                let best_socket = client.sockets
-                                        .values()
-                                        .filter(|socket| *socket.init_complete.value())
-                                        .filter(|socket| socket.is_valid(self.opts.socket_drop_timeout))
-                                        .sorted_by_key(|socket| socket.score())
-                                        .next();
-
-                if let Some(socket) = best_socket {
-                    let event = TaskEvent::StreamingPacket { packet: { msg.packet.clone() }, };
-                    let msg = DomainServerMessage::TaskEvent { task_id: { msg.task_id.clone() },
-                                                               event:   { event }, };
-
-                    self.send_to_socket(socket, msg, ResponseMedia::MsgPack, ctx);
-                }
+                let event = TaskEvent::StreamingPacket { packet: msg.packet.clone(), };
+                let msg = DomainServerMessage::TaskEvent { task_id: { msg.task_id.clone() },
+                                                           event:   { event }, };
+                self.send_to_client(client_id, msg, ctx);
             }
         }
     }
