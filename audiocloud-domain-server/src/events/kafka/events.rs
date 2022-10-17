@@ -14,11 +14,11 @@ use crate::events::messages::NotifyDomainEvent;
 static KAFKA_DOMAIN_EVENTS_SINK: OnceCell<Addr<KafkaDomainEventsSink>> = OnceCell::new();
 
 pub async fn init(topic: String, brokers: String, username: String, password: String) -> anyhow::Result<()> {
-    KAFKA_DOMAIN_EVENTS_SINK.set(Supervisor::start(move |_| KafkaDomainEventsSink { topic,
-                                                                                    brokers,
-                                                                                    username,
-                                                                                    password,
-                                                                                    producer: None }))
+    KAFKA_DOMAIN_EVENTS_SINK.set(KafkaDomainEventsSink { topic,
+                                                         brokers,
+                                                         username,
+                                                         password,
+                                                         producer: None }.start())
                             .map_err(|_| anyhow!("KAFKA_DOMAIN_EVENTS_SINK already initialized"))?;
 
     Ok(())
@@ -32,16 +32,9 @@ pub struct KafkaDomainEventsSink {
     producer: Option<BaseProducer>,
 }
 
-impl Actor for KafkaDomainEventsSink {
-    type Context = Context<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for KafkaDomainEventsSink {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
+impl KafkaDomainEventsSink {
+    #[instrument(skip_all)]
+    fn init(&mut self, ctx: &mut Context<Self>) {
         self.subscribe_system_async::<NotifyDomainEvent>(ctx);
 
         let config = super::create_config(&self.brokers, &self.username, &self.password);
@@ -51,9 +44,18 @@ impl Supervised for KafkaDomainEventsSink {
     }
 }
 
+impl Actor for KafkaDomainEventsSink {
+    type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        self.init(ctx);
+    }
+}
+
 impl Handler<NotifyDomainEvent> for KafkaDomainEventsSink {
     type Result = ();
 
+    #[instrument(skip_all, name = "handle_notify_domain_event")]
     fn handle(&mut self, msg: NotifyDomainEvent, ctx: &mut Self::Context) -> Self::Result {
         match self.producer.as_mut() {
             Some(producer) => match Json.serialize(&msg.event) {

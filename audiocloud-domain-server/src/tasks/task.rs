@@ -54,12 +54,6 @@ impl Actor for TaskActor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for TaskActor {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         self.notify_task_spec();
 
         self.notify_task_security();

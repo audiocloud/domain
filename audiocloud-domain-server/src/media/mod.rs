@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use actix::{Addr, Handler, Supervised, Supervisor};
+use actix::{Actor, Addr, Handler, Supervised, Supervisor};
 use clap::Args;
 use derive_more::{Display, From, FromStr};
 use once_cell::sync::OnceCell;
@@ -75,8 +75,7 @@ pub struct MediaOpts {
 pub async fn init(cfg: MediaOpts, db: Db) -> anyhow::Result<Addr<MediaSupervisor>> {
     let service = MediaSupervisor::new(cfg, db)?;
 
-    let addr = MEDIA_SUPERVISOR.get_or_init(move || Supervisor::start(move |_| service))
-                               .clone();
+    let addr = MEDIA_SUPERVISOR.get_or_init(move || service.start()).clone();
 
     Ok(addr)
 }

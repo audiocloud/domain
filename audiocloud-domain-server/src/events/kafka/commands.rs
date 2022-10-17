@@ -22,11 +22,11 @@ pub async fn init(topic: String,
                   password: String,
                   maybe_offset: Option<i64>)
                   -> anyhow::Result<()> {
-    KAFKA_DOMAIN_COMMANDS_LISTENER.set(Supervisor::start(move |_| KafkaDomainCommandsListener { topic,
-                                                                                                brokers,
-                                                                                                username,
-                                                                                                password,
-                                                                                                maybe_offset }))
+    KAFKA_DOMAIN_COMMANDS_LISTENER.set(KafkaDomainCommandsListener { topic,
+                                                                     brokers,
+                                                                     username,
+                                                                     password,
+                                                                     maybe_offset }.start())
                                   .map_err(|_| anyhow!("KAFKA_DOMAIN_COMMANDS_LISTENER already initialized"))?;
     Ok(())
 }
@@ -63,45 +63,12 @@ impl Actor for KafkaDomainCommandsListener {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for KafkaDomainCommandsListener {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        let mut init = || -> anyhow::Result<()> {
-            let config = super::create_config(&self.brokers, &self.username, &self.password);
-
-            let consumer = LoggingConsumer::from_config_and_context(&config, CustomContext)?;
-
-            let mut topics = TopicPartitionList::new();
-            topics.add_partition_offset(&self.topic, 0, match self.maybe_offset {
-                      None => Offset::OffsetTail(100),
-                      Some(offset) => Offset::Offset(offset as i64),
-                  })?;
-
-            consumer.assign(&topics)?;
-
-            let stream = futures::stream::unfold(consumer, |consumer| async move {
-                match consumer.recv().await {
-                    Ok(item) => Some((Ok(item.detach()), consumer)),
-                    Err(error) => {
-                        warn!(%error, "Error receiving item");
-                        None
-                    }
-                }
-            });
-
-            ctx.add_stream(stream);
-
-            Ok(())
-        };
-
-        init().expect("initialization success");
+        self.init(ctx).expect("initialization success");
     }
 }
 
 impl StreamHandler<KafkaResult<OwnedMessage>> for KafkaDomainCommandsListener {
+    #[instrument(skip_all, name = "handle_kafka_message")]
     fn handle(&mut self, item: KafkaResult<OwnedMessage>, ctx: &mut Self::Context) {
         match item {
             Ok(item) => {
@@ -111,6 +78,7 @@ impl StreamHandler<KafkaResult<OwnedMessage>> for KafkaDomainCommandsListener {
                 match item.payload() {
                     Some(payload) => match Json.deserialize(payload) {
                         Ok(command) => {
+                            trace!(?command, "Received");
                             self.issue_system_async(NotifyDomainSessionCommand { command });
                         }
                         Err(error) => {
@@ -127,5 +95,36 @@ impl StreamHandler<KafkaResult<OwnedMessage>> for KafkaDomainCommandsListener {
                 ctx.stop();
             }
         }
+    }
+}
+
+impl KafkaDomainCommandsListener {
+    #[instrument(skip_all, err)]
+    fn init(&mut self, ctx: &mut Context<Self>) -> anyhow::Result<()> {
+        let config = super::create_config(&self.brokers, &self.username, &self.password);
+
+        let consumer = LoggingConsumer::from_config_and_context(&config, CustomContext)?;
+
+        let mut topics = TopicPartitionList::new();
+        topics.add_partition_offset(&self.topic, 0, match self.maybe_offset {
+                  None => Offset::OffsetTail(100),
+                  Some(offset) => Offset::Offset(offset as i64),
+              })?;
+
+        consumer.assign(&topics)?;
+
+        let stream = futures::stream::unfold(consumer, |consumer| async move {
+            match consumer.recv().await {
+                Ok(item) => Some((Ok(item.detach()), consumer)),
+                Err(error) => {
+                    warn!(%error, "Error receiving item");
+                    None
+                }
+            }
+        });
+
+        ctx.add_stream(stream);
+
+        Ok(())
     }
 }

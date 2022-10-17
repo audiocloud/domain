@@ -36,6 +36,7 @@ impl MediaSupervisor {
                   media_root: { media_root }, })
     }
 
+    #[instrument(skip_all)]
     fn load_pending_downloads(&mut self, ctx: &mut Context<Self>) {
         match block_on(self.db.fetch_pending_download_jobs(self.opts.max_downloads_batch)) {
             Ok(downloads) => {
@@ -54,7 +55,7 @@ impl MediaSupervisor {
                                           download)
                     {
                         Ok(downloader) => {
-                            self.downloads.insert(id, Supervisor::start(move |_| downloader));
+                            self.downloads.insert(id, downloader.start());
                         }
                         Err(error) => {
                             warn!( % error, % id, "Failed to start downloader");
@@ -72,10 +73,12 @@ impl MediaSupervisor {
         }
     }
 
+    #[instrument(skip_all)]
     fn load_pending_uploads(&mut self, ctx: &mut Context<Self>) {
         let rv = block_on(self.db.fetch_pending_download_jobs(self.opts.max_uploads_batch));
     }
 
+    #[instrument(skip_all)]
     fn process_pending_uploads(uploads: anyhow::Result<HashMap<UploadJobId, MediaUpload>>,
                                actor: &mut Self,
                                ctx: &mut Context<Self>) {
@@ -96,7 +99,7 @@ impl MediaSupervisor {
                                         upload)
                     {
                         Ok(uploader) => {
-                            actor.uploads.insert(id, Supervisor::start(move |_| uploader));
+                            actor.uploads.insert(id, uploader.start());
                         }
                         Err(error) => {
                             warn!(%error, %id, "Failed to start uploader");
@@ -122,6 +125,7 @@ impl MediaSupervisor {
         rv
     }
 
+    #[instrument(skip_all)]
     fn update(&mut self, ctx: &mut Context<Self>) {
         self.clear_stale_downloads(ctx);
         self.clear_stale_uploads(ctx);
@@ -165,12 +169,6 @@ impl Actor for MediaSupervisor {
     type Context = Context<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
-    }
-}
-
-impl Supervised for MediaSupervisor {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
         ctx.run_interval(Duration::from_secs(1), Self::update);
     }
 }

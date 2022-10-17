@@ -27,7 +27,7 @@ pub fn get_tasks_supervisor() -> &'static Addr<TasksSupervisor> {
 pub fn init(db: Db, opts: &TaskOpts, config: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<()> {
     let supervisor = TasksSupervisor::new(db, opts, config, routing)?;
 
-    TASKS_SUPERVISOR.set(Supervisor::start(move |_| supervisor))
+    TASKS_SUPERVISOR.set(supervisor.start())
                     .map_err(|_| anyhow!("Tasks supervisor already initialized"))?;
 
     Ok(())

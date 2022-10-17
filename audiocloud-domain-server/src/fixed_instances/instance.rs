@@ -7,7 +7,7 @@ use actix::{
 };
 use actix_broker::BrokerIssue;
 use futures::FutureExt;
-use tracing::warn;
+use tracing::*;
 
 use audiocloud_api::cloud::domains::DomainFixedInstanceConfig;
 use audiocloud_api::domain::DomainError;
@@ -90,14 +90,16 @@ impl InstanceActor {
 impl Actor for InstanceActor {
     type Context = Context<Self>;
 
+    #[instrument(skip_all)]
     fn started(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
+        ctx.run_interval(Duration::from_millis(30), Self::update);
+        self.subscribe_instance_driver_events(ctx);
     }
 }
 
-impl Supervised for InstanceActor {
-    fn restarting(&mut self, ctx: &mut <Self as Actor>::Context) {
-        ctx.run_interval(Duration::from_millis(30), Self::update);
+impl InstanceActor {
+    #[instrument(skip_all)]
+    fn subscribe_instance_driver_events(&mut self, ctx: &mut Context<Self>) {
         ctx.add_stream(nats::subscribe_json::<InstanceDriverEvent>(self.id.driver_event_subject()));
     }
 }
@@ -195,7 +197,7 @@ impl StreamHandler<InstanceDriverEvent> for InstanceActor {
     }
 
     fn finished(&mut self, ctx: &mut Self::Context) {
-        self.restarting(ctx);
+        self.subscribe_instance_driver_events(ctx);
     }
 }
 
