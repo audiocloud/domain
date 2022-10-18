@@ -1,24 +1,31 @@
 use std::any::Any;
+use std::borrow::Cow;
 
 use anyhow::anyhow;
-
+use sentry_tracing::SentryLayer;
+use tracing::Subscriber;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Layer};
 
+use audiocloud_api::DomainId;
+
 use crate::o11y::O11yOpts;
 
-pub fn setup_sentry(opts: &O11yOpts) -> anyhow::Result<Box<dyn Any>> {
+pub fn sentry_tracing_layer<S>(opts: &O11yOpts) -> anyhow::Result<(SentryLayer<S>, Box<dyn Any>)>
+    where S: Subscriber + for<'a> LookupSpan<'a>
+{
     let dsn = opts.sentry_dsn.as_ref().ok_or_else(|| anyhow!("Sentry DSN not set"))?;
 
-    let guard = sentry::init((dsn.as_str(),
-                              sentry::ClientOptions { // Set this a to lower value in production
-                                                      traces_sample_rate: 1.0,
-                                                      ..sentry::ClientOptions::default() }));
+    let guard =
+        sentry::init((dsn.as_str(),
+                      sentry::ClientOptions { // Set this a to lower value in production
+                                              traces_sample_rate: 1.0,
+                                              server_name: Some(Cow::from(opts.domain_id.as_str().to_owned())),
+                                              ..sentry::ClientOptions::default() }));
 
-    tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_filter(EnvFilter::from_default_env()))
-                                  .with(sentry_tracing::layer())
-                                  .init();
+    let layer = sentry_tracing::layer();
 
-    Ok(Box::new(guard))
+    Ok((layer, Box::new(guard)))
 }

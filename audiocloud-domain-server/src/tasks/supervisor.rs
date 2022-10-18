@@ -3,18 +3,19 @@
 use std::collections::HashMap;
 
 use actix::{Actor, Addr, Context, Handler};
-
+use opentelemetry::global;
+use opentelemetry::metrics::ObservableGauge;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInstanceRoutingMap};
 use audiocloud_api::common::change::TaskState;
-
 use audiocloud_api::newtypes::{AppTaskId, EngineId};
 use audiocloud_api::{
     DomainId, FixedInstanceId, PlayId, StreamingPacket, Task, TaskReservation, TaskSecurity, TaskSpec, Timestamped,
 };
 
 use crate::db::Db;
+use crate::o11y;
 use crate::tasks::messages::BecomeOnline;
 use crate::tasks::task::TaskActor;
 use crate::tasks::TaskOpts;
@@ -44,6 +45,8 @@ pub struct TasksSupervisor {
     engines:                   HashMap<EngineId, ReferencedEngine>,
     fixed_instance_membership: HashMap<FixedInstanceId, AppTaskId>,
     fixed_instance_routing:    FixedInstanceRoutingMap,
+    num_tasks:                 ObservableGauge<u64>,
+    num_active_tasks:          ObservableGauge<u64>,
     online:                    bool,
 }
 
@@ -63,6 +66,15 @@ struct ReferencedEngine {
 
 impl TasksSupervisor {
     pub fn new(db: Db, opts: &TaskOpts, cfg: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<Self> {
+        let meter = global::meter("audiocloud.io/tasks_total");
+        let num_tasks = meter.u64_observable_gauge("tasks")
+                             .with_description("Total number of tasks")
+                             .init();
+
+        let num_active_tasks = meter.u64_observable_gauge("active_tasks")
+                                    .with_description("Total number of active tasks")
+                                    .init();
+
         let tasks = cfg.tasks
             .iter()
             .filter(|(id, task)| {
@@ -88,6 +100,8 @@ impl TasksSupervisor {
                   fixed_instance_routing:    { routing },
                   tasks:                     { tasks },
                   engines:                   { engines },
+                  num_tasks:                 { num_tasks },
+                  num_active_tasks:          { num_active_tasks },
                   online:                    { false }, })
     }
 

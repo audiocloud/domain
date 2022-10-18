@@ -7,6 +7,7 @@ use tracing::*;
 
 use audiocloud_api::now;
 
+use crate::o11y;
 use crate::tasks::supervisor::TasksSupervisor;
 use crate::tasks::task::TaskActor;
 use crate::tasks::{NotifyTaskActivated, NotifyTaskDeactivated, NotifyTaskDeleted};
@@ -18,10 +19,20 @@ impl TasksSupervisor {
 
     pub(crate) fn run_task_timers(&mut self, ctx: &mut Context<Self>) {
         if self.online {
+            self.update_metrics();
             self.drop_inactive_task_actors();
             self.drop_old_tasks();
             self.create_pending_task_actors();
         }
+    }
+
+    fn update_metrics(&mut self) {
+        o11y::in_context(|ctx| {
+            self.num_tasks.observe(ctx, self.tasks.len() as u64, &[]);
+            self.num_active_tasks.observe(ctx,
+                                          self.tasks.values().filter(|task| task.actor.is_some()).count() as u64,
+                                          &[]);
+        });
     }
 
     fn drop_inactive_task_actors(&mut self) {

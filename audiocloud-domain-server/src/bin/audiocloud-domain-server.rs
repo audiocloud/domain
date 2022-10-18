@@ -49,51 +49,59 @@ async fn main() -> anyhow::Result<()> {
 
     let _ = dotenv::dotenv();
 
-    let opts = Opts::parse();
-
-    let _o11y_guard = o11y::init(&opts.o11y)?;
+    let mut opts = Opts::parse();
 
     info!(source = %opts.config.describe(), "Loading config");
 
     let cfg = config::init(opts.config).await?;
 
-    info!("Initializing...");
+    if opts.o11y.domain_id.is_empty() {
+        opts.o11y.domain_id = cfg.domain_id.clone();
+    }
 
-    let db = db::init(opts.db).await?;
+    info!(" ⚡ Tracing");
+
+    let _tracing_guard = o11y::init_tracing(&opts.o11y)?;
+
+    info!(" ⚡ Metrics");
+
+    let _metrics_guard = o11y::init_metrics(&opts.o11y)?;
 
     info!(" ⚡ Database");
 
-    let _nats_guard = nats::init(&opts.nats_url).await?;
+    let db = db::init(opts.db).await?;
 
     info!(" ⚡ NATS");
 
-    models::init(&cfg, db.clone()).await?;
+    let _nats_guard = nats::init(&opts.nats_url).await?;
 
     info!(" ⚡ Models");
 
-    media::init(opts.media, db.clone()).await?;
+    models::init(&cfg, db.clone()).await?;
 
     info!(" ⚡ Media");
 
-    let routing = fixed_instances::init(&cfg, db.clone()).await?;
+    media::init(opts.media, db.clone()).await?;
 
     info!(" ⚡ Instances");
 
-    tasks::init(db.clone(), &opts.tasks, &cfg, routing)?;
+    let routing = fixed_instances::init(&cfg, db.clone()).await?;
 
     info!(" ⚡ Tasks (Offline)");
 
-    events::init(cfg.command_source.clone(), cfg.event_sink.clone()).await?;
+    tasks::init(db.clone(), &opts.tasks, &cfg, routing)?;
 
     info!(" ⚡ Cloud Events");
 
-    tasks::become_online().await?;
+    events::init(cfg.command_source.clone(), cfg.event_sink.clone()).await?;
 
     info!(" ⚡ Tasks (Online)");
 
-    sockets::init(opts.sockets)?;
+    tasks::become_online().await?;
 
     info!(" ⚡ Sockets");
+
+    sockets::init(opts.sockets)?;
 
     info!(bind = opts.bind,
           port = opts.port,
