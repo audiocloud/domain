@@ -18,6 +18,8 @@ use crate::db::Db;
 pub mod download;
 pub mod messages;
 mod supervisor;
+#[cfg(test)]
+mod tests;
 pub mod upload;
 
 static MEDIA_SUPERVISOR: OnceCell<Addr<MediaSupervisor>> = OnceCell::new();

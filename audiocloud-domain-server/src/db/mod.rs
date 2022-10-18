@@ -2,7 +2,6 @@ use std::fmt::{Debug, Formatter};
 
 use clap::Args;
 use serde::{Deserialize, Serialize};
-
 use sqlx::SqlitePool;
 use tracing::*;
 
@@ -30,6 +29,12 @@ pub struct DataOpts {
     /// Sqlite database file where data for media and session cache will be stored. Use :memory: for an in-memory store
     #[clap(long, env, default_value = "sqlite:domain.sqlite")]
     pub database_url: String,
+}
+
+impl DataOpts {
+    pub fn memory() -> Self {
+        Self { database_url: ":memory:".to_string(), }
+    }
 }
 
 #[instrument(skip_all, err)]

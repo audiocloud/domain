@@ -6,7 +6,6 @@ use futures::executor::block_on;
 use reqwest::Client;
 use serde_json::json;
 use tokio::fs::File;
-
 use tracing::*;
 
 use audiocloud_api::common::time::now;
@@ -39,15 +38,15 @@ impl Downloader {
                   client })
     }
 
-    #[instrument(skip(ctx))]
+    #[instrument(skip_all)]
     fn download(&mut self, ctx: &mut Context<Self>) {
-        debug!("starting download");
-
         let source = self.source.clone();
         let download = self.download.clone();
         let client = self.client.clone();
         let media_id = self.download.media_id.clone();
         let db = self.db.clone();
+
+        debug!(?source, ?download, %media_id, "starting download");
 
         async move {
             client.put(&download.download.url)
