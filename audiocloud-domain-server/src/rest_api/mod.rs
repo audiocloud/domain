@@ -6,7 +6,7 @@ use actix::{fut, MailboxError};
 use actix_web::body::{BoxBody, EitherBody};
 use actix_web::dev::Payload;
 use actix_web::error::{ErrorBadRequest, ErrorInternalServerError, ErrorUnauthorized};
-use actix_web::http::header::{Header, AUTHORIZATION};
+use actix_web::http::header::AUTHORIZATION;
 use actix_web::{get, web, FromRequest, HttpRequest, HttpResponse, HttpResponseBuilder, Responder};
 use anyhow::anyhow;
 use clap::{Args, ValueEnum};
@@ -15,17 +15,20 @@ use reqwest::StatusCode;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::json;
+use tracing::*;
 
 use audiocloud_api::domain::DomainError;
 use audiocloud_api::{AppId, AppTaskId, Codec, Json, MsgPack, SecureKey, TaskId};
 
+use crate::o11y::generate_prometheus_metrics;
 use crate::{DomainSecurity, ResponseMedia};
 
 mod v1;
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
-    cfg.service(healthz);
-    cfg.service(web::scope("/v1").configure(v1::configure));
+    cfg.service(healthz)
+       .service(metrics)
+       .service(web::scope("/v1").configure(v1::configure));
 }
 
 #[get("/healthz")]
@@ -35,6 +38,18 @@ async fn healthz() -> impl Responder {
     });
 
     web::Json(res)
+}
+
+#[get("/metrics")]
+async fn metrics() -> impl Responder {
+    match generate_prometheus_metrics() {
+        Ok(metrics) => HttpResponse::Ok().content_type("text/plain; version=0.0.4")
+                                         .body(metrics),
+        Err(e) => {
+            error!("Failed to generate metrics: {}", e);
+            HttpResponse::InternalServerError().finish()
+        }
+    }
 }
 
 pub struct ApiResponder(ResponseMedia);
@@ -127,7 +142,7 @@ impl FromRequest for DomainSecurity {
     type Error = actix_web::Error;
     type Future = Ready<Result<Self, actix_web::Error>>;
 
-    fn from_request(req: &HttpRequest, payload: &mut Payload) -> Self::Future {
+    fn from_request(req: &HttpRequest, _payload: &mut Payload) -> Self::Future {
         let func = move || -> Result<Self, actix_web::Error> {
             let auth_opts =
                 req.app_data::<web::Data<RestOpts>>()

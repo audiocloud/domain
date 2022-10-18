@@ -1,21 +1,15 @@
 #![allow(unused_variables)]
 
-use std::time::Duration;
-
-use actix::{
-    spawn, Actor, ActorFutureExt, ArbiterHandle, AsyncContext, Context, Handler, Recipient, Running, Supervised,
-    WrapFuture,
-};
+use actix::{spawn, AsyncContext, Recipient};
 use futures::TryFutureExt;
-use maplit::hashmap;
+
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 use tracing::*;
 
-use audiocloud_api::common::model::ModelValue;
-use audiocloud_api::common::time::{Timestamp, Timestamped};
-use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
+use audiocloud_api::common::time::Timestamp;
+use audiocloud_api::instance_driver::InstanceDriverEvent;
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_models::netio::PowerPdu4CReports;
 

@@ -5,13 +5,12 @@ use anyhow::anyhow;
 use derive_more::IsVariant;
 use futures::FutureExt;
 use itertools::Itertools;
-use nanoid::nanoid;
+
 use tracing::*;
 
 use audiocloud_api::domain::streaming::DomainServerMessage;
-use audiocloud_api::{ClientId, ClientSocketId, Codec, MsgPack, SocketId, TaskEvent, Timestamped};
+use audiocloud_api::{ClientId, ClientSocketId, Codec, MsgPack, Timestamped};
 
-use crate::sockets::supervisor::SupervisedClient;
 use crate::sockets::web_rtc::WebRtcActor;
 use crate::sockets::web_sockets::WebSocketActor;
 use crate::sockets::{Disconnect, SendToClient, SocketReceived, SocketSend, SocketsSupervisor};

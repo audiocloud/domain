@@ -1,7 +1,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use actix::{Actor, ActorContext, ActorFutureExt, Context, ContextFutureSpawner, Supervised, WrapFuture};
+use actix::{Actor, ActorContext, ActorFutureExt, Context, ContextFutureSpawner, WrapFuture};
 use actix_broker::BrokerIssue;
 use futures::TryStreamExt;
 use reqwest::Client;

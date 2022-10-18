@@ -1,5 +1,5 @@
 use actix::fut::LocalBoxActorFuture;
-use actix::{fut, ActorFutureExt, Addr, Handler, WrapFuture};
+use actix::{fut, ActorFutureExt, Handler, WrapFuture};
 use tracing::*;
 
 use audiocloud_api::domain::tasks::TaskUpdated;
@@ -9,7 +9,7 @@ use crate::tasks::supervisor::SupervisedTask;
 use crate::tasks::ModifyTask;
 use crate::DomainResult;
 
-use super::{TasksSupervisor, ALLOW_MODIFY_STRUCTURE};
+use super::TasksSupervisor;
 
 impl Handler<ModifyTask> for TasksSupervisor {
     type Result = LocalBoxActorFuture<Self, DomainResult<TaskUpdated>>;

@@ -1,31 +1,24 @@
 #![allow(unused_variables)]
 
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::collections::HashMap;
 
-use actix::{Actor, Addr, AsyncContext, Context, Handler, Supervised, Supervisor};
-use actix_broker::{BrokerIssue, BrokerSubscribe};
+use actix::{Actor, Addr, Context, Handler};
+use opentelemetry::global;
+use opentelemetry::metrics::ObservableGauge;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainEngineConfig, FixedInstanceRoutingMap};
 use audiocloud_api::common::change::TaskState;
-use audiocloud_api::domain::DomainError;
 use audiocloud_api::newtypes::{AppTaskId, EngineId};
 use audiocloud_api::{
-    now, DomainId, FixedInstanceId, PlayId, StreamingPacket, Task, TaskPermissions, TaskReservation, TaskSecurity,
-    TaskSpec, Timestamped,
+    DomainId, FixedInstanceId, PlayId, StreamingPacket, Task, TaskReservation, TaskSecurity, TaskSpec, Timestamped,
 };
 
 use crate::db::Db;
-use crate::tasks::messages::{BecomeOnline, NotifyTaskSpec, NotifyTaskState};
+use crate::o11y;
+use crate::tasks::messages::BecomeOnline;
 use crate::tasks::task::TaskActor;
-use crate::tasks::{
-    NotifyTaskActivated, NotifyTaskDeactivated, NotifyTaskDeleted, NotifyTaskReservation, NotifyTaskSecurity, TaskOpts,
-};
-use crate::{DomainResult, DomainSecurity};
-
-const ALLOW_MODIFY_STRUCTURE: TaskPermissions = TaskPermissions { structure: true,
-                                                                  ..TaskPermissions::empty() };
+use crate::tasks::TaskOpts;
 
 mod cancel_render;
 mod create_task;
@@ -52,6 +45,8 @@ pub struct TasksSupervisor {
     engines:                   HashMap<EngineId, ReferencedEngine>,
     fixed_instance_membership: HashMap<FixedInstanceId, AppTaskId>,
     fixed_instance_routing:    FixedInstanceRoutingMap,
+    num_tasks:                 ObservableGauge<u64>,
+    num_active_tasks:          ObservableGauge<u64>,
     online:                    bool,
 }
 
@@ -71,6 +66,15 @@ struct ReferencedEngine {
 
 impl TasksSupervisor {
     pub fn new(db: Db, opts: &TaskOpts, cfg: &DomainConfig, routing: FixedInstanceRoutingMap) -> anyhow::Result<Self> {
+        let meter = global::meter("audiocloud.io/tasks_total");
+        let num_tasks = meter.u64_observable_gauge("tasks")
+                             .with_description("Total number of tasks")
+                             .init();
+
+        let num_active_tasks = meter.u64_observable_gauge("active_tasks")
+                                    .with_description("Total number of active tasks")
+                                    .init();
+
         let tasks = cfg.tasks
             .iter()
             .filter(|(id, task)| {
@@ -96,6 +100,8 @@ impl TasksSupervisor {
                   fixed_instance_routing:    { routing },
                   tasks:                     { tasks },
                   engines:                   { engines },
+                  num_tasks:                 { num_tasks },
+                  num_active_tasks:          { num_active_tasks },
                   online:                    { false }, })
     }
 

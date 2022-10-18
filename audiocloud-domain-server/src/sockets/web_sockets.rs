@@ -3,8 +3,7 @@
 use std::time::Duration;
 
 use actix::{
-    Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, Running, StreamHandler,
-    WrapFuture,
+    Actor, ActorContext, ActorFutureExt, AsyncContext, ContextFutureSpawner, Handler, StreamHandler, WrapFuture,
 };
 use actix_web::{get, web, HttpRequest, Responder};
 use actix_web_actors::ws;
@@ -14,10 +13,10 @@ use serde::Deserialize;
 use tracing::*;
 
 use audiocloud_api::newtypes::SecureKey;
-use audiocloud_api::{ClientId, ClientSocketId};
+use audiocloud_api::ClientSocketId;
 
 use crate::sockets::messages::{RegisterWebSocket, SocketReceived, SocketSend};
-use crate::sockets::{get_next_socket_id, get_sockets_supervisor, Disconnect, SocketId};
+use crate::sockets::{get_sockets_supervisor, Disconnect};
 
 pub fn configure(cfg: &mut web::ServiceConfig) {
     cfg.service(ws_handler);

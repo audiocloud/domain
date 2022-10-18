@@ -21,7 +21,7 @@ impl Actor for LogEventsActor {
 impl Handler<NotifyDomainEvent> for LogEventsActor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifyDomainEvent, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyDomainEvent, _ctx: &mut Self::Context) -> Self::Result {
         debug!(event = ?msg.event, "Event!");
     }
 }

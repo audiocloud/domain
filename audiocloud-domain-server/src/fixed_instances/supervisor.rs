@@ -1,10 +1,7 @@
 use std::collections::HashMap;
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{
-    fut, Actor, ActorFutureExt, Addr, Context, ContextFutureSpawner, Handler, MessageResult, Supervised, Supervisor,
-    WrapFuture,
-};
+use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, MessageResult, WrapFuture};
 use actix_broker::BrokerSubscribe;
 use anyhow::anyhow;
 use futures::executor::block_on;
@@ -84,7 +81,7 @@ impl Handler<NotifyDomainConfiguration> for FixedInstancesSupervisor {
     type Result = ();
 
     #[instrument(skip_all, name = "handle_notify_domain_configuration")]
-    fn handle(&mut self, msg: NotifyDomainConfiguration, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyDomainConfiguration, _ctx: &mut Self::Context) -> Self::Result {
         let existing = self.instances
                            .iter()
                            .map(|(id, instance)| (id.clone(), instance.config.clone()))
@@ -128,12 +125,12 @@ impl Handler<NotifyDomainConfiguration> for FixedInstancesSupervisor {
 impl Handler<SetInstanceParameters> for FixedInstancesSupervisor {
     type Result = LocalBoxActorFuture<Self, DomainResult>;
 
-    fn handle(&mut self, msg: SetInstanceParameters, ctx: &mut Context<FixedInstancesSupervisor>) -> Self::Result {
+    fn handle(&mut self, msg: SetInstanceParameters, _ctx: &mut Context<FixedInstancesSupervisor>) -> Self::Result {
         if let Some(instance) = self.instances.get(&msg.instance_id) {
             instance.address
                     .send(msg)
                     .into_actor(self)
-                    .map(|res, actor, ctx| match res {
+                    .map(|res, _actor, _ctx| match res {
                         Ok(res) => res,
                         Err(err) => {
                             Err(DomainError::BadGateway { error: format!("Failed to set instance parameters: {err}"), })
@@ -149,12 +146,12 @@ impl Handler<SetInstanceParameters> for FixedInstancesSupervisor {
 impl Handler<SetDesiredPowerChannel> for FixedInstancesSupervisor {
     type Result = LocalBoxActorFuture<Self, DomainResult>;
 
-    fn handle(&mut self, msg: SetDesiredPowerChannel, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: SetDesiredPowerChannel, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(instance) = self.instances.get(&msg.instance_id) {
             instance.address
                     .send(msg)
                     .into_actor(self)
-                    .map(|res, actor, ctx| match res {
+                    .map(|res, _actor, _ctx| match res {
                         Ok(res) => res,
                         Err(err) => {
                             Err(DomainError::BadGateway { error: format!("Failed to set instance power: {err}"), })
@@ -170,12 +167,12 @@ impl Handler<SetDesiredPowerChannel> for FixedInstancesSupervisor {
 impl Handler<SetInstanceDesiredPlayState> for FixedInstancesSupervisor {
     type Result = LocalBoxActorFuture<Self, DomainResult>;
 
-    fn handle(&mut self, msg: SetInstanceDesiredPlayState, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: SetInstanceDesiredPlayState, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(instance) = self.instances.get(&msg.instance_id) {
             instance.address
         .send(msg)
         .into_actor(self)
-        .map(|res, actor, ctx| match res {
+        .map(|res, _actor, _ctx| match res {
           Ok(res) => res,
           Err(err) => Err(DomainError::BadGateway { error: format!("Failed to set instance desired play state: {err}") }),
         })
@@ -189,7 +186,7 @@ impl Handler<SetInstanceDesiredPlayState> for FixedInstancesSupervisor {
 impl Handler<GetMultipleFixedInstanceState> for FixedInstancesSupervisor {
     type Result = MessageResult<GetMultipleFixedInstanceState>;
 
-    fn handle(&mut self, msg: GetMultipleFixedInstanceState, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: GetMultipleFixedInstanceState, _ctx: &mut Self::Context) -> Self::Result {
         let mut rv = HashMap::new();
 
         for id in msg.instance_ids {
@@ -207,7 +204,7 @@ impl Handler<GetMultipleFixedInstanceState> for FixedInstancesSupervisor {
 impl Handler<NotifyInstancePowerChannelsChanged> for FixedInstancesSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifyInstancePowerChannelsChanged, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyInstancePowerChannelsChanged, _ctx: &mut Self::Context) -> Self::Result {
         // inform all connected instances
         for instance in self.instances.values() {
             if let Some(power_config) = &instance.config.power {

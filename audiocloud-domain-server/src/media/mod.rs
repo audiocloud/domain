@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use actix::{Actor, Addr, Handler, Supervised, Supervisor};
+use actix::{Actor, Addr};
 use clap::Args;
 use derive_more::{Display, From, FromStr};
 use once_cell::sync::OnceCell;

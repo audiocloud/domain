@@ -1,4 +1,4 @@
-use actix::{Actor, Addr, Supervisor};
+use actix::{Actor, Addr};
 use anyhow::anyhow;
 use once_cell::sync::OnceCell;
 use tracing::*;

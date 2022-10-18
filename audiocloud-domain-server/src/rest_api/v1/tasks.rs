@@ -1,11 +1,10 @@
 use std::convert::identity;
 use std::str::FromStr;
 
-use actix::MailboxError;
 use actix_web::http::header::IfMatch;
 use actix_web::web::{Header, Json};
 use actix_web::{delete, get, post, web};
-use serde::Deserialize;
+
 use web::Path;
 
 use audiocloud_api::audio_engine::{TaskPlayStopped, TaskPlaying, TaskRenderCancelled, TaskRendering, TaskSought};
@@ -13,10 +12,7 @@ use audiocloud_api::domain::tasks::{
     CreateTask, ModifyTask, TaskCreated, TaskDeleted, TaskSummaryList, TaskUpdated, TaskWithStatusAndSpec,
 };
 use audiocloud_api::domain::DomainError;
-use audiocloud_api::{
-    AppId, AppTaskId, DesiredTaskPlayState, RequestCancelRender, RequestPlay, RequestRender, RequestSeek,
-    RequestStopPlay, TaskId,
-};
+use audiocloud_api::{RequestCancelRender, RequestPlay, RequestRender, RequestSeek, RequestStopPlay};
 
 use crate::rest_api::{ApiResponder, ApiResponse, AppTaskIdPath};
 use crate::tasks::{get_tasks_supervisor, messages, ListTasks};

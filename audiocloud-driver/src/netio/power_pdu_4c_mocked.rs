@@ -2,19 +2,16 @@
 
 use std::time::Duration;
 
-use actix::{Actor, AsyncContext, Context, Handler, Recipient, Supervised};
-use maplit::hashmap;
+use actix::Recipient;
+
 use serde::{Deserialize, Serialize};
 use tracing::*;
 
-use audiocloud_api::common::model::ModelValue;
-use audiocloud_api::common::time::Timestamped;
-use audiocloud_api::instance_driver::{InstanceDriverCommand, InstanceDriverError, InstanceDriverEvent};
 use audiocloud_api::newtypes::FixedInstanceId;
 use audiocloud_models::netio::PowerPdu4CReports;
 
 use crate::driver::{Driver, DriverActor, Result};
-use crate::{emit_event, Command, InstanceConfig};
+use crate::{Command, InstanceConfig};
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Config;

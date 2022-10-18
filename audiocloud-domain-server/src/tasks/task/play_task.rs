@@ -1,11 +1,11 @@
-use actix::{Handler, MessageResult};
+use actix::Handler;
 
 use audiocloud_api::audio_engine::TaskPlaying;
-use audiocloud_api::domain::tasks::TaskUpdated;
+
 use audiocloud_api::{DesiredInstancePlayState, DesiredTaskPlayState};
 
 use crate::tasks::task::TaskActor;
-use crate::tasks::{PlayTask, RenderTask};
+use crate::tasks::PlayTask;
 use crate::DomainResult;
 
 impl Handler<PlayTask> for TaskActor {

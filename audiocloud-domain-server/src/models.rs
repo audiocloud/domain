@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use tracing::*;
 
 use audiocloud_api::cloud::domains::{DomainConfig, DomainModelSource};
-use audiocloud_api::{Model, ModelId};
+use audiocloud_api::ModelId;
 
 use crate::db::Db;
 

@@ -1,30 +1,27 @@
 use std::default::Default;
-use std::sync::Arc;
+
 use std::time::Duration;
 
 use actix::{
     Actor, ActorContext, ActorFutureExt, Addr, AsyncContext, Context, ContextFutureSpawner, Handler, Message,
     WrapFuture,
 };
-use actix_web::web::block;
-use anyhow::anyhow;
+
 use clap::Args;
 use datachannel::{
     ConnectionState, DataChannelHandler, DataChannelInit, GatheringState, IceCandidate, PeerConnectionHandler,
     Reliability, RtcConfig, RtcDataChannel, RtcPeerConnection, SessionDescription,
 };
-use futures::executor::block_on;
+
 use futures::FutureExt;
-use nanoid::nanoid;
-use once_cell::sync::OnceCell;
+
 use tracing::*;
 
 use audiocloud_api::domain::streaming::DomainServerMessage;
-use audiocloud_api::{ClientSocketId, Codec, MsgPack};
-use audiocloud_api::{RequestId, SocketId};
+use audiocloud_api::ClientSocketId;
 
 use crate::sockets::messages::{SocketReceived, SocketSend};
-use crate::sockets::web_sockets::WebSocketActor;
+
 use crate::sockets::{get_sockets_supervisor, Disconnect, SendToClient, SocketConnected};
 use crate::ResponseMedia;
 
@@ -155,8 +152,7 @@ impl WebRtcActor {
                 let mut peer_connection =
                     RtcPeerConnection::new(&config, ActorConnectionHandler { actor: ctx.address() }).expect("Create peer connection");
 
-                let mut data_channel =
-                    peer_connection.create_data_channel_ex("data",
+                let data_channel = peer_connection.create_data_channel_ex("data",
                                                            ActorDataChannelHandler { actor: ctx.address() },
                                                            &data_channel_init)
                                    .expect("Create data channel");
@@ -180,7 +176,7 @@ impl WebRtcActor {
 impl Actor for WebRtcActor {
     type Context = Context<Self>;
 
-    fn started(&mut self, ctx: &mut Self::Context) {}
+    fn started(&mut self, _ctx: &mut Self::Context) {}
 }
 
 impl Handler<Closed> for WebRtcActor {
@@ -206,7 +202,7 @@ impl Handler<OnDataChannelMessage> for WebRtcActor {
 impl Handler<OnLocalIceCandidate> for WebRtcActor {
     type Result = ();
 
-    fn handle(&mut self, msg: OnLocalIceCandidate, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: OnLocalIceCandidate, _ctx: &mut Self::Context) -> Self::Result {
         get_sockets_supervisor().do_send(SendToClient {
             client_id: self.id.client_id.clone(),
             message: DomainServerMessage::SubmitPeerConnectionCandidate {
@@ -221,7 +217,7 @@ impl Handler<OnLocalIceCandidate> for WebRtcActor {
 impl Handler<SocketSend> for WebRtcActor {
     type Result = ();
 
-    fn handle(&mut self, msg: SocketSend, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: SocketSend, _ctx: &mut Self::Context) -> Self::Result {
         match (msg, self.connected) {
             (SocketSend::Bytes(bytes), true) => {
                 if let Err(error) = self.data_channel.send(&bytes[..]) {
@@ -236,7 +232,7 @@ impl Handler<SocketSend> for WebRtcActor {
 impl Handler<SetPeerAnswer> for WebRtcActor {
     type Result = anyhow::Result<()>;
 
-    fn handle(&mut self, msg: SetPeerAnswer, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: SetPeerAnswer, _ctx: &mut Self::Context) -> Self::Result {
         let answer: SessionDescription = serde_json::from_str(&msg.answer)?;
         debug!(id = %self.id, answer = ?answer.sdp, "Received Peer Answer");
 
@@ -249,7 +245,7 @@ impl Handler<SetPeerAnswer> for WebRtcActor {
 impl Handler<Opened> for WebRtcActor {
     type Result = ();
 
-    fn handle(&mut self, msg: Opened, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: Opened, _ctx: &mut Self::Context) -> Self::Result {
         self.connected = true;
         get_sockets_supervisor().do_send(SocketConnected { socket_id: self.id.clone(), });
     }
@@ -258,7 +254,7 @@ impl Handler<Opened> for WebRtcActor {
 impl Handler<AddRemoteIceCandidate> for WebRtcActor {
     type Result = anyhow::Result<()>;
 
-    fn handle(&mut self, msg: AddRemoteIceCandidate, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: AddRemoteIceCandidate, _ctx: &mut Self::Context) -> Self::Result {
         match msg.candidate {
             Some(candidate) => match serde_json::from_str::<IceCandidate>(&candidate) {
                 Ok(candidate) => {
@@ -283,7 +279,7 @@ impl Handler<AddRemoteIceCandidate> for WebRtcActor {
 impl Handler<Disconnect> for WebRtcActor {
     type Result = ();
 
-    fn handle(&mut self, msg: Disconnect, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: Disconnect, ctx: &mut Self::Context) -> Self::Result {
         debug!(id = %self.id, "Asked to disconnect");
         ctx.run_later(Duration::default(), |_, ctx| ctx.stop());
     }
@@ -317,7 +313,7 @@ pub struct SetPeerAnswer {
     pub answer: String,
 }
 
-pub fn init(opts: &WebRtcOpts) -> anyhow::Result<()> {
+pub fn init(_opts: &WebRtcOpts) -> anyhow::Result<()> {
     // datachannel::configure_logging();
 
     Ok(())

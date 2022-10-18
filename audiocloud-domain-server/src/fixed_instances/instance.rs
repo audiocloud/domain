@@ -2,9 +2,7 @@
 
 use std::time::Duration;
 
-use actix::{
-    Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, StreamHandler, Supervised, WrapFuture,
-};
+use actix::{Actor, ActorFutureExt, AsyncContext, Context, ContextFutureSpawner, Handler, StreamHandler, WrapFuture};
 use actix_broker::BrokerIssue;
 use futures::FutureExt;
 use tracing::*;

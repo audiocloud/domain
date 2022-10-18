@@ -100,7 +100,7 @@ impl Resampler {
             channels.push(Vec::from(&temp[..size]));
         }
 
-        let len = channels.first().map(|v| v.len()).unwrap_or_default();
+        let _len = channels.first().map(|v| v.len()).unwrap_or_default();
 
         out.push_back(AudioBuf { channels,
                                  stream: self.stream,

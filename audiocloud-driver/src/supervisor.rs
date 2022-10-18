@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use actix::fut::LocalBoxActorFuture;
-use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Recipient, Response, Supervised, WrapFuture};
+use actix::{fut, Actor, ActorFutureExt, Addr, Context, Handler, Recipient, Response, WrapFuture};
 use actix_broker::BrokerSubscribe;
 use once_cell::sync::OnceCell;
 use tracing::*;
@@ -64,7 +64,7 @@ impl Handler<Command> for DriverSupervisor {
 impl Handler<GetInstances> for DriverSupervisor {
     type Result = Response<HashSet<FixedInstanceId>>;
 
-    fn handle(&mut self, msg: GetInstances, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, _msg: GetInstances, _ctx: &mut Self::Context) -> Self::Result {
         Response::reply(self.instances.keys().cloned().collect())
     }
 }
@@ -72,7 +72,7 @@ impl Handler<GetInstances> for DriverSupervisor {
 impl Handler<NotifyInstanceValues> for DriverSupervisor {
     type Result = ();
 
-    fn handle(&mut self, msg: NotifyInstanceValues, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: NotifyInstanceValues, _ctx: &mut Self::Context) -> Self::Result {
         self.values.insert(msg.instance_id.clone(), msg);
     }
 }
@@ -80,7 +80,7 @@ impl Handler<NotifyInstanceValues> for DriverSupervisor {
 impl Handler<GetValues> for DriverSupervisor {
     type Result = Result<NotifyInstanceValues, InstanceDriverError>;
 
-    fn handle(&mut self, msg: GetValues, ctx: &mut Self::Context) -> Self::Result {
+    fn handle(&mut self, msg: GetValues, _ctx: &mut Self::Context) -> Self::Result {
         match self.values.get(&msg.instance_id) {
             None => Err(InstanceDriverError::InstanceNotFound(msg.instance_id.clone())),
             Some(values) => Ok(values.clone()),
