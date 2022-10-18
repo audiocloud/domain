@@ -54,13 +54,10 @@ pub fn get_nats() -> &'static Connection {
 #[instrument(skip_all, fields(%instance_id))]
 async fn handle_commands(subscription: nats_aflowt::Subscription, instance_id: FixedInstanceId) {
     while let Some(msg) = subscription.next().await {
-        debug!("Received bytes: {:?}", &msg.data);
         match Json.deserialize::<InstanceDriverCommand>(&msg.data) {
             Ok(cmd) => {
-                debug!("Received command: {cmd:?}");
+                trace!("Received command: {cmd:?}");
                 let supervisor = get_driver_supervisor();
-
-                debug!("Got supervisor");
 
                 let cmd = Command { instance_id: instance_id.clone(),
                                     command:     cmd, };
@@ -72,11 +69,10 @@ async fn handle_commands(subscription: nats_aflowt::Subscription, instance_id: F
                             Err(err) => SerializableResult::Error(err),
                         };
 
-                        debug!("Got response: {response:?}");
+                        trace!("Got response: {response:?}");
                         if let Ok(encoded) = Json.serialize(&response) {
-                            debug!("Sending response: {encoded:?}");
                             let _ = msg.respond(encoded).await;
-                            debug!("Response sent");
+                            trace!("Response sent");
                         }
                     }
                     Err(err) => {
