@@ -1,9 +1,19 @@
+use std::time::Duration;
+
+use actix::spawn;
+use anyhow::anyhow;
+use tokio::time::sleep;
 use trim_margin::MarginTrimmable;
 
-use crate::netio::power_pdu_4c::NetioPowerResponse;
+use audiocloud_api::FixedInstanceId;
+
+use crate::driver::Driver;
+use crate::netio::power_pdu_4c::{
+    Config, NetioPowerOutputAction, NetioPowerRequest, NetioPowerResponse, PowerAction, PowerPdu4c,
+};
 
 #[test]
-fn deserialize_captured_response() {
+fn deserialize_captured_response() -> anyhow::Result<()> {
     let raw_json = r#"|{
                       |	"Agent":	{
                       |		"Model":	"PowerPDU 4C",
@@ -68,15 +78,60 @@ fn deserialize_captured_response() {
                       |			"Energy":	8
                       |		}]
                       |}"#.trim_margin()
-                          .expect("Failed to trim margin from captured JSON");
+                          .ok_or_else(|| anyhow!("Failed to trim margin from captured JSON"))?;
 
     let _netio_response =
-        serde_json::from_str::<NetioPowerResponse>(raw_json.as_str()).expect("Captured response should deserialize");
+        serde_json::from_str::<NetioPowerResponse>(raw_json.as_str()).map_err(|error| anyhow!("Captured response should deserialize: {error}"))?;
 
     // TODO: assert values
+
+    Ok(())
 }
 
 #[test]
-fn serialize_request() {
+fn serialize_request() -> anyhow::Result<()> {
     // TODO: add test when implementation exists
+
+    let request = NetioPowerRequest { outputs: vec![NetioPowerOutputAction { id:     { 0 },
+                                                                             action: { PowerAction::Off }, },
+                                                    NetioPowerOutputAction { id:     { 1 },
+                                                                             action: { PowerAction::On }, }], };
+
+    let json = serde_json::to_string_pretty(&request).expect("Request should serialize");
+
+    assert_eq!(json,
+               r#"|{
+                  |  "Outputs": [
+                  |    {
+                  |      "ID": 0,
+                  |      "Action": 0
+                  |    },
+                  |    {
+                  |      "ID": 1,
+                  |      "Action": 1
+                  |    }
+                  |  ]
+                  |}"#.trim_margin()
+                      .ok_or_else(|| anyhow!("Failed to extract margins from comparison JSON"))?);
+
+    Ok(())
+}
+
+#[cfg(feature = "test_distopik_hq")]
+#[actix::test]
+async fn test_integration_distopik_hq() -> anyhow::Result<()> {
+    let config = Config { address: "http://10.1.3.100".to_string(),
+                          auth:    None, };
+
+    let mut pdu = PowerPdu4c::new(FixedInstanceId { manufacturer: "netio".to_owned(),
+                                                    name:         "power_pdu_4c".to_owned(),
+                                                    instance:     "rack1-up-right".to_owned(), },
+                                  config)?;
+
+    pdu.set_power_channel(3, false);
+    sleep(Duration::from_secs(15)).await;
+    pdu.set_power_channel(3, true);
+    sleep(Duration::from_secs(1)).await;
+
+    Ok(())
 }

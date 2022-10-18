@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use actix::{Actor, AsyncContext, Context, Handler, Recipient, Supervised, Supervisor};
-
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tracing::*;
@@ -75,8 +74,8 @@ pub struct DriverActor<D>
 
 impl<D> DriverActor<D> where D: Driver
 {
-    pub fn start_supervised_recipient(driver: D) -> Recipient<Command> {
-        Supervisor::start(move |_| Self { driver }).recipient()
+    pub fn start_recipient(driver: D) -> Recipient<Command> {
+        Self { driver }.start().recipient()
     }
 
     fn update(&mut self, ctx: &mut Context<Self>) {

@@ -67,8 +67,8 @@ impl SocketsSupervisor {
         let result = match WebRtcActor::new(socket_id.clone(), initiator_socket_id.clone(), &opts.web_rtc) {
             Ok((actor, local_description)) => {
                 let socket = SupervisedSocket { actor_addr:    { SocketActorAddr::WebRtc(actor) },
-                                                last_pong_at:  { Instant::now() },
-                                                init_complete: { Timestamped::new(false) }, };
+                                                init_complete: { Timestamped::new(false) },
+                                                last_pong_at:  { Instant::now() }, };
 
                 self.clients
                     .entry(initiator_socket_id.client_id.clone())
