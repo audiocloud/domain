@@ -23,7 +23,7 @@ impl InstanceConfig for Config {
         let driver = Netio4cMocked { id,
                                      state: vec![false; 4] };
 
-        Ok(DriverActor::start_supervised_recipient(driver))
+        Ok(DriverActor::start_recipient(driver))
     }
 }
 

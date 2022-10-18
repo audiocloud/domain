@@ -1,8 +1,9 @@
 #![allow(unused_variables)]
 
+use std::time::Duration;
+
 use actix::{spawn, AsyncContext, Recipient};
 use futures::TryFutureExt;
-
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
@@ -28,11 +29,8 @@ pub struct Config {
 impl InstanceConfig for Config {
     fn create(self, id: FixedInstanceId) -> anyhow::Result<Recipient<Command>> {
         info!(%id, config = ?self, "Creating instance");
-        let base_url = Url::parse(&self.address)?;
 
-        Ok(DriverActor::start_supervised_recipient(PowerPdu4c { id,
-                                                                config: self,
-                                                                base_url }))
+        Ok(DriverActor::start_recipient(PowerPdu4c::new(id, self)?))
     }
 }
 
@@ -46,19 +44,23 @@ impl Driver for PowerPdu4c {
     type Params = ();
     type Reports = ();
 
+    #[instrument(skip(self))]
     fn set_power_channel(&mut self, channel: usize, value: bool) -> Result {
         let id = self.id.clone();
         let url = self.base_url.clone();
-
-        // TODO: wtf we don't actually update it ?!
+        let action = if value { PowerAction::On } else { PowerAction::Off };
+        let update = NetioPowerRequest { outputs: vec![NetioPowerOutputAction { id:     { (channel + 1) as u32 },
+                                                                                action: { action }, }], };
 
         spawn(async move {
                   let url = url.join("/netio.json")?;
-                  let response = get_http_client().get(url)
-                                                  .send()
-                                                  .await?
-                                                  .json::<NetioPowerResponse>()
-                                                  .await?;
+                  let client = reqwest::Client::new();
+                  let response = client.post(url)
+                                       .json(&update)
+                                       .send()
+                                       .await?
+                                       .json::<NetioPowerResponse>()
+                                       .await?;
 
                   Self::handle_response(id, response);
 
@@ -69,10 +71,37 @@ impl Driver for PowerPdu4c {
 
         Ok(())
     }
+
+    fn poll(&mut self) -> Option<Duration> {
+        let id = self.id.clone();
+        let url = self.base_url.clone();
+
+        spawn(async move {
+                  let url = url.join("/netio.json")?;
+                  let client = reqwest::Client::new();
+                  let response = client.get(url).send().await?.json::<NetioPowerResponse>().await?;
+
+                  Self::handle_response(id, response);
+
+                  anyhow::Result::<()>::Ok(())
+              }.map_err(|err| {
+                   info!(?err, "Update failed");
+               }));
+
+        Some(Duration::from_secs(15))
+    }
 }
 
 impl PowerPdu4c {
+    pub fn new(id: FixedInstanceId, config: Config) -> anyhow::Result<Self> {
+        let base_url = Url::parse(&config.address)?;
+        Ok(Self { id, config, base_url })
+    }
+
+    #[instrument(skip(response))]
     fn handle_response(id: FixedInstanceId, response: NetioPowerResponse) {
+        println!("response: {response:#?}");
+
         let mut power_values = vec![false; 4];
         let mut current_values = vec![0.0; 4];
         let mut reports = PowerPdu4CReports::default();
@@ -89,21 +118,26 @@ impl PowerPdu4c {
         reports.power = Some(power_values);
         reports.current = Some(current_values);
 
-        if let Ok(reports) = serde_json::to_value(&reports) {
-            emit_event(id, InstanceDriverEvent::Reports { reports });
+        match serde_json::to_value(&reports) {
+            Ok(reports) => {
+                emit_event(id, InstanceDriverEvent::Reports { reports });
+            }
+            Err(error) => {
+                error!(%error, "Failed to encode NETIO reports");
+            }
         }
     }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct NetioPowerRequest {
+pub(crate) struct NetioPowerRequest {
     pub outputs: Vec<NetioPowerOutputAction>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "PascalCase")]
-struct NetioPowerOutputAction {
+pub(crate) struct NetioPowerOutputAction {
     #[serde(rename = "ID")]
     pub id:     u32,
     pub action: PowerAction,
