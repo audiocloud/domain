@@ -160,9 +160,23 @@ impl Db {
       .bind(serde_json::to_string(&download.download)?)
       .bind(serde_json::to_string(&download.state)?)
       .bind(now())
-      .bind(download.state.in_progress)
+      .bind(!download.state.in_progress)
       .bind(download.media_id.to_string())
       .execute(&self.pool).await?;
+
+        Ok(())
+    }
+
+    pub async fn save_upload_job(&self, id: &UploadJobId, upload: &MediaUpload) -> anyhow::Result<()> {
+        sqlx::query(r#"INSERT OR REPLACE INTO media_job (id, kind, spec, state, last_modified, active, media_id) VALUES(?, ?, ?, ?, ?, ?, ?)"#)
+            .bind(id.to_string())
+            .bind(KIND_UPLOAD.to_string())
+            .bind(serde_json::to_string(&upload.upload)?)
+            .bind(serde_json::to_string(&upload.state)?)
+            .bind(now())
+            .bind(!upload.state.in_progress)
+            .bind(upload.media_id.to_string())
+            .execute(&self.pool).await?;
 
         Ok(())
     }

@@ -9,6 +9,8 @@ mod media;
 mod models;
 mod sys_props;
 mod tasks;
+#[cfg(test)]
+mod tests;
 
 #[derive(Clone)]
 pub struct Db {
